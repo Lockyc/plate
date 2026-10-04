@@ -8,8 +8,9 @@
 
 Image, render and document operations for print and web pipelines, as one
 command: lift a subject out of a photo, fill or enlarge artwork, render HTML to
-PNG, PDF or its settled DOM, turn markdown into a PDF, look inside a PDF, make
-a press-ready PDF, match a colour grade. Each operation wraps the best engine
+PNG, PDF or its settled DOM, preview a Google Slides deck, turn markdown into a
+PDF, look inside a PDF, make a press-ready PDF, match a colour grade. Each
+operation wraps the best engine
 for the job at a pinned version, and its quality is measured against a
 committed set of test images rather than judged by eye.
 
@@ -35,8 +36,9 @@ the exceptions listed under [Platforms](#platforms). What comes next is in
 | `pdf pages` | Renders PDF pages to PNG and prints each path | `plate pdf pages [--pages N\|N-M] [--out DIR] [--dpi N] <in.pdf>` |
 | `pdf images` | Extracts a PDF's embedded images and prints each path | `plate pdf images [--pages N\|N-M] [--out DIR] <in.pdf>` |
 | `doc` | Renders markdown or HTML to a PDF with a plain document look: A4, a running head from the first heading, page numbers, ruled tables | `plate doc [--css FILE] <in.md\|in.html> <out.pdf>` |
+| `slides` | Previews a Google Slides deck from its Slides API JSON, one PNG per slide, in the faces the deck names: for a deck Drive will not export | `plate slides [--pages LIST] [--out DIR] [--scale S] <deck.json\|->` |
 | `diff` | Compares two images after lining them up, so a small shift doesn't fail everything | `plate diff [--tolerance N] [--max-shift PX] [--step PX] [--threshold PCT] [--out diff.png] <a> <b>` |
-| `fonts` | Embeds web fonts into a CSS file so a page renders from the filesystem, optionally cut to the characters a language uses | `plate fonts [--display block] [--subset latin] -o fonts.css FILE:FAMILY:WEIGHT:STYLE...` |
+| `fonts` | Embeds web fonts, from files or from Google Fonts by family name, into a CSS file so a page renders from the filesystem, optionally cut to the characters a language uses | `plate fonts [--display block] [--subset latin] [--google FAMILY:WEIGHT:STYLE]... -o fonts.css [FILE:FAMILY:WEIGHT:STYLE]...` |
 | `qr` | Makes a QR code SVG that any phone camera decodes | `plate qr [--ec L\|M\|Q\|H] [--fg RRGGBB] [--bg RRGGBB] -o out.svg <text>` |
 | `doctor` | Checks every engine against its pin, installs the ones plate manages, and prints the install command for the rest | `plate doctor [--install]` |
 | `version` | Prints plate's version | `plate version` |
@@ -55,6 +57,20 @@ alpha 0 rather than white, for artwork laid over other artwork.
 the common punctuation (dashes, curly quotes, ellipsis) and the euro sign
 before embedding it, which takes a typical text face from about 150 KB to
 about 35 KB. It needs `.ttf` or `.otf` input and keeps that format.
+
+`fonts --google` fetches a face from Google Fonts once into plate's cache.
+Google also serves the faces Docs and Slides offer outside its catalogue,
+such as Calibri; a face it does not serve, such as Arial, is an error.
+
+`slides` takes the JSON `presentations.get` returns, as a file or `-` for
+stdin; plate never calls Google's APIs itself. It writes each slide as
+`sNN.html` beside `sNN.png` in `--out` and prints the PNG paths. `--pages`
+takes slide numbers, ranges and slide object IDs, comma-separated. It
+fetches the pictures and, through `fonts --google`, every face the slides
+name, so text wraps where Slides wraps it; a face Google does not serve is
+named on stderr. Picture URLs in the JSON expire about 30 minutes after it
+was fetched. Lines, tables, videos, charts and word art are not drawn, and
+it says which slides had them; bullets and autofit are not drawn either.
 
 `render` runs the page outside Chrome's sandbox, with read access to your
 files and open network access: give it only pages you trust.

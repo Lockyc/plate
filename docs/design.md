@@ -22,7 +22,8 @@ recipe, because wrapping them would add nothing.
 ```
 main.go              dispatch
 internal/<op>/       one package per command (cutout, inpaint, infill, upscale,
-                     grade, render, press, pdf, doc, diff, fonts, qr, doctor)
+                     grade, render, press, pdf, doc, slides, diff, fonts, qr,
+                     doctor)
 internal/cli/        flag, exit-code and error conventions every command shares
 internal/engine/     the one way an external tool is run
 internal/frame/      the source pre-pass the ML ops read: oriented, sRGB, 8-bit
@@ -129,7 +130,7 @@ colours, or renders what it is given.
 - **upscale** — DAT ×4 over the normalised frame in overlapping tiles
   (internal/ml/scripts/upscale.py); alpha, which the model does not take, is
   enlarged separately.
-- **inpaint, fonts, qr, pdf, doc** — as the README table and each package's
+- **inpaint, fonts, qr, pdf, doc, slides** — as the README table and each package's
   doc comment describe.
 
 ## Platforms and errors
