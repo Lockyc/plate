@@ -4,7 +4,8 @@
 // subresources, and a data: URI has no origin to refuse. font-display is
 // block by default, so a render never captures a fallback face. --subset
 // cuts each font to a named set of characters with hb-subset first, so the
-// CSS carries only the glyphs the page's language uses.
+// CSS carries only the glyphs the page's language uses. --google takes a
+// face by family name from Google Fonts (google.go) in place of a file.
 package fonts
 
 import (
@@ -28,7 +29,7 @@ import (
 // displays are the font-display values CSS defines.
 var displays = []string{"auto", "block", "swap", "fallback", "optional"}
 
-const usage = "fonts [--display block] [--subset latin] -o fonts.css FILE:FAMILY:WEIGHT:STYLE..."
+const usage = "fonts [--display block] [--subset latin] [--google FAMILY:WEIGHT:STYLE]... -o fonts.css [FILE:FAMILY:WEIGHT:STYLE]..."
 
 // subsets are the named character sets --subset takes, as hb-subset
 // --unicodes ranges. latin is Basic Latin, Latin-1 Supplement and the
@@ -45,31 +46,47 @@ var formats = map[string][2]string{
 	".otf":   {"font/otf", "opentype"},
 }
 
-type face struct{ file, family, weight, style string }
+// Face is one @font-face: a font file and the family, weight and style a
+// page asks for it by.
+type Face struct{ File, Family, Weight, Style string }
 
 // parseFace splits FILE:FAMILY:WEIGHT:STYLE from the right, so a colon in
 // the file path survives.
-func parseFace(s string) (face, error) {
+func parseFace(s string) (Face, error) {
 	parts := strings.Split(s, ":")
 	n := len(parts)
 	if n < 4 {
-		return face{}, fmt.Errorf("%q: want FILE:FAMILY:WEIGHT:STYLE", s)
+		return Face{}, fmt.Errorf("%q: want FILE:FAMILY:WEIGHT:STYLE", s)
 	}
-	f := face{file: strings.Join(parts[:n-3], ":"), family: parts[n-3], weight: parts[n-2], style: parts[n-1]}
-	if f.family == "" || strings.ContainsAny(f.family, `"\`) || strings.IndexFunc(f.family, unicode.IsControl) >= 0 {
-		return face{}, fmt.Errorf("%q: family must be non-empty, without quotes, backslashes or control characters", s)
+	f := Face{File: strings.Join(parts[:n-3], ":"), Family: parts[n-3], Weight: parts[n-2], Style: parts[n-1]}
+	if err := f.check(); err != nil {
+		return Face{}, fmt.Errorf("%q: %w", s, err)
 	}
-	if w, err := strconv.Atoi(f.weight); (err != nil || w < 1 || w > 1000) && f.weight != "normal" && f.weight != "bold" {
-		return face{}, fmt.Errorf("%q: weight must be 1-1000, normal or bold", s)
-	}
-	if f.style != "normal" && f.style != "italic" && f.style != "oblique" {
-		return face{}, fmt.Errorf("%q: style must be normal, italic or oblique", s)
-	}
-	if _, ok := formats[strings.ToLower(filepath.Ext(f.file))]; !ok {
-		return face{}, fmt.Errorf("%q: %s is not a web font; use .woff2, .woff, .ttf or .otf", s, filepath.Ext(f.file))
+	if _, ok := formats[strings.ToLower(filepath.Ext(f.File))]; !ok {
+		return Face{}, fmt.Errorf("%q: %s is not a web font; use .woff2, .woff, .ttf or .otf", s, filepath.Ext(f.File))
 	}
 	return f, nil
 }
+
+// check refuses a family, weight or style that would break out of the CSS
+// or that CSS does not define.
+func (f Face) check() error {
+	if f.Family == "" || strings.ContainsAny(f.Family, `"\`) || strings.IndexFunc(f.Family, unicode.IsControl) >= 0 {
+		return errors.New("family must be non-empty, without quotes, backslashes or control characters")
+	}
+	if w, err := strconv.Atoi(f.Weight); (err != nil || w < 1 || w > 1000) && f.Weight != "normal" && f.Weight != "bold" {
+		return errors.New("weight must be 1-1000, normal or bold")
+	}
+	if f.Style != "normal" && f.Style != "italic" && f.Style != "oblique" {
+		return errors.New("style must be normal, italic or oblique")
+	}
+	return nil
+}
+
+type multi []string
+
+func (m *multi) String() string     { return strings.Join(*m, ", ") }
+func (m *multi) Set(s string) error { *m = append(*m, s); return nil }
 
 // Main runs `plate fonts`.
 func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
@@ -77,79 +94,110 @@ func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	out := fs.String("o", "", "the CSS file to write (required)")
 	display := fs.String("display", "block", "font-display value")
 	subset := fs.String("subset", "", "cut each font to a named character set before embedding: latin (needs .ttf or .otf input)")
+	var google multi
+	fs.Var(&google, "google", "a face from Google Fonts by family name, `FAMILY:WEIGHT:STYLE` (repeatable; fetched once into plate's cache)")
 	rest, code, ok := cli.Parse(fs, args, -1)
 	if !ok {
 		return code
 	}
 	usageErr := func(err error) int { return cli.Usage(stderr, "fonts", "%v", err) }
-	if *out == "" || len(rest) == 0 {
-		return usageErr(fmt.Errorf("give -o and at least one FILE:FAMILY:WEIGHT:STYLE"))
+	if *out == "" || len(rest)+len(google) == 0 {
+		return usageErr(fmt.Errorf("give -o and at least one FILE:FAMILY:WEIGHT:STYLE or --google FAMILY:WEIGHT:STYLE"))
 	}
 	if !slices.Contains(displays, *display) {
 		return usageErr(fmt.Errorf("--display %q: use %s", *display, strings.Join(displays, ", ")))
 	}
-	unicodes, subsetting := subsets[*subset]
 	given := false
 	fs.Visit(func(f *flag.Flag) { given = given || f.Name == "subset" })
-	if given && !subsetting {
+	if _, ok := subsets[*subset]; given && !ok {
 		return usageErr(fmt.Errorf("--subset %q: use latin", *subset))
 	}
-	var faces []face
+	var faces []Face
 	for _, s := range rest {
 		f, err := parseFace(s)
 		if err != nil {
 			return usageErr(err)
 		}
-		if ext := strings.ToLower(filepath.Ext(f.file)); subsetting && ext != ".ttf" && ext != ".otf" {
+		if ext := strings.ToLower(filepath.Ext(f.File)); *subset != "" && ext != ".ttf" && ext != ".otf" {
 			return usageErr(fmt.Errorf("%q: --subset needs .ttf or .otf input; hb-subset cannot read %s", s, ext))
+		}
+		if engine.SameFile(*out, f.File) {
+			return usageErr(fmt.Errorf("-o is the same file as a font input: %q", f.File))
 		}
 		faces = append(faces, f)
 	}
-
-	// Check that -o is not the same file as any input font
-	for _, f := range faces {
-		if engine.SameFile(*out, f.file) {
-			return usageErr(fmt.Errorf("-o is the same file as a font input: %q", f.file))
+	var wanted []Variant
+	for _, s := range google {
+		v, err := parseVariant(s)
+		if err != nil {
+			return usageErr(fmt.Errorf("--google %w", err))
 		}
+		wanted = append(wanted, v)
 	}
 	// A failure below must not leave an earlier run's CSS looking current.
 	if err := os.Remove(*out); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return cli.Fail(stderr, "fonts", err)
 	}
+	for _, v := range wanted {
+		f, err := Google(ctx, v)
+		if err != nil {
+			return cli.Fail(stderr, "fonts", err)
+		}
+		faces = append(faces, f)
+	}
+	css, err := CSS(ctx, faces, *display, *subset)
+	if err != nil {
+		return cli.Fail(stderr, "fonts", err)
+	}
+	if err := writeAtomic(*out, []byte(css)); err != nil {
+		return cli.Fail(stderr, "fonts", err)
+	}
+	fmt.Fprintf(stdout, "wrote %s (%d faces, %d bytes)\n", *out, len(faces), len(css))
+	return 0
+}
 
+// CSS returns the stylesheet embedding faces with font-display display,
+// each cut to the named subset first when subset is not "".
+func CSS(ctx context.Context, faces []Face, display, subset string) (string, error) {
+	unicodes, subsetting := subsets[subset]
+	if subset != "" && !subsetting {
+		return "", fmt.Errorf("no subset named %q", subset)
+	}
 	var b strings.Builder
 	b.WriteString("/* Generated by plate fonts. Regenerate it rather than editing it. */\n\n")
 	var tmp string
 	if subsetting {
 		d, err := os.MkdirTemp("", "plate-fonts-")
 		if err != nil {
-			return cli.Fail(stderr, "fonts", err)
+			return "", err
 		}
 		defer os.RemoveAll(d)
 		tmp = d
 	}
 	for i, f := range faces {
-		src := f.file
+		if err := f.check(); err != nil {
+			return "", fmt.Errorf("%s: %w", f.File, err)
+		}
+		fm, ok := formats[strings.ToLower(filepath.Ext(f.File))]
+		if !ok {
+			return "", fmt.Errorf("%s is not a web font; use .woff2, .woff, .ttf or .otf", f.File)
+		}
+		src := f.File
 		if subsetting {
-			src = filepath.Join(tmp, strconv.Itoa(i)+filepath.Ext(f.file))
-			if _, err := engine.Run(ctx, engine.Cmd{Engine: "hb-subset", Args: []string{"--unicodes=" + unicodes, "--output-file=" + src, f.file},
-				Inputs: []string{f.file}, Outputs: []string{src}}); err != nil {
-				return cli.Fail(stderr, "fonts", err)
+			src = filepath.Join(tmp, strconv.Itoa(i)+filepath.Ext(f.File))
+			if _, err := engine.Run(ctx, engine.Cmd{Engine: "hb-subset", Args: []string{"--unicodes=" + unicodes, "--output-file=" + src, f.File},
+				Inputs: []string{f.File}, Outputs: []string{src}}); err != nil {
+				return "", err
 			}
 		}
 		data, err := os.ReadFile(src)
 		if err != nil {
-			return cli.Fail(stderr, "fonts", err)
+			return "", err
 		}
-		fm := formats[strings.ToLower(filepath.Ext(f.file))]
 		fmt.Fprintf(&b, "@font-face {\n  font-family: %q;\n  font-style: %s;\n  font-weight: %s;\n  font-display: %s;\n  src: url(data:%s;base64,%s) format(%q);\n}\n",
-			f.family, f.style, f.weight, *display, fm[0], base64.StdEncoding.EncodeToString(data), fm[1])
+			f.Family, f.Style, f.Weight, display, fm[0], base64.StdEncoding.EncodeToString(data), fm[1])
 	}
-	if err := writeAtomic(*out, []byte(b.String())); err != nil {
-		return cli.Fail(stderr, "fonts", err)
-	}
-	fmt.Fprintf(stdout, "wrote %s (%d faces, %d bytes)\n", *out, len(faces), b.Len())
-	return 0
+	return b.String(), nil
 }
 
 // writeAtomic writes data to a temporary file beside path and renames it
