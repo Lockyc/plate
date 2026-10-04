@@ -134,6 +134,19 @@ func PDF(ctx context.Context, page, out string, warn io.Writer) error {
 	return job{url: u, local: local, pdf: out, scale: 1, budget: defaultBudget, warn: warn}.run(ctx)
 }
 
+// PNG renders the page at path (a file or URL) to a w×h CSS px PNG at out,
+// at device scale factor scale, under the checks `plate render --png` runs.
+func PNG(ctx context.Context, page, out string, w, h int, scale float64) error {
+	if w <= 0 || h <= 0 || !(scale > 0) || math.IsInf(scale, 0) {
+		return fmt.Errorf("render %dx%d at scale %g: want a positive size and scale", w, h, scale)
+	}
+	u, local, err := pageURL(page)
+	if err != nil {
+		return err
+	}
+	return job{url: u, local: local, png: out, w: w, h: h, scale: scale, budget: defaultBudget, warn: io.Discard}.run(ctx)
+}
+
 func parseSize(s string) (int, int, error) {
 	ws, hs, ok := strings.Cut(s, "x")
 	w, err1 := strconv.Atoi(ws)

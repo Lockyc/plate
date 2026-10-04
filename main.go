@@ -26,6 +26,7 @@ import (
 	"github.com/lockyc/plate/internal/press"
 	"github.com/lockyc/plate/internal/qr"
 	"github.com/lockyc/plate/internal/render"
+	"github.com/lockyc/plate/internal/slides"
 	"github.com/lockyc/plate/internal/upscale"
 )
 
@@ -46,6 +47,7 @@ var commands = []command{
 	{"press", "PDF to a print master: outlined text, CMYK, checked against a soft proof", press.Main, false},
 	{"pdf", "inspect a PDF: info with a text-layer check, text, page renders, embedded images", pdf.Main, false},
 	{"doc", "markdown or HTML to a PDF with a document stylesheet", doc.Main, false},
+	{"slides", "preview a Google Slides deck from its Slides API JSON, one PNG per slide", slides.Main, false},
 	{"diff", "compare two images after lining them up vertically", diff.Main, false},
 	{"fonts", "embed web fonts into a CSS file as data: URIs", fonts.Main, false},
 	{"qr", "a QR code SVG, dark on light, quiet zone included", qr.Main, false},
