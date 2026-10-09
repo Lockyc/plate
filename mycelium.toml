@@ -1,5 +1,5 @@
 name    = "plate"
-summary = "Go CLI of generic image and render operations for print and web pipelines: cutout, inpaint, infill, upscale, colour grade, HTML→PNG/PDF render, markdown→PDF, PDF inspect, press-ready PDF, diff, font embed, QR — pinned engines, measured quality"
+summary = "Go CLI that makes or inspects visual artefacts for print and web pipelines: cutout, inpaint, infill, upscale, colour grade, HTML→PNG/PDF render, markdown→PDF, press-ready PDF, diff, font embed, QR — pinned engines, measured quality"
 kind    = "tool"
 status  = "active"
 tags    = ["images", "print", "render", "cli", "pipelines"]
