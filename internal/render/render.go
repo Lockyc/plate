@@ -165,7 +165,11 @@ func pageURL(arg string) (string, string, error) {
 		case "http", "https":
 			return arg, "", nil
 		case "file":
-			return arg, filepath.FromSlash(u.Path), nil
+			local := filepath.FromSlash(u.Path)
+			if _, err := os.Stat(local); err != nil {
+				return "", "", err
+			}
+			return arg, local, nil
 		}
 	}
 	abs, err := filepath.Abs(arg)

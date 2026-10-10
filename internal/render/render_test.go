@@ -5,6 +5,7 @@ import (
 	"context"
 	"image"
 	"image/png"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -270,6 +271,13 @@ func TestPageURLEscapes(t *testing.T) {
 	}
 	if _, _, err := pageURL(filepath.Join(t.TempDir(), "missing.html")); err == nil {
 		t.Error("missing page accepted")
+	}
+	if u, l, err := pageURL(got); err != nil || l != p {
+		t.Errorf("file URL to an existing page: %q, %q, %v", u, l, err)
+	}
+	missing := (&url.URL{Scheme: "file", Path: filepath.Join(t.TempDir(), "typo.html")}).String()
+	if _, _, err := pageURL(missing); err == nil {
+		t.Error("file URL to a missing page accepted")
 	}
 }
 
