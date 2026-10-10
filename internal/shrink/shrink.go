@@ -9,8 +9,10 @@ package shrink
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"math"
 	"os"
 	"path/filepath"
@@ -106,7 +108,7 @@ func Target(w, h, boxW, boxH int) (int, int) {
 	return max(1, int(math.Round(float64(w)*s))), max(1, int(math.Round(float64(h)*s)))
 }
 
-func run(ctx context.Context, in string, outs []string, boxW, boxH, quality int) (int, int, error) {
+func run(ctx context.Context, in string, outs []string, boxW, boxH, quality int) (w, h int, err error) {
 	// Each output is copied from a temporary file, so no engine call names
 	// both <in> and an output; this is the one place that can refuse it.
 	for i, o := range outs {
@@ -119,6 +121,20 @@ func run(ctx context.Context, in string, outs []string, boxW, boxH, quality int)
 			}
 		}
 	}
+	// An earlier run's outputs go first, and a failed run removes its own,
+	// so a failure leaves no output that looks current.
+	for _, o := range outs {
+		if err := os.Remove(o); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return 0, 0, err
+		}
+	}
+	defer func() {
+		if err != nil {
+			for _, o := range outs {
+				os.Remove(o)
+			}
+		}
+	}()
 	res, err := engine.Run(ctx, engine.Cmd{Engine: "magick", Args: []string{in, "-auto-orient", "-format", "%[opaque] %w %h\n", "info:"}, Inputs: []string{in}})
 	if err != nil {
 		return 0, 0, err
@@ -134,7 +150,7 @@ func run(ctx context.Context, in string, outs []string, boxW, boxH, quality int)
 	if errW != nil || errH != nil || sw < 1 || sh < 1 {
 		return 0, 0, fmt.Errorf("could not read the size of %s", in)
 	}
-	w, h := Target(sw, sh, boxW, boxH)
+	w, h = Target(sw, sh, boxW, boxH)
 	if w > sw || h > sh {
 		return 0, 0, fmt.Errorf("%s is %dx%d, smaller than %dx%d; shrink never enlarges", in, sw, sh, w, h)
 	}
@@ -168,15 +184,36 @@ func run(ctx context.Context, in string, outs []string, boxW, boxH, quality int)
 		} else if best, err = smallestPNG(ctx, small, tmp, i); err != nil {
 			return 0, 0, err
 		}
-		b, err := os.ReadFile(best)
-		if err != nil {
-			return 0, 0, err
-		}
-		if err := os.WriteFile(o, b, 0o644); err != nil {
+		if err := place(best, o); err != nil {
 			return 0, 0, err
 		}
 	}
 	return w, h, nil
+}
+
+// place copies src to dst through a temporary file in dst's directory and a
+// rename, so an interrupted copy never leaves a partial dst.
+func place(src, dst string) error {
+	b, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+	f, err := os.CreateTemp(filepath.Dir(dst), ".plate-shrink-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(f.Name())
+	_, err = f.Write(b)
+	if err == nil {
+		err = f.Chmod(0o644)
+	}
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		return err
+	}
+	return os.Rename(f.Name(), dst)
 }
 
 // smallestPNG writes small as an 8-bit PNG under each of pngStrategies and

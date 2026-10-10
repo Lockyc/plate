@@ -14,9 +14,11 @@ import (
 
 // magickStub answers the size probe from $INFO, and otherwise writes to its
 // last argument, less any FORMAT: prefix: a long body for zlib strategy 0, a
-// short one for the rest, so the smallest-PNG choice is visible.
+// short one for the rest, so the smallest-PNG choice is visible. A WebP
+// encode fails when $FAIL_WEBP is set.
 const magickStub = `for a in "$@"; do last=$a; done
 if [ "$last" = info: ]; then printf '%s\n' "${INFO:-True 1080 720}"; exit 0; fi
+case "$last" in WEBP:*) [ -n "$FAIL_WEBP" ] && exit 1 ;; esac
 body=small
 for a in "$@"; do [ "$a" = png:compression-strategy=0 ] && body=larger-body; done
 printf %s "$body" > "${last#*:}"`
@@ -144,5 +146,43 @@ func TestMultiFrame(t *testing.T) {
 	code, _, stderr, _ := call(t, "--fit", "5", "in.gif", filepath.Join(t.TempDir(), "o.png"))
 	if code != 1 || !strings.Contains(stderr, "one frame") {
 		t.Errorf("code %d, %q", code, stderr)
+	}
+}
+
+// TestFailureLeavesNoOutput: a failed run removes an earlier run's outputs
+// and any it wrote itself, so nothing at an output path looks current.
+func TestFailureLeavesNoOutput(t *testing.T) {
+	dir := t.TempDir()
+	png, webp := filepath.Join(dir, "o.png"), filepath.Join(dir, "o.webp")
+	stale := func() {
+		for _, o := range []string{png, webp} {
+			if err := os.WriteFile(o, []byte("earlier run"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	gone := func(when string) {
+		for _, o := range []string{png, webp} {
+			if _, err := os.Stat(o); err == nil {
+				t.Errorf("%s: %s left behind", when, filepath.Base(o))
+			}
+		}
+	}
+
+	stale()
+	if code, _, _, _ := call(t, "--fit", "2000", "in.jpg", png, webp); code != 1 {
+		t.Fatalf("enlarging: code %d", code)
+	}
+	gone("refused before encoding")
+
+	stale()
+	t.Setenv("FAIL_WEBP", "1")
+	if code, _, _, _ := call(t, "--fit", "256", "in.jpg", png, webp); code != 1 {
+		t.Fatalf("failing WebP: code %d", code)
+	}
+	gone("WebP encode failed after the PNG was written")
+
+	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
+		t.Errorf("temporary files left in the output directory: %v", entries)
 	}
 }
