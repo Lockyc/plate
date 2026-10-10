@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"maps"
 	"math"
 	"net/http"
@@ -156,9 +157,19 @@ func run(ctx context.Context, d *Deck, picked []int, out string, scale float64, 
 	} else if err := os.MkdirAll(out, 0o755); err != nil {
 		return nil, err
 	}
+	// created lists, in order, what this run wrote into a caller's --out; a
+	// failed run removes it, newest first, so the same --out takes a retry.
+	var created []string
 	defer func() {
-		if err != nil && made {
+		if err == nil {
+			return
+		}
+		if made {
 			os.RemoveAll(out)
+			return
+		}
+		for _, p := range slices.Backward(created) {
+			os.Remove(p)
 		}
 	}()
 	digits := max(2, len(strconv.Itoa(len(d.Slides))))
@@ -191,16 +202,18 @@ func run(ctx context.Context, d *Deck, picked []int, out string, scale float64, 
 	if err != nil {
 		return nil, err
 	}
-	if err := os.WriteFile(filepath.Join(out, fontsName), []byte(css), 0o644); err != nil {
+	created = append(created, filepath.Join(out, fontsName))
+	if err := os.WriteFile(created[0], []byte(css), 0o644); err != nil {
 		return nil, err
 	}
-	if err := fetchImages(ctx, b.images, out); err != nil {
+	if err := fetchImages(ctx, b.images, out, &created); err != nil {
 		return nil, err
 	}
 	pw, ph := int(math.Round(w)), int(math.Round(h))
 	for _, i := range picked {
 		page := filepath.Join(out, name(i)+".html")
 		png := filepath.Join(out, name(i)+".png")
+		created = append(created, page, png)
 		if err := os.WriteFile(page, []byte(html[i]), 0o644); err != nil {
 			return nil, err
 		}
@@ -255,13 +268,17 @@ func imageName(url string) string {
 }
 
 // fetchImages downloads each picture once into out, skipping one already
-// there.
-func fetchImages(ctx context.Context, images map[string]string, out string) error {
+// there, and appends to created each path it makes.
+func fetchImages(ctx context.Context, images map[string]string, out string, created *[]string) error {
 	if len(images) == 0 {
 		return nil
 	}
-	if err := os.MkdirAll(filepath.Join(out, imgDir), 0o755); err != nil {
-		return err
+	dir := filepath.Join(out, imgDir)
+	if _, err := os.Lstat(dir); errors.Is(err, fs.ErrNotExist) {
+		if err := os.Mkdir(dir, 0o755); err != nil {
+			return err
+		}
+		*created = append(*created, dir)
 	}
 	for _, u := range slices.Sorted(maps.Keys(images)) {
 		p := filepath.Join(out, images[u])
@@ -272,6 +289,7 @@ func fetchImages(ctx context.Context, images map[string]string, out string) erro
 		if err != nil {
 			return fmt.Errorf("fetching a picture (contentUrl expires about 30 minutes after the JSON was fetched; fetch it again): %w", err)
 		}
+		*created = append(*created, p)
 		if err := os.WriteFile(p, data, 0o644); err != nil {
 			return err
 		}

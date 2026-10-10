@@ -192,30 +192,37 @@ const chromeStub = `for a in "$@"; do
   case "$a" in --screenshot=*) cp "$FIXTURE_PNG" "${a#--screenshot=}" ;; esac
 done`
 
-func TestCommand(t *testing.T) {
-	dir := t.TempDir()
+// commandSetup stubs Chrome and fills plate's font cache, so nothing asks
+// Google, and writes deckJSON with its picture served by pic. It returns the
+// temporary directory, the deck and the Chrome call log.
+func commandSetup(t *testing.T, pic http.HandlerFunc) (dir, deck, chrome string) {
+	t.Helper()
+	dir = t.TempDir()
 	fix := filepath.Join(dir, "fixture.png")
 	f, _ := os.Create(fix)
 	png.Encode(f, image.NewRGBA(image.Rect(0, 0, 720, 405)))
 	f.Close()
 	t.Setenv("FIXTURE_PNG", fix)
-	chrome := enginetest.Stub(t, "chrome-headless-shell", chromeStub)
-
-	// The faces are already in plate's cache, so nothing asks Google.
+	chrome = enginetest.Stub(t, "chrome-headless-shell", chromeStub)
 	cache := filepath.Join(dir, "cache")
 	t.Setenv("XDG_CACHE_HOME", cache)
 	os.MkdirAll(filepath.Join(cache, "plate", "google-fonts"), 0o755)
 	for _, n := range []string{"BodyFace-400-normal.ttf", "BodyFace-700-normal.ttf", "LightFace-300-italic.ttf"} {
 		os.WriteFile(filepath.Join(cache, "plate", "google-fonts", n), []byte("TTF"), 0o644)
 	}
+	srv := httptest.NewServer(pic)
+	t.Cleanup(srv.Close)
+	deck = filepath.Join(dir, "deck.json")
+	os.WriteFile(deck, []byte(strings.ReplaceAll(deckJSON, "IMAGE_URL", srv.URL+"/pic")), 0o644)
+	return dir, deck, chrome
+}
+
+func TestCommand(t *testing.T) {
 	pics := 0
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	dir, deck, chrome := commandSetup(t, func(w http.ResponseWriter, r *http.Request) {
 		pics++
 		w.Write([]byte("PICTURE"))
-	}))
-	defer srv.Close()
-	deck := filepath.Join(dir, "deck.json")
-	os.WriteFile(deck, []byte(strings.ReplaceAll(deckJSON, "IMAGE_URL", srv.URL+"/pic")), 0o644)
+	})
 
 	out := filepath.Join(dir, "out")
 	var o, e bytes.Buffer
@@ -270,5 +277,41 @@ func TestCommandRejects(t *testing.T) {
 		if code := Main(context.Background(), c.args, &o, &e); code != c.code || !strings.Contains(e.String(), c.want) {
 			t.Errorf("%q: code %d stderr %q; want %d containing %q", c.args, code, e.String(), c.code, c.want)
 		}
+	}
+}
+
+// TestCommandFailureCleansOut: a run into a caller's --out that fails on an
+// expired picture removes what it wrote and nothing else, so the retry the
+// error asks for can use the same --out.
+func TestCommandFailureCleansOut(t *testing.T) {
+	expired := true
+	dir, deck, _ := commandSetup(t, func(w http.ResponseWriter, r *http.Request) {
+		if expired {
+			http.Error(w, "expired", http.StatusForbidden)
+			return
+		}
+		w.Write([]byte("PICTURE"))
+	})
+
+	out := filepath.Join(dir, "out")
+	os.MkdirAll(out, 0o755)
+	os.WriteFile(filepath.Join(out, "keep.txt"), []byte("mine"), 0o644)
+	var o, e bytes.Buffer
+	if code := Main(context.Background(), []string{"--out", out, deck}, &o, &e); code != 1 || !strings.Contains(e.String(), "fetch it again") {
+		t.Fatalf("expired picture: code %d stderr %q", code, e.String())
+	}
+	entries, _ := os.ReadDir(out)
+	if len(entries) != 1 || entries[0].Name() != "keep.txt" {
+		var names []string
+		for _, en := range entries {
+			names = append(names, en.Name())
+		}
+		t.Errorf("--out after the failed run holds %q, want only keep.txt", names)
+	}
+
+	expired = false
+	e.Reset()
+	if code := Main(context.Background(), []string{"--out", out, deck}, &o, &e); code != 0 {
+		t.Errorf("retry into the same --out: code %d stderr %q", code, e.String())
 	}
 }
