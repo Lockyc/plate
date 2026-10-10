@@ -118,8 +118,8 @@ func parseRegion(s string) (region, error) {
 	if err != nil {
 		return region{}, err
 	}
-	m, err := strconv.ParseFloat(max, 64)
-	if err != nil || m <= 0 {
+	m, ok := cli.Finite(max)
+	if !ok || m <= 0 {
 		return region{}, fmt.Errorf("--region %q: max must be a positive RMSE", s)
 	}
 	return region{spec: box, f: f, max: m}, nil

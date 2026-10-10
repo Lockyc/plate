@@ -212,6 +212,11 @@ func TestPressUsage(t *testing.T) {
 	if code := e.run("--region", "0,0,1"); code != 2 {
 		t.Errorf("bad region: code %d", code)
 	}
+	for _, max := range []string{"nan", "inf", "+Inf", "-1", "0"} {
+		if code := e.run("--region", "0,0,1,1:"+max); code != 2 {
+			t.Errorf("--region max %q: code %d, want 2", max, code)
+		}
+	}
 }
 
 func TestPressRefusesInputAsOutput(t *testing.T) {
