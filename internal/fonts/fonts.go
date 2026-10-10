@@ -22,6 +22,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/lockyc/plate/internal/atomicfile"
 	"github.com/lockyc/plate/internal/cli"
 	"github.com/lockyc/plate/internal/engine"
 )
@@ -149,7 +150,7 @@ func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return cli.Fail(stderr, "fonts", err)
 	}
-	if err := writeAtomic(*out, []byte(css)); err != nil {
+	if err := atomicfile.WriteFile(*out, []byte(css), 0o644); err != nil {
 		return cli.Fail(stderr, "fonts", err)
 	}
 	fmt.Fprintf(stdout, "wrote %s (%d faces, %d bytes)\n", *out, len(faces), len(css))
@@ -198,26 +199,4 @@ func CSS(ctx context.Context, faces []Face, display, subset string) (string, err
 			f.Family, f.Style, f.Weight, display, fm[0], base64.StdEncoding.EncodeToString(data), fm[1])
 	}
 	return b.String(), nil
-}
-
-// writeAtomic writes data to a temporary file beside path and renames it
-// into place, so path is never a partly written file.
-func writeAtomic(path string, data []byte) error {
-	f, err := os.CreateTemp(filepath.Dir(path), ".plate-fonts-")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(f.Name())
-	if _, err := f.Write(data); err != nil {
-		f.Close()
-		return err
-	}
-	if err := f.Chmod(0o644); err != nil {
-		f.Close()
-		return err
-	}
-	if err := f.Close(); err != nil {
-		return err
-	}
-	return os.Rename(f.Name(), path)
 }

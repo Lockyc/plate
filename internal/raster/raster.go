@@ -10,11 +10,13 @@ import (
 	"image/draw"
 	_ "image/jpeg"
 	"image/png"
+	"io"
 	"math"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/lockyc/plate/internal/atomicfile"
 )
 
 // Load decodes a PNG or JPEG.
@@ -34,29 +36,9 @@ func Load(path string) (*image.RGBA64, error) {
 	return dst, nil
 }
 
-// SavePNG writes img as PNG, mode 0644. It encodes into a temporary file
-// beside path and renames it into place, so a failed save leaves path as
-// it was rather than truncated.
+// SavePNG writes img as PNG, mode 0644, whole or not at all.
 func SavePNG(path string, img image.Image) error {
-	f, err := os.CreateTemp(filepath.Dir(path), ".plate-*.png")
-	if err != nil {
-		return err
-	}
-	tmp := f.Name()
-	err = png.Encode(f, img)
-	if err == nil {
-		err = f.Chmod(0o644)
-	}
-	if cerr := f.Close(); err == nil {
-		err = cerr
-	}
-	if err == nil {
-		err = os.Rename(tmp, path)
-	}
-	if err != nil {
-		os.Remove(tmp)
-	}
-	return err
+	return atomicfile.Write(path, 0o644, func(w io.Writer) error { return png.Encode(w, img) })
 }
 
 // Frac is a rectangle as fractions of an image's width and height, so one

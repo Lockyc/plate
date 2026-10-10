@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/lockyc/plate/internal/atomicfile"
 	"github.com/lockyc/plate/internal/engine"
 )
 
@@ -28,21 +29,8 @@ func SRGB() (string, error) {
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		return "", err
 	}
-	// A temp file of its own, so concurrent runs never write one file.
-	f, err := os.CreateTemp(filepath.Dir(p), ".sRGB-*")
-	if err != nil {
+	if err := atomicfile.WriteFile(p, srgb, 0o644); err != nil {
 		return "", err
 	}
-	defer os.Remove(f.Name())
-	_, err = f.Write(srgb)
-	if cerr := f.Close(); err == nil {
-		err = cerr
-	}
-	if err == nil {
-		err = os.Chmod(f.Name(), 0o644)
-	}
-	if err != nil {
-		return "", err
-	}
-	return p, os.Rename(f.Name(), p)
+	return p, nil
 }

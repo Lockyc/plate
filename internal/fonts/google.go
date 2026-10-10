@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lockyc/plate/internal/atomicfile"
 	"github.com/lockyc/plate/internal/engine"
 )
 
@@ -112,7 +113,7 @@ func Google(ctx context.Context, v Variant) (Face, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return Face{}, err
 	}
-	if err := writeAtomic(face.File, data); err != nil {
+	if err := atomicfile.WriteFile(face.File, data, 0o644); err != nil {
 		return Face{}, err
 	}
 	return face, nil

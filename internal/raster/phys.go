@@ -7,7 +7,8 @@ import (
 	"hash/crc32"
 	"math"
 	"os"
-	"path/filepath"
+
+	"github.com/lockyc/plate/internal/atomicfile"
 )
 
 var pngSig = []byte("\x89PNG\r\n\x1a\n")
@@ -56,30 +57,12 @@ func SetDPI(path string, dpi float64) error {
 		return fmt.Errorf("%s: PNG has no IHDR chunk", path)
 	}
 
-	// Get original file permissions
+	// The file is edited, not made, so it keeps its own mode.
 	fi, err := os.Stat(path)
 	if err != nil {
 		return err
 	}
-	origMode := fi.Mode().Perm()
-
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".phys-")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(tmp.Name())
-	if _, err := tmp.Write(out.Bytes()); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	// Restore original permissions before rename
-	if err := os.Chmod(tmp.Name(), origMode); err != nil {
-		return err
-	}
-	return os.Rename(tmp.Name(), path)
+	return atomicfile.WriteFile(path, out.Bytes(), fi.Mode().Perm())
 }
 
 // DPI reads a PNG's pHYs resolution; 0 when it has none or none in metres.

@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/lockyc/plate/internal/atomicfile"
 	"github.com/lockyc/plate/internal/cli"
 	"github.com/lockyc/plate/internal/engine"
 	"github.com/lockyc/plate/internal/frame"
@@ -184,36 +185,15 @@ func run(ctx context.Context, in string, outs []string, boxW, boxH, quality int)
 		} else if best, err = smallestPNG(ctx, small, tmp, i); err != nil {
 			return 0, 0, err
 		}
-		if err := place(best, o); err != nil {
+		b, err := os.ReadFile(best)
+		if err != nil {
+			return 0, 0, err
+		}
+		if err := atomicfile.WriteFile(o, b, 0o644); err != nil {
 			return 0, 0, err
 		}
 	}
 	return w, h, nil
-}
-
-// place copies src to dst through a temporary file in dst's directory and a
-// rename, so an interrupted copy never leaves a partial dst.
-func place(src, dst string) error {
-	b, err := os.ReadFile(src)
-	if err != nil {
-		return err
-	}
-	f, err := os.CreateTemp(filepath.Dir(dst), ".plate-shrink-*")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(f.Name())
-	_, err = f.Write(b)
-	if err == nil {
-		err = f.Chmod(0o644)
-	}
-	if cerr := f.Close(); err == nil {
-		err = cerr
-	}
-	if err != nil {
-		return err
-	}
-	return os.Rename(f.Name(), dst)
 }
 
 // smallestPNG writes small as an 8-bit PNG under each of pngStrategies and
