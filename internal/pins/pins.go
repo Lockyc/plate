@@ -128,7 +128,7 @@ var Engines = []Engine{
 			"darwin/amd64": chs("mac-x64", "a54292aaacbb77f76f6ef47558e7c51ab884044e0adacca315567f83c060bcc4"),
 			"linux/amd64":  chs("linux64", "636aa5c79f2693632e9921b8bbb050038ba11672e02346c06c20f991aed096f9"),
 		}},
-		UsedBy: []string{"render"},
+		UsedBy: []string{"render", "doc", "slides"},
 	},
 }
 

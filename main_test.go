@@ -4,8 +4,11 @@ import (
 	"bytes"
 	"context"
 	"os"
+	"slices"
 	"strings"
 	"testing"
+
+	"github.com/lockyc/plate/internal/pins"
 )
 
 func TestRun(t *testing.T) {
@@ -40,6 +43,28 @@ func TestEveryCommandIsInUsage(t *testing.T) {
 	for _, c := range commands {
 		if !strings.Contains(u, "  "+c.name+" ") {
 			t.Errorf("usage lacks %q", c.name)
+		}
+	}
+}
+
+// doctor names an engine's UsedBy as the commands that will not run without
+// it, so each entry must be a command plate dispatches.
+func TestEngineUsedByNamesCommands(t *testing.T) {
+	known := map[string]bool{}
+	for _, c := range commands {
+		known[c.name] = true
+	}
+	for _, e := range pins.Engines {
+		for _, u := range e.UsedBy {
+			if !known[u] {
+				t.Errorf("%s: UsedBy names %q, which is not a plate command", e.Name, u)
+			}
+		}
+	}
+	chrome, _ := pins.Lookup("chrome-headless-shell")
+	for _, want := range []string{"render", "doc", "slides"} {
+		if !slices.Contains(chrome.UsedBy, want) {
+			t.Errorf("chrome-headless-shell UsedBy %q lacks %q, which renders through Chrome", chrome.UsedBy, want)
 		}
 	}
 }
