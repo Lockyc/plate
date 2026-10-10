@@ -88,3 +88,11 @@ source  = "https://github.com/saucecontrol/Compact-ICC-Profiles/blob/master/prof
 author  = "Clinton Ingram (Compact-ICC-Profiles)"
 licence = "CC0"
 sha256  = "c56e1685d888f5edb92fe07f2750f387f8fe8e91b32ff8fb0b56bfbbb9458353"
+
+[[asset]]
+file    = "shrink-target.html"
+source  = "synthetic"
+recipe  = "written for plate: a 256 px SVG of a 36-spoke starburst, hairline rings and diagonals, sub-pixel bars, flat shapes on a gradient, and translucent discs on a transparent ground; rendered at 1x it is the native small image a shrink is measured against"
+author  = "plate"
+licence = "CC0"
+sha256  = "41e192de94550f178b5148a9fcac7fcd68f6e05d7cd9194cc5560a4d26a25d03"

@@ -4,6 +4,7 @@ import (
 	"image"
 	"image/color"
 	"math"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -250,5 +251,18 @@ func TestDetail(t *testing.T) {
 	raster.SavePNG(small, image.NewGray(image.Rect(0, 0, 5, 5)))
 	if v, err := Metrics["detail"](Params{"a": small, "b": orig}); err == nil {
 		t.Errorf("mismatched sizes gave %v, want an error", v)
+	}
+}
+
+func TestBytes(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "a.webp")
+	if err := os.WriteFile(p, []byte("12345"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if v, err := Metrics["bytes"](Params{"image": p}); err != nil || v != 5 {
+		t.Errorf("bytes = %v, %v", v, err)
+	}
+	if _, err := Metrics["bytes"](Params{"image": p + "x"}); err == nil {
+		t.Error("a missing file measured")
 	}
 }

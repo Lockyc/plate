@@ -7,7 +7,7 @@
 [![License](https://img.shields.io/github/license/lockyc/plate)](LICENSE)
 
 Image, render and document operations for print and web pipelines, as one
-command: lift a subject out of a photo, fill or enlarge artwork, render HTML to
+command: lift a subject out of a photo, fill, enlarge or shrink artwork, render HTML to
 PNG, PDF or its settled DOM, preview a Google Slides deck, turn markdown into a
 PDF, look inside a PDF, make a press-ready PDF, match a colour grade. Each
 operation wraps the best engine
@@ -37,6 +37,7 @@ the exceptions listed under [Platforms](#platforms). What comes next is in
 | `pdf images` | Extracts a PDF's embedded images and prints each path | `plate pdf images [--pages N\|N-M] [--out DIR] <in.pdf>` |
 | `doc` | Renders markdown or HTML to a PDF with a plain document look: A4, a running head from the first heading, page numbers, ruled tables | `plate doc [--css FILE] <in.md\|in.html> <out.pdf>` |
 | `slides` | Previews a Google Slides deck from its Slides API JSON, one PNG per slide, in the faces the deck names: for a deck Drive will not export | `plate slides [--pages LIST] [--out DIR] [--scale S] <deck.json\|->` |
+| `shrink` | Resizes down to a small, sharp web asset: PNG compressed losslessly as far as zlib goes, or WebP, alpha kept, never enlarging | `plate shrink (--width PX \| --height PX \| --fit PX) [--quality Q] <in> <out.png\|out.webp>...` |
 | `diff` | Compares two images after lining them up, so a small shift doesn't fail everything | `plate diff [--tolerance N] [--max-shift PX] [--step PX] [--threshold PCT] [--out diff.png] <a> <b>` |
 | `fonts` | Embeds web fonts, from files or from Google Fonts by family name, into a CSS file so a page renders from the filesystem, optionally cut to the characters a language uses | `plate fonts [--display block] [--subset latin] [--google FAMILY:WEIGHT:STYLE]... -o fonts.css [FILE:FAMILY:WEIGHT:STYLE]...` |
 | `qr` | Makes a QR code SVG that any phone camera decodes | `plate qr [--ec L\|M\|Q\|H] [--fg RRGGBB] [--bg RRGGBB] -o out.svg <text>` |
@@ -71,6 +72,13 @@ name, so text wraps where Slides wraps it; a face Google does not serve is
 named on stderr. Picture URLs in the JSON expire about 30 minutes after it
 was fetched. Lines, tables, videos, charts and word art are not drawn, and
 it says which slides had them; bullets and autofit are not drawn either.
+
+`shrink` fits the image inside `--width` × `--height` (either alone, or `--fit` for
+the longest side), with ImageMagick's Catrom filter, the one closest to the
+same artwork drawn natively at the small size. Each output's extension picks
+its format, and several outputs share one resample, so `o.png o.webp` writes
+both to keep the smaller. WebP is lossy at `--quality` (default 90) with
+lossless alpha.
 
 `render` runs the page outside Chrome's sandbox, with read access to your
 files and open network access: give it only pages you trust.

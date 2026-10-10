@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"image"
 	"math"
+	"os"
 	"strconv"
 	"strings"
 
@@ -460,4 +461,22 @@ func highPass(img *image.RGBA64, sigma float64) []float64 {
 		l[i] -= blur[i]
 	}
 	return l
+}
+
+func init() {
+	Metrics["bytes"] = fileBytes
+}
+
+// fileBytes is the size of image in bytes, for an encoder whose output size
+// is the result.
+func fileBytes(p Params) (float64, error) {
+	path, err := p.Path("image")
+	if err != nil {
+		return 0, err
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		return 0, err
+	}
+	return float64(fi.Size()), nil
 }

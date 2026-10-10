@@ -16,14 +16,15 @@ built and what comes next.
 One Go binary, `go install`-able. Each subcommand is one generic operation;
 nothing project-specific (crop boxes, paths, colours, thresholds tuned to one
 image) lives here. A project keeps a short recipe that supplies those and
-calls plate. Plain resize, crop and encode stay as `magick` calls in the
-recipe, because wrapping them would add nothing.
+calls plate. A plain crop stays a `magick` call in the recipe, because
+wrapping it would add nothing; a resize down for the web goes through
+`shrink`, whose filter and encoders are measured.
 
 ```
 main.go              dispatch
 internal/<op>/       one package per command (cutout, inpaint, infill, upscale,
-                     grade, render, press, pdf, doc, slides, diff, fonts, qr,
-                     doctor)
+                     grade, render, press, pdf, doc, slides, shrink, diff,
+                     fonts, qr, doctor)
 internal/cli/        flag, exit-code and error conventions every command shares
 internal/engine/     the one way an external tool is run
 internal/frame/      the source pre-pass the ML ops read: oriented, sRGB, 8-bit

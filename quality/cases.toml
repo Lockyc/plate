@@ -415,3 +415,92 @@ post   = [["plate", "grade", "apply", "--clut", "{tmp:hald.png}", "{tmp:subject.
 metric = "rmse"
 params = { a = "{tmp:graded.png}", b = "{tmp:truth.png}", region = "0.25,0.25,0.5,0.5" }
 max    = 0.0073
+
+# shrink: the source is the target page rendered at 4.21875x (1080 px, the
+# ratio of a 1080 px photo shown at 256 px), and the reference is the same
+# page rendered natively at 256 px.
+
+[[case]]
+name   = "shrink-matches-native-render"
+why    = "a downscale should look as if the artwork had been drawn at the small size: soft filters blur hairlines, sharpening rings, linear-light resampling thins dark lines"
+setup  = [
+  ["plate", "render", "--png", "{tmp:big.png}", "--transparent", "--size", "256x256", "--scale", "4.21875", "{asset:shrink-target.html}"],
+  ["plate", "render", "--png", "{tmp:ref.png}", "--transparent", "--size", "256x256", "{asset:shrink-target.html}"],
+]
+run    = ["shrink", "--fit", "256", "{tmp:big.png}", "{tmp:o.png}"]
+metric = "rmse"
+params = { a = "{tmp:o.png}", b = "{tmp:ref.png}" }
+max    = 0.0275
+
+[[case]]
+name   = "shrink-matches-native-render-2.5x"
+why    = "the filter must hold at another ratio, not only the one it was chosen on: Box wins at 4.2x and falls behind at 2.5x"
+setup  = [
+  ["plate", "render", "--png", "{tmp:big.png}", "--transparent", "--size", "256x256", "--scale", "2.5", "{asset:shrink-target.html}"],
+  ["plate", "render", "--png", "{tmp:ref.png}", "--transparent", "--size", "256x256", "{asset:shrink-target.html}"],
+]
+run    = ["shrink", "--fit", "256", "{tmp:big.png}", "{tmp:o.png}"]
+metric = "rmse"
+params = { a = "{tmp:o.png}", b = "{tmp:ref.png}" }
+max    = 0.0283
+
+[[case]]
+name   = "shrink-keeps-detail"
+why    = "RMSE is dominated by tone; the fine strokes of the native render must survive the downscale"
+setup  = [
+  ["plate", "render", "--png", "{tmp:big.png}", "--transparent", "--size", "256x256", "--scale", "4.21875", "{asset:shrink-target.html}"],
+  ["plate", "render", "--png", "{tmp:ref.png}", "--transparent", "--size", "256x256", "{asset:shrink-target.html}"],
+]
+run    = ["shrink", "--fit", "256", "{tmp:big.png}", "{tmp:o.png}"]
+metric = "detail"
+params = { a = "{tmp:o.png}", b = "{tmp:ref.png}", sigma = 1.0 }
+min    = 0.955
+
+[[case]]
+name   = "shrink-keeps-alpha"
+why    = "a transparent ground and translucent shapes must keep their coverage through the downscale"
+setup  = [
+  ["plate", "render", "--png", "{tmp:big.png}", "--transparent", "--size", "256x256", "--scale", "4.21875", "{asset:shrink-target.html}"],
+  ["plate", "render", "--png", "{tmp:ref.png}", "--transparent", "--size", "256x256", "{asset:shrink-target.html}"],
+]
+run    = ["shrink", "--fit", "256", "{tmp:big.png}", "{tmp:o.png}"]
+metric = "rmse"
+params = { a = "{tmp:o.png}", b = "{tmp:ref.png}", channels = "alpha" }
+max    = 0.0147
+
+[[case]]
+name   = "shrink-png-size"
+why    = "a web PNG must be compressed as far as zlib goes; magick's default settings leave about 15% on flat artwork"
+setup  = [["plate", "render", "--png", "{tmp:big.png}", "--transparent", "--size", "256x256", "--scale", "4.21875", "{asset:shrink-target.html}"]]
+run    = ["shrink", "--fit", "256", "{tmp:big.png}", "{tmp:o.png}"]
+metric = "bytes"
+params = { image = "{tmp:o.png}" }
+max    = 64000
+
+[[case]]
+name   = "shrink-webp-size"
+why    = "the WebP is the small option: about a third of the PNG at the default quality"
+setup  = [["plate", "render", "--png", "{tmp:big.png}", "--transparent", "--size", "256x256", "--scale", "4.21875", "{asset:shrink-target.html}"]]
+run    = ["shrink", "--fit", "256", "{tmp:big.png}", "{tmp:o.webp}"]
+metric = "bytes"
+params = { image = "{tmp:o.webp}" }
+max    = 22000
+
+[[case]]
+name   = "shrink-webp-loss"
+why    = "the lossy WebP must stay close to the lossless PNG of the same shrink; 4:2:0 chroma without sharp YUV smears coloured edges"
+setup  = [["plate", "render", "--png", "{tmp:big.png}", "--transparent", "--size", "256x256", "--scale", "4.21875", "{asset:shrink-target.html}"]]
+run    = ["shrink", "--fit", "256", "{tmp:big.png}", "{tmp:o.png}", "{tmp:o.webp}"]
+post   = [["magick", "{tmp:o.webp}", "PNG32:{tmp:w.png}"]]
+metric = "rmse"
+params = { a = "{tmp:w.png}", b = "{tmp:o.png}" }
+max    = 0.0172
+
+[[case]]
+name   = "shrink-refuses-enlarging"
+why    = "shrink only ever resamples down; enlarging is upscale's job, and a silent enlargement ships a soft asset"
+setup  = [["plate", "render", "--png", "{tmp:small.png}", "--size", "256x256", "{asset:shrink-target.html}"]]
+run    = ["shrink", "--fit", "512", "{tmp:small.png}", "{tmp:o.png}"]
+exit   = 1
+stderr = "never enlarges"
+absent = ["{tmp:o.png}"]
