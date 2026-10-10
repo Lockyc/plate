@@ -27,7 +27,7 @@ internal/<op>/       one package per command (cutout, inpaint, infill, upscale,
                      fonts, qr, doctor)
 internal/cli/        flag, exit-code and error conventions every command shares
 internal/engine/     the one way an external tool is run
-internal/atomicfile/ the one way plate writes a file in process: whole or not at all
+internal/atomicfile/ a file written whole or not at all: a temp file beside it, renamed
 internal/frame/      the source pre-pass the ML ops read: oriented, sRGB, 8-bit
                      RGB(A) PNG; or oriented only, for infill
 internal/icc/        the embedded sRGB profile
