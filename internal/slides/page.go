@@ -233,8 +233,8 @@ func (b *builder) element(out *strings.Builder, e *Element, m affine) {
 				box += fmt.Sprintf("outline:%gpx solid %s;", ol.Weight.pt(0), c)
 			}
 		}
-		fmt.Fprintf(out, "<div style=\"%soverflow:hidden\" title=\"%s\"><img src=\"%s\" style=\"width:100%%;height:100%%;object-fit:fill\"></div>\n",
-			html.EscapeString(box), html.EscapeString(e.ObjectID), html.EscapeString(b.image(e.Image.ContentURL)))
+		fmt.Fprintf(out, "<div style=\"%soverflow:hidden\" title=\"%s\"><img src=\"%s\" style=\"%s\"></div>\n",
+			html.EscapeString(box), html.EscapeString(e.ObjectID), html.EscapeString(b.image(e.Image.ContentURL)), html.EscapeString(e.Image.ImageProperties.CropProperties.css()))
 	case e.Shape != nil:
 		sh := e.Shape
 		sp := sh.ShapeProperties

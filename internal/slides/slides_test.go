@@ -315,3 +315,26 @@ func TestCommandFailureCleansOut(t *testing.T) {
 		t.Errorf("retry into the same --out: code %d stderr %q", code, e.String())
 	}
 }
+
+// TestCrop pins a cropped picture: the frame is the visible region, and the
+// whole picture inside it is scaled and shifted so only that region shows.
+// A negative offset extends the picture's box past its edge.
+func TestCrop(t *testing.T) {
+	d := parse(t, `{"slides": [{"objectId": "s", "pageElements": [
+	  {"objectId": "pic", "size": {"width": {"magnitude": 100, "unit": "PT"}, "height": {"magnitude": 50, "unit": "PT"}},
+	   "transform": {"translateX": 10, "translateY": 20, "unit": "PT"},
+	   "image": {"contentUrl": "IMAGE_URL", "imageProperties": {
+	     "cropProperties": {"leftOffset": 0.25, "rightOffset": 0.25, "topOffset": 0.5, "bottomOffset": -0.5},
+	     "outline": {"outlineFill": {"solidFill": {"color": {"rgbColor": {"red": 1}}}}, "weight": {"magnitude": 2, "unit": "PT"}}}}}
+	]}]}`)
+	got := newBuilder(d).page(&d.Slides[0], 720, 405, "fonts.css")
+	for _, want := range []string{
+		// The outline is on the frame, which clips the cropped-away part.
+		`width:100px;height:50px;transform-origin:0 0;transform:matrix(1,0,0,1,10,20);outline:2px solid rgb(255,0,0);overflow:hidden" title="pic">`,
+		`style="position:absolute;left:-50%;top:-50%;width:200%;height:100%"`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("page lacks %s\n%s", want, got)
+		}
+	}
+}

@@ -71,7 +71,8 @@ fetches the pictures and, through `fonts --google`, every face the slides
 name, so text wraps where Slides wraps it; a face Google does not serve is
 named on stderr. Picture URLs in the JSON expire about 30 minutes after it
 was fetched. Lines, tables, videos, charts and word art are not drawn, and
-it says which slides had them; bullets and autofit are not drawn either.
+it says which slides had them; bullets, autofit and a crop's rotation are not
+drawn either.
 
 `shrink` fits the image inside `--width` × `--height` (either alone, or `--fit` for
 the longest side), with ImageMagick's Catrom filter, the one closest to the

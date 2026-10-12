@@ -173,8 +173,36 @@ type Outline struct {
 type Image struct {
 	ContentURL      string `json:"contentUrl"`
 	ImageProperties struct {
-		Outline Outline `json:"outline"`
+		Outline        Outline `json:"outline"`
+		CropProperties Crop    `json:"cropProperties"`
 	} `json:"imageProperties"`
+}
+
+// Crop is a picture's CropProperties: how far each edge of the frame sits
+// inside the whole picture, as a fraction of its width or height. A
+// negative offset puts the edge outside the picture. The crop's angle is
+// not read: the preview draws the window unrotated.
+type Crop struct {
+	Left   float64 `json:"leftOffset"`
+	Right  float64 `json:"rightOffset"`
+	Top    float64 `json:"topOffset"`
+	Bottom float64 `json:"bottomOffset"`
+}
+
+// css places the whole picture in its frame, as percentages of the frame,
+// so the frame shows only the cropped region, stretched to fill it. A crop
+// that leaves nothing visible on an axis is not applied on that axis.
+func (c Crop) css() string {
+	axis := func(lo, hi float64) (pos, size float64) {
+		v := 1 - lo - hi
+		if v <= 0 {
+			return 0, 100
+		}
+		return -lo / v * 100, 100 / v
+	}
+	x, w := axis(c.Left, c.Right)
+	y, h := axis(c.Top, c.Bottom)
+	return fmt.Sprintf("position:absolute;left:%g%%;top:%g%%;width:%g%%;height:%g%%", x, y, w, h)
 }
 
 type Solid struct {
