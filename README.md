@@ -54,6 +54,10 @@ copy to publish; it needs no `--size`, and refuses a page that does not end in
 page leaves transparent (a `background: transparent` html and body) is
 alpha 0 rather than white, for artwork laid over other artwork.
 
+A PDF from `render --pdf` or `doc` is dated `SOURCE_DATE_EPOCH`, or
+1970-01-01 when that is unset, so an unchanged page renders to identical
+bytes and a checksum says whether it changed.
+
 `fonts --subset latin` cuts each font to Basic Latin, Latin-1 Supplement,
 the common punctuation (dashes, curly quotes, ellipsis) and the euro sign
 before embedding it, which takes a typical text face from about 150 KB to

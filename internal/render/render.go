@@ -297,8 +297,15 @@ func (j job) print(ctx context.Context) error {
 	if j.w != 0 && (j.w%8 != 0 || j.h%8 != 0) {
 		fmt.Fprintf(j.warn, "plate render: warning: Chrome rounds PDF page sizes to multiples of 8 CSS px, so %dx%d will not print at exactly that size\n", j.w, j.h)
 	}
+	stamp, err := pdf.SourceDate()
+	if err != nil {
+		return err
+	}
 	args := append(j.base(), "--no-pdf-header-footer", "--print-to-pdf="+j.pdf, j.url)
 	if _, err := engine.Run(ctx, engine.Cmd{Engine: chrome, Args: args, Inputs: j.inputs(), Outputs: []string{j.pdf}, Timeout: 15 * time.Minute}); err != nil {
+		return err
+	}
+	if err := pdf.PinDates(j.pdf, stamp); err != nil {
 		return err
 	}
 	if len(j.failIf) > 0 {

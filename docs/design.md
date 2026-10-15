@@ -35,7 +35,7 @@ internal/imgsize/    image dimensions without decoding pixels
 internal/enginetest/ sh stubs that stand in for engines in tests
 internal/pins/       the one table of engine versions
 internal/pdf/        PDF page count, page boxes and text through poppler; the
-                     pdf command
+                     pdf command; pinning a written PDF's dates
 internal/policy/     the plate.toml synthesis policy
 internal/raster/     in-process pixel work: load, measure, small PNG edits
 internal/ml/         embedded single-file Python scripts (uv run --script)
