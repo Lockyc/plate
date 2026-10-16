@@ -10,9 +10,8 @@ Image, render and document operations for print and web pipelines, as one
 command: lift a subject out of a photo, fill, enlarge or shrink artwork, render HTML to
 PNG, PDF or its settled DOM, preview a Google Slides deck, turn markdown into a
 PDF, look inside a PDF, make a press-ready PDF, match a colour grade. Each
-operation wraps the best engine
-for the job at a pinned version, and its quality is measured against a
-committed set of test images rather than judged by eye.
+operation wraps an engine at a pinned version, and its output is checked
+against a committed set of test images.
 
 ## Status
 
@@ -25,8 +24,8 @@ the exceptions listed under [Platforms](#platforms). What comes next is in
 |---|---|---|
 | `cutout` | Lifts the subject out of an image as RGBA, down to hair and fur | `plate cutout [--coarse vision\|birefnet] [--height PX] [--tile PX] [--band-in D] [--band-out D] [--despill PRESET] [--despill-hue A:B] [--despill-clean A:B] [--despill-chroma A:B] [--despill-lmax L] [--despill-hue-end H] <in> <out.png>` |
 | `inpaint` ⚠ | Fills a masked region with LaMa | `plate inpaint --mask mask.png <in> <out.png>` |
-| `infill` ⚠ | Fills a hole in a flat ground by blending blurred copies of its surroundings, then lays the ground's own grain over it | `plate infill --mask mask.png [--levels 150,60,20,6] [--grain 1] [--seed 1] <in> <out.png>` |
-| `upscale` ⚠ | Enlarges 4× with DAT, a super-resolution model that sharpens what the small image holds rather than inventing texture | `plate upscale <in> <out.png>` |
+| `infill` ⚠ | Fills a hole in a flat ground, matching the surrounding colour and grain | `plate infill --mask mask.png [--levels 150,60,20,6] [--grain 1] [--seed 1] <in> <out.png>` |
+| `upscale` ⚠ | Enlarges 4× with DAT, sharpening existing detail without inventing texture | `plate upscale <in> <out.png>` |
 | `grade fit` | Recovers a reference image's colour grade as a lookup table | `plate grade fit --ref ref.png [--ref-crop x,y,w,h] [--exclude x,y,w,h]... [--level 8] [--min-inliers 40] <subject.png> <out-hald.png>` |
 | `grade apply` | Applies that lookup table, keeping transparency | `plate grade apply --clut hald.png <in> <out.png>` |
 | `render` | HTML to PNG, PDF or settled HTML with headless Chrome, guarded against Chrome's silent failures | `plate render [--png out.png [--transparent]] [--pdf out.pdf] [--html out.html] [--size WxH] [--scale S] [--budget MS] [--fail-if TEXT]... <page.html\|http(s) or file URL>` |
@@ -37,7 +36,7 @@ the exceptions listed under [Platforms](#platforms). What comes next is in
 | `pdf images` | Extracts a PDF's embedded images and prints each path | `plate pdf images [--pages N\|N-M] [--out DIR] <in.pdf>` |
 | `doc` | Renders markdown or HTML to a PDF with a plain document look: A4, a running head from the first heading, page numbers, ruled tables | `plate doc [--css FILE] <in.md\|in.html> <out.pdf>` |
 | `slides` | Previews a Google Slides deck from its Slides API JSON, one PNG per slide, in the faces the deck names: for a deck Drive will not export | `plate slides [--pages LIST] [--out DIR] [--scale S] <deck.json\|->` |
-| `shrink` | Resizes down to a small, sharp web asset: PNG compressed losslessly as far as zlib goes, or WebP, alpha kept, never enlarging | `plate shrink (--width PX \| --height PX \| --fit PX) [--quality Q] <in> <out.png\|out.webp>...` |
+| `shrink` | Resizes down to a small, sharp web asset: PNG at maximum lossless compression, or WebP, alpha kept, never enlarging | `plate shrink (--width PX \| --height PX \| --fit PX) [--quality Q] <in> <out.png\|out.webp>...` |
 | `diff` | Compares two images after lining them up, so a small shift doesn't fail everything | `plate diff [--tolerance N] [--max-shift PX] [--step PX] [--threshold PCT] [--out diff.png] <a> <b>` |
 | `fonts` | Embeds web fonts, from files or from Google Fonts by family name, into a CSS file so a page renders from the filesystem, optionally cut to the characters a language uses | `plate fonts [--display block] [--subset latin] [--google FAMILY:WEIGHT:STYLE]... -o fonts.css [FILE:FAMILY:WEIGHT:STYLE]...` |
 | `qr` | Makes a QR code SVG that any phone camera decodes | `plate qr [--ec L\|M\|Q\|H] [--fg RRGGBB] [--bg RRGGBB] -o out.svg <text>` |
@@ -79,10 +78,8 @@ it says which slides had them; bullets, autofit and a crop's rotation are not
 drawn either.
 
 `shrink` fits the image inside `--width` × `--height` (either alone, or `--fit` for
-the longest side), with ImageMagick's Catrom filter, the one closest to the
-same artwork drawn natively at the small size. Each output's extension picks
-its format, and several outputs share one resample, so `o.png o.webp` writes
-both to keep the smaller. WebP is lossy at `--quality` (default 90) with
+the longest side). Each output's extension picks its format; `o.png o.webp`
+writes both, to keep the smaller. WebP is lossy at `--quality` (default 90) with
 lossless alpha.
 
 `render` runs the page outside Chrome's sandbox, with read access to your
@@ -130,7 +127,7 @@ chooses the PyTorch device instead.
 
 `just quality` runs the quality cases over the openly licensed and synthetic
 images in `quality/` and checks each result against a measured threshold. It
-needs every engine and model, so it runs locally, not in CI.
+needs every engine and model installed.
 
 ## Development
 
