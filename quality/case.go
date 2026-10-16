@@ -1,7 +1,7 @@
 // Package quality runs every plate operation over openly licensed or
 // synthetic test assets and checks each result against a measured
 // threshold. The real run is `just quality` (build tag quality): it needs
-// the engines and models and runs locally, not in CI. Untagged tests check
+// the engines and models and runs outside `just gate`. Untagged tests check
 // the registry and the case file.
 package quality
 

@@ -94,7 +94,7 @@ printf '#!/bin/sh\ncp "$1" "$2"\n' > "$2"; chmod +x "$2"`)
 }
 
 // TestRealVision compiles the helper with the real swiftc and cuts a real
-// image. Opt-in (PLATE_REAL=1): it is not part of gate or CI.
+// image. Opt-in (PLATE_REAL=1): it is not part of gate.
 func TestRealVision(t *testing.T) {
 	if os.Getenv("PLATE_REAL") == "" || runtime.GOOS != "darwin" {
 		t.Skip("set PLATE_REAL=1 on macOS")

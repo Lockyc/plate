@@ -1,7 +1,6 @@
 # plate
 
 [![Release](https://img.shields.io/github/v/release/lockyc/plate?sort=semver&label=release)](https://github.com/lockyc/plate/releases/latest)
-[![CI](https://github.com/lockyc/plate/actions/workflows/ci.yml/badge.svg)](https://github.com/lockyc/plate/actions/workflows/ci.yml)
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-555)
 ![Go](https://img.shields.io/badge/go-1.27%2B-00ADD8?logo=go&logoColor=white)
 [![License](https://img.shields.io/github/license/lockyc/plate)](LICENSE)

@@ -159,4 +159,4 @@ the quality cases over `quality/`: openly licensed or synthetic test images,
 each asset registered in `quality/assets.toml` with its source and licence,
 each case in `quality/cases.toml` (fields: `quality.Case`) with its metric
 (`quality.Metrics`) and threshold, which only ever tightens. It needs the
-models and runs locally, not in CI.
+models and runs locally, outside `just gate`.
