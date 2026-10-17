@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -103,8 +104,44 @@ func TestPagesNamesEachPage(t *testing.T) {
 	if len(calls) != 2 {
 		t.Fatalf("%d pdftoppm calls, want one per page", len(calls))
 	}
+	slices.SortFunc(calls, func(a, b []string) int { return strings.Compare(a[4], b[4]) })
 	if want := []string{"-png", "-r", "200", "-f", "3", "-l", "3", "-singlefile", in, filepath.Join(out, "page-03")}; !slices.Equal(calls[0], want) {
 		t.Errorf("args %q, want %q", calls[0], want)
+	}
+}
+
+// Pages render concurrently, so each file must hold its own page and a
+// failure must name the page that failed.
+func TestRenderPagesMapsPagesToFiles(t *testing.T) {
+	in := fixture(t)
+	stubPages(t, "12")
+	enginetest.Stub(t, "pdftoppm", `while [ $# -gt 0 ]; do case "$1" in -f) f=$2;; esac; root=$1; shift; done
+sleep 0.0$((RANDOM % 5)); printf "page$f" > "$root.png"`)
+	out := t.TempDir()
+	paths, err := RenderPages(context.Background(), in, out, 150)
+	if err != nil || len(paths) != 12 {
+		t.Fatalf("%d paths, err %v", len(paths), err)
+	}
+	for i, p := range paths {
+		if got, _ := os.ReadFile(p); string(got) != "page"+strconv.Itoa(i+1) {
+			t.Errorf("%s holds %q, want page%d", p, got, i+1)
+		}
+	}
+}
+
+func TestRenderPagesFailureNamesPage(t *testing.T) {
+	in := fixture(t)
+	stubPages(t, "12")
+	enginetest.Stub(t, "pdftoppm", `while [ $# -gt 0 ]; do case "$1" in -f) f=$2;; esac; root=$1; shift; done
+if [ "$f" = 7 ]; then echo "bad page $root" >&2; exit 1; fi
+printf x > "$root.png"`)
+	out := t.TempDir()
+	_, err := RenderPages(context.Background(), in, out, 150)
+	if err == nil || !strings.Contains(err.Error(), "page-07") {
+		t.Fatalf("err %v, want it to name page-07", err)
+	}
+	if left, _ := filepath.Glob(filepath.Join(out, "*.png")); len(left) != 0 {
+		t.Errorf("left behind: %q", left)
 	}
 }
 

@@ -8,8 +8,10 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/lockyc/plate/internal/cli"
 	"github.com/lockyc/plate/internal/engine"
@@ -23,6 +25,9 @@ const usage = "pdf info <in.pdf>\n" +
 // maxDPI bounds --dpi. pdftoppm takes any -r in silence: 0 becomes its own
 // 150, and a huge value writes a 1x1 PNG and exits 0.
 const maxDPI = 1200
+
+// maxProcs bounds the concurrent pdftoppm calls of renderPages.
+const maxProcs = 4
 
 // Main dispatches `plate pdf <verb>`.
 func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
@@ -231,20 +236,35 @@ func renderPages(ctx context.Context, in string, r pageRange, out string, dpi in
 	if err := refuseExisting(dir, names); err != nil {
 		return nil, err
 	}
+	// Pages render concurrently, each its own pdftoppm call: rendering, not
+	// parsing, is the cost, and a single call over the document is no faster.
+	// Each page owns its file name, so a failure names the page that failed.
+	errs := make([]error, len(names))
+	sem := make(chan struct{}, min(maxProcs, runtime.NumCPU()))
+	var wg sync.WaitGroup
 	for i, name := range names {
-		n := strconv.Itoa(r.first + i)
-		png := filepath.Join(dir, name)
-		root := strings.TrimSuffix(png, ".png")
-		_, err := engine.Run(ctx, engine.Cmd{
-			Engine:  "pdftoppm",
-			Args:    []string{"-png", "-r", strconv.Itoa(dpi), "-f", n, "-l", n, "-singlefile", in, root},
-			Inputs:  []string{in},
-			Outputs: []string{png},
-		})
-		if err != nil {
-			return paths, err
-		}
-		paths = append(paths, png)
+		wg.Add(1)
+		sem <- struct{}{}
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+			n := strconv.Itoa(r.first + i)
+			png := filepath.Join(dir, name)
+			root := strings.TrimSuffix(png, ".png")
+			_, errs[i] = engine.Run(ctx, engine.Cmd{
+				Engine:  "pdftoppm",
+				Args:    []string{"-png", "-r", strconv.Itoa(dpi), "-f", n, "-l", n, "-singlefile", in, root},
+				Inputs:  []string{in},
+				Outputs: []string{png},
+			})
+		}()
+	}
+	wg.Wait()
+	for _, name := range names {
+		paths = append(paths, filepath.Join(dir, name))
+	}
+	if err := errors.Join(errs...); err != nil {
+		return paths, err
 	}
 	return paths, nil
 }
