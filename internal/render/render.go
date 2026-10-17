@@ -43,8 +43,9 @@ const (
 	maxPixels = 16384 * 16384
 )
 
-// defaultBudget is --budget's default, in ms.
-const defaultBudget = 5000
+// DefaultBudget is --budget's default, in ms. Run takes a Budget of 0 as
+// 0, so a caller without its own value passes this.
+const DefaultBudget = 5000
 
 // defaultQuality is --quality's default.
 const defaultQuality = 90
@@ -108,7 +109,11 @@ func (o Options) outputs() []string {
 	return out
 }
 
-func (o Options) validate() error {
+// Validate refuses a combination of options no render can satisfy, as a
+// usage error. Run calls it first; a caller that queues renders calls it up
+// front, so a bad one is refused before any of them start. The messages
+// name render's flags.
+func (o Options) Validate() error {
 	if len(o.outputs()) == 0 {
 		return usageError("give --png, --jpeg, --pdf, --html or a combination")
 	}
@@ -164,7 +169,7 @@ func (o Options) validate() error {
 // Only the CLI goes through Run; the library entry points PDF and PNG stay
 // uncached.
 func Run(ctx context.Context, o Options, warn io.Writer) (Result, error) {
-	if err := o.validate(); err != nil {
+	if err := o.Validate(); err != nil {
 		return Result{}, err
 	}
 	if o.JPEG != "" && o.Quality == nil {
@@ -253,7 +258,7 @@ func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	transparent := fs.Bool("transparent", false, "give the PNG an alpha channel, with the page's transparent areas left transparent rather than white")
 	size := fs.String("size", "", "viewport and expected page size in CSS px, WxH (required with --png)")
 	scale := cli.Float(fs, "scale", 1, "device scale factor; the PNG is size × scale px at 96 × scale dpi")
-	budget := cli.Int(fs, "budget", defaultBudget, "virtual-time budget in ms for scripts, fonts and images to settle")
+	budget := cli.Int(fs, "budget", DefaultBudget, "virtual-time budget in ms for scripts, fonts and images to settle")
 	var failIf multi
 	fs.Var(&failIf, "fail-if", "fail when `TEXT` appears in the page: its markup (dumped DOM) for --png, its extracted text for --pdf (repeatable)")
 	blankMargin := cli.Int(fs, "blank-margin", 0, "fail when ink sits within `PX` CSS px of a page edge, checked on the PDF's pages at 150 dpi or else the PNG (0 is off)")
@@ -268,7 +273,7 @@ func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	}
 	o := Options{Page: rest[0], PNG: *pngOut, PDF: *pdfOut, HTML: *htmlOut, JPEG: *jpegOut, Transparent: *transparent,
 		Scale: *scale, Budget: *budget, BlankMargin: *blankMargin, FailIf: failIf, Force: *force}
-	// An explicit --quality is passed as given; validate and Run own the rules and the default.
+	// An explicit --quality is passed as given; Validate and Run own the rules and the default.
 	fs.Visit(func(f *flag.Flag) {
 		if f.Name == "quality" {
 			o.Quality = quality
@@ -301,7 +306,7 @@ func PDF(ctx context.Context, page, out string, warn io.Writer) error {
 	if err != nil {
 		return err
 	}
-	_, _, err = job{url: u, local: local, query: query, pdf: out, scale: 1, budget: defaultBudget, warn: warn}.run(ctx)
+	_, _, err = job{url: u, local: local, query: query, pdf: out, scale: 1, budget: DefaultBudget, warn: warn}.run(ctx)
 	return err
 }
 
@@ -315,7 +320,7 @@ func PNG(ctx context.Context, page, out string, w, h int, scale float64) error {
 	if err != nil {
 		return err
 	}
-	_, _, err = job{url: u, local: local, query: query, png: out, w: w, h: h, scale: scale, budget: defaultBudget, warn: io.Discard}.run(ctx)
+	_, _, err = job{url: u, local: local, query: query, png: out, w: w, h: h, scale: scale, budget: DefaultBudget, warn: io.Discard}.run(ctx)
 	return err
 }
 

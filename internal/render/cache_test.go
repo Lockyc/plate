@@ -89,7 +89,7 @@ func TestCacheFailureLeavesNoTemp(t *testing.T) {
 }
 
 func (e *env) pngOpts() Options {
-	return Options{Page: e.page, PNG: e.out("p.png"), W: 100, H: 50, Scale: 2, Budget: defaultBudget}
+	return Options{Page: e.page, PNG: e.out("p.png"), W: 100, H: 50, Scale: 2, Budget: DefaultBudget}
 }
 
 // render runs o through Run, fails the test on an error, and reports
@@ -224,7 +224,7 @@ func TestCacheKeyIncludesOptions(t *testing.T) {
 
 func TestCacheKeyIncludesSourceDate(t *testing.T) {
 	e := cacheEnv(t)
-	o := Options{Page: e.page, PDF: e.out("p.pdf"), Scale: 1, Budget: defaultBudget}
+	o := Options{Page: e.page, PDF: e.out("p.pdf"), Scale: 1, Budget: DefaultBudget}
 	e.render(t, o)
 	t.Setenv("SOURCE_DATE_EPOCH", "1700000000")
 	if e.render(t, o) {
@@ -261,7 +261,7 @@ func TestCacheExternalNotCached(t *testing.T) {
 
 func TestCacheRemotePageNotCached(t *testing.T) {
 	e := cacheEnv(t)
-	o := Options{Page: "https://example.org/x", PDF: e.out("p.pdf"), Scale: 1, Budget: defaultBudget}
+	o := Options{Page: "https://example.org/x", PDF: e.out("p.pdf"), Scale: 1, Budget: DefaultBudget}
 	if res := e.result(t, o); res != (Result{Uncacheable, "remote page"}) {
 		t.Errorf("result %+v", res)
 	}
@@ -388,7 +388,7 @@ func TestMainReportsUnchanged(t *testing.T) {
 func TestCacheJPEGOnlyRecordsJPEG(t *testing.T) {
 	e := cacheEnv(t)
 	enginetest.Stub(t, "magick", magickStub)
-	o := Options{Page: e.page, JPEG: e.out("p.jpg"), Quality: ptr(90), W: 100, H: 50, Scale: 2, Budget: defaultBudget}
+	o := Options{Page: e.page, JPEG: e.out("p.jpg"), Quality: ptr(90), W: 100, H: 50, Scale: 2, Budget: DefaultBudget}
 	if e.render(t, o) {
 		t.Fatal("first render skipped")
 	}
@@ -404,7 +404,7 @@ func TestCacheJPEGOnlyRecordsJPEG(t *testing.T) {
 func TestCacheDeletedJPEGRerenders(t *testing.T) {
 	e := cacheEnv(t)
 	enginetest.Stub(t, "magick", magickStub)
-	o := Options{Page: e.page, JPEG: e.out("p.jpg"), Quality: ptr(90), W: 100, H: 50, Scale: 2, Budget: defaultBudget}
+	o := Options{Page: e.page, JPEG: e.out("p.jpg"), Quality: ptr(90), W: 100, H: 50, Scale: 2, Budget: DefaultBudget}
 	e.render(t, o)
 	os.Remove(o.JPEG)
 	if e.render(t, o) {
@@ -420,7 +420,7 @@ func ptr(n int) *int { return &n }
 func TestCacheKeyQualityDefaultEqualsExplicit(t *testing.T) {
 	e := cacheEnv(t)
 	enginetest.Stub(t, "magick", magickStub)
-	o := Options{Page: e.page, JPEG: e.out("p.jpg"), W: 100, H: 50, Scale: 2, Budget: defaultBudget}
+	o := Options{Page: e.page, JPEG: e.out("p.jpg"), W: 100, H: 50, Scale: 2, Budget: DefaultBudget}
 	e.render(t, o)
 	o.Quality = ptr(defaultQuality)
 	if !e.render(t, o) {
