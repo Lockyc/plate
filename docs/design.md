@@ -116,13 +116,16 @@ colours, or renders what it is given.
   Chrome's PDF backend rounds to, and a page box unlike `--size` fails (no
   matching `@page` prints Letter); a `--fail-if` string in the dumped DOM, or
   a PDF's `pdftotext`, fails; so does ink in the `--blank-margin` band
-  (`render.checkMargin`). `--jpeg` converts the same screenshot. `--html`
+  (`render.checkMargin`), and a `file://` load Chrome refused, which it
+  reports only on stderr (`render.blockedRe`). `--jpeg` converts the same screenshot. `--html`
   judges Chrome's output by content: a dump ending in `</html>` is whole,
   since Chrome's teardown watchdog can exit non-zero after writing the full
   page (`engine.Cmd.AllowExit`).
 - **build** — parses a manifest into `render.Options`, each checked by
   `render.Validate` before anything renders, and runs `render.Run` on up to
-  `--jobs` workers, logging in manifest order (`build.ParseManifest`).
+  `--jobs` workers, logging in manifest order (`build.ParseManifest`). A
+  target whose `render.Result.Inputs` holds another target's output fails
+  (`build.loadsOutput`).
 - **press** — Ghostscript pdfwrite with outlined text, CMYK conversion to a
   supplied ICC, fixed media from the input's page box, and images downsampled
   only above 1.5 × `--max-ppi`. It then checks the result has no fonts, no
