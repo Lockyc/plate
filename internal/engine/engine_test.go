@@ -75,6 +75,16 @@ func TestFindRefusesAMissingOverride(t *testing.T) {
 	}
 }
 
+func TestFindRunsARelativeOverride(t *testing.T) {
+	t.Chdir(t.TempDir())
+	os.WriteFile("mystub", []byte("#!/bin/sh\nexit 0\n"), 0o755)
+	t.Setenv("PATH", t.TempDir())
+	t.Setenv(engine.EnvOverride("magick"), "mystub")
+	if _, err := engine.Run(ctx, engine.Cmd{Engine: "magick"}); err != nil {
+		t.Fatalf("bare-name override in the working directory: %v", err)
+	}
+}
+
 func TestVersionReportsAnExecFailure(t *testing.T) {
 	bad := filepath.Join(t.TempDir(), "magick")
 	os.WriteFile(bad, []byte("#!/no/such/interpreter\n"), 0o755)
