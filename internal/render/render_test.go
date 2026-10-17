@@ -136,6 +136,11 @@ func TestRenderWrongSizeFails(t *testing.T) {
 	if !strings.Contains(e.stderr.String(), "rendered 100x100, expected 200x100") || exists(e.out("p.png")) {
 		t.Errorf("stderr %q, file left: %v", e.stderr.String(), exists(e.out("p.png")))
 	}
+	// The PNG is checked under a temporary name; the error names the file
+	// asked for.
+	if s := e.stderr.String(); !strings.Contains(s, e.out("p.png")+": ") || strings.Contains(s, ".plate-") {
+		t.Errorf("stderr %q does not name %s, or names the temporary file", s, e.out("p.png"))
+	}
 }
 
 func TestRenderKilledChromeLeavesNothing(t *testing.T) {
@@ -155,8 +160,8 @@ func TestRenderNoOutput(t *testing.T) {
 	if code := e.run("--size", "100x50", "--scale", "2", "--png", e.out("p.png"), e.page); code != 1 {
 		t.Fatalf("code %d", code)
 	}
-	if !strings.Contains(e.stderr.String(), "produced no output") {
-		t.Errorf("stderr %q", e.stderr.String())
+	if s := e.stderr.String(); !strings.Contains(s, "produced no output at "+e.out("p.png")) || strings.Contains(s, ".plate-") {
+		t.Errorf("stderr %q", s)
 	}
 }
 

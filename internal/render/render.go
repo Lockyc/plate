@@ -338,14 +338,10 @@ func (j job) inputs() []string {
 // the destination afterwards would record that writer's bytes under this
 // render's key.
 func (j job) run(ctx context.Context) (_ loadSet, _ []fileHash, err error) {
-	type output struct {
-		slot      *string // the job field, pointed at tmp while the stages run
-		dest, tmp string
-	}
-	var outputs []output
+	var outputs []outFile
 	for _, p := range []*string{&j.png, &j.pdf, &j.html} {
 		if *p != "" {
-			outputs = append(outputs, output{slot: p, dest: *p})
+			outputs = append(outputs, outFile{slot: p, dest: *p})
 		}
 	}
 	if j.local != "" {
@@ -370,6 +366,9 @@ func (j job) run(ctx context.Context) (_ loadSet, _ []fileHash, err error) {
 			if err != nil {
 				os.Remove(o.dest)
 			}
+		}
+		if err != nil {
+			err = destErr{err, outputs}
 		}
 	}()
 	for i := range outputs {
@@ -422,6 +421,33 @@ func (j job) run(ctx context.Context) (_ loadSet, _ []fileHash, err error) {
 	}
 	return loads(), hashes, nil
 }
+
+// outFile is one output of a run: the destination asked for and the
+// temporary name it is written under until every check has passed.
+type outFile struct {
+	slot      *string // the job field, pointed at tmp while the stages run
+	dest, tmp string
+}
+
+// destErr is a run's error with each temporary name replaced by its
+// destination, so the message names the file the caller asked for. Unwrap
+// keeps the original for errors.Is and errors.As.
+type destErr struct {
+	err  error
+	outs []outFile
+}
+
+func (e destErr) Error() string {
+	msg := e.err.Error()
+	for _, o := range e.outs {
+		if o.tmp != "" {
+			msg = strings.ReplaceAll(msg, o.tmp, o.dest)
+		}
+	}
+	return msg
+}
+
+func (e destErr) Unwrap() error { return e.err }
 
 // tempName is an unused name beside dest, keeping its extension, for an
 // output to be written under before it is moved into place. The name is
@@ -495,10 +521,10 @@ func (j job) screenshot(ctx context.Context) error {
 		return fmt.Errorf("%s: %w", j.png, err)
 	}
 	if cfg.Width != pw || cfg.Height != ph {
-		return fmt.Errorf("Chrome rendered %dx%d, expected %dx%d (size × scale)", cfg.Width, cfg.Height, pw, ph)
+		return fmt.Errorf("%s: Chrome rendered %dx%d, expected %dx%d (size × scale)", j.png, cfg.Width, cfg.Height, pw, ph)
 	}
 	if j.transparent && cfg.ColorModel != color.NRGBAModel && cfg.ColorModel != color.NRGBA64Model {
-		return fmt.Errorf("Chrome wrote a PNG without an alpha channel for --transparent")
+		return fmt.Errorf("%s: Chrome wrote a PNG without an alpha channel for --transparent", j.png)
 	}
 	// Chrome writes no pHYs, so the PNG would claim 72 dpi and misstate its
 	// print size. A CSS px is 1/96 in, so the true density is 96 × scale.
@@ -548,8 +574,8 @@ func (j job) print(ctx context.Context) error {
 	}
 	ww, wh := float64(j.w)*0.75, float64(j.h)*0.75
 	if math.Abs(info.W-ww) > pdfQuantum || math.Abs(info.H-wh) > pdfQuantum {
-		return fmt.Errorf("the PDF page is %gx%g pt, not the %dx%d CSS px (%gx%g pt) asked for; give the page `@page { size: %dpx %dpx; margin: 0 }`",
-			info.W, info.H, j.w, j.h, ww, wh, j.w, j.h)
+		return fmt.Errorf("%s: the PDF page is %gx%g pt, not the %dx%d CSS px (%gx%g pt) asked for; give the page `@page { size: %dpx %dpx; margin: 0 }`",
+			j.pdf, info.W, info.H, j.w, j.h, ww, wh, j.w, j.h)
 	}
 	return nil
 }
