@@ -101,7 +101,7 @@ var Engines = []Engine{
 		Name: "qpdf", Kind: Minimum,
 		VersionArgs: []string{"--version"}, VersionRe: `qpdf version (\d+\.\d+\.\d+)`, Min: "11.0.0",
 		Install: map[string]string{"darwin": "brew install qpdf", "linux": "sudo apt install qpdf"},
-		UsedBy:  []string{"press", "impose"},
+		UsedBy:  []string{"press", "impose", "build"},
 	},
 	{
 		Name: "qrencode", Kind: Minimum,

@@ -67,13 +67,11 @@ func TestEngineUsedByNamesCommands(t *testing.T) {
 			t.Errorf("chrome-headless-shell UsedBy %q lacks %q, which renders through Chrome", chrome.UsedBy, want)
 		}
 	}
-	// build renders through render, so whatever render runs, build runs.
-	for _, name := range []string{"chrome-headless-shell", "magick", "pdfinfo", "pdftotext", "pdftoppm"} {
-		e, _ := pins.Lookup(name)
-		for _, want := range []string{"render", "build"} {
-			if !slices.Contains(e.UsedBy, want) {
-				t.Errorf("%s UsedBy %q lacks %q", name, e.UsedBy, want)
-			}
+	// build renders through render and imposes a 2up target through
+	// impose, so whatever either runs, build runs.
+	for _, e := range pins.Engines {
+		if (slices.Contains(e.UsedBy, "render") || slices.Contains(e.UsedBy, "impose")) && !slices.Contains(e.UsedBy, "build") {
+			t.Errorf("%s UsedBy %q lacks build", e.Name, e.UsedBy)
 		}
 	}
 }
