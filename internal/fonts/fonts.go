@@ -84,18 +84,13 @@ func (f Face) check() error {
 	return nil
 }
 
-type multi []string
-
-func (m *multi) String() string     { return strings.Join(*m, ", ") }
-func (m *multi) Set(s string) error { *m = append(*m, s); return nil }
-
 // Main runs `plate fonts`.
 func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := cli.Flags("fonts", usage, stderr)
 	out := fs.String("o", "", "the CSS file to write (required)")
 	display := fs.String("display", "block", "font-display value")
 	subset := fs.String("subset", "", "cut each font to a named character set before embedding: latin (needs .ttf or .otf input)")
-	var google multi
+	var google cli.Multi
 	fs.Var(&google, "google", "a face from Google Fonts by family name, `FAMILY:WEIGHT:STYLE` (repeatable; fetched once into plate's cache)")
 	rest, code, ok := cli.Parse(fs, args, -1)
 	if !ok {

@@ -10,6 +10,7 @@ import (
 	"io"
 	"math"
 	"strconv"
+	"strings"
 )
 
 // Flags makes the flag set for "plate <op>".
@@ -67,6 +68,12 @@ func (d *decimal) Set(s string) error {
 	*d = decimal(v)
 	return nil
 }
+
+// Multi is a repeatable string flag: each use appends its value.
+type Multi []string
+
+func (m *Multi) String() string     { return strings.Join(*m, ", ") }
+func (m *Multi) Set(s string) error { *m = append(*m, s); return nil }
 
 // Finite parses s as a number, refusing NaN and the infinities, which
 // ParseFloat accepts.
