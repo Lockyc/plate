@@ -3,8 +3,8 @@
 package quality
 
 import (
-	"bytes"
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"io"
 	"os"
@@ -54,10 +54,11 @@ func TestRealRenderCache(t *testing.T) {
 		}
 	}
 	run(render.Rendered, "first")
-	first, err := os.ReadFile(o.PNG)
-	if err != nil {
+	first := filepath.Join(out, "first.png")
+	if err := os.WriteFile(first, mustRead(t, o.PNG), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	pdf1 := sha256.Sum256(mustRead(t, o.PDF))
 	if _, err := os.Stat(o.PDF); err != nil {
 		t.Fatal(err)
 	}
@@ -70,12 +71,11 @@ func TestRealRenderCache(t *testing.T) {
 		t.Fatal(err)
 	}
 	run(render.Rendered, "after facts edit")
-	last, err := os.ReadFile(o.PNG)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if bytes.Equal(first, last) {
+	if diffPixels(t, first, o.PNG) == 0 {
 		t.Error("PNG did not change after facts.html changed")
+	}
+	if sha256.Sum256(mustRead(t, o.PDF)) == pdf1 {
+		t.Error("PDF was not rewritten after facts.html changed")
 	}
 }
 
@@ -102,26 +102,60 @@ func TestRealRenderMatchesFileURL(t *testing.T) {
 	if b, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("reference: %v\n%s", err, b)
 	}
-	a, err := raster.Load(got)
+	if n := diffPixels(t, got, ref); n != 0 {
+		t.Errorf("%d pixels differ from the file:// reference", n)
+	}
+	// Controls: the quoted sibling value must move pixels, or a failed load
+	// in both renders would pass vacuously.
+	for name, facts := range map[string]string{"other value": factsHTML("DELTA"), "no facts.html": ""} {
+		cdir := t.TempDir()
+		cpage := writePage(t, cdir, "x")
+		if facts == "" {
+			os.Remove(filepath.Join(cdir, "facts.html"))
+		} else {
+			os.WriteFile(filepath.Join(cdir, "facts.html"), []byte(facts), 0o644)
+		}
+		cp := filepath.Join(out, "control.png")
+		co := render.Options{Page: cpage, PNG: cp, W: w, H: h, Scale: 1, Budget: render.DefaultBudget}
+		if _, err := render.Run(context.Background(), co, io.Discard); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if diffPixels(t, got, cp) == 0 {
+			t.Errorf("control %q rendered identically: the sibling value is not reaching the page", name)
+		}
+	}
+}
+
+func mustRead(t *testing.T, p string) []byte {
+	t.Helper()
+	b, err := os.ReadFile(p)
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := raster.Load(ref)
+	return b
+}
+
+// diffPixels counts pixels that differ between two PNGs of equal size.
+func diffPixels(t *testing.T, a, b string) int {
+	t.Helper()
+	ia, err := raster.Load(a)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if a.Bounds() != b.Bounds() {
-		t.Fatalf("sizes differ: %v vs %v", a.Bounds(), b.Bounds())
+	ib, err := raster.Load(b)
+	if err != nil {
+		t.Fatal(err)
 	}
-	diff := 0
-	for y := a.Bounds().Min.Y; y < a.Bounds().Max.Y; y++ {
-		for x := a.Bounds().Min.X; x < a.Bounds().Max.X; x++ {
-			if a.At(x, y) != b.At(x, y) {
-				diff++
+	if ia.Bounds() != ib.Bounds() {
+		t.Fatalf("sizes differ: %v vs %v", ia.Bounds(), ib.Bounds())
+	}
+	n := 0
+	for y := ia.Bounds().Min.Y; y < ia.Bounds().Max.Y; y++ {
+		for x := ia.Bounds().Min.X; x < ia.Bounds().Max.X; x++ {
+			if ia.At(x, y) != ib.At(x, y) {
+				n++
 			}
 		}
 	}
-	if diff != 0 {
-		t.Errorf("%d pixels differ from the file:// reference (%s vs %s)", diff, got, ref)
-	}
+	return n
 }
