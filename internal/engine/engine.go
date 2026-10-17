@@ -129,9 +129,13 @@ func Resolve(name string) (string, error) {
 }
 
 // Find locates e: its override variable, then (Managed) the data directory
-// or (Minimum) PATH.
+// or (Minimum) PATH. The override is made absolute, because exec searches
+// PATH for a bare name, which is not the file checked here.
 func Find(e pins.Engine) (string, error) {
 	if p := os.Getenv(EnvOverride(e.Name)); p != "" {
+		if abs, err := filepath.Abs(p); err == nil {
+			p = abs
+		}
 		if !executable(p) {
 			return "", &NotInstalledError{Engine: e.Name, Hint: EnvOverride(e.Name) + "=" + p + " is not an executable file"}
 		}
@@ -168,7 +172,7 @@ func executable(p string) bool {
 }
 
 // Cmd is one engine invocation. Inputs and Outputs are paths as plate sees
-// them, relative to its own working directory rather than Dir.
+// them, relative to its own working directory.
 type Cmd struct {
 	Engine      string // pin-table name; resolves the executable unless Path is set
 	Path        string // an executable plate built itself; Engine is then only a label
@@ -341,7 +345,12 @@ func Version(ctx context.Context, e pins.Engine) (string, error) {
 	}
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, path, e.VersionArgs...).CombinedOutput()
+	// The group kill and WaitDelay stop a child that keeps the pipe open
+	// from holding CombinedOutput past the timeout.
+	cmd := exec.CommandContext(ctx, path, e.VersionArgs...)
+	killGroupOnCancel(cmd)
+	cmd.WaitDelay = time.Second
+	out, err := cmd.CombinedOutput()
 	m := regexp.MustCompile(e.VersionRe).FindSubmatch(out)
 	if m == nil {
 		var ee *exec.ExitError
