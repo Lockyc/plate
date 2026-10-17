@@ -86,7 +86,8 @@ manifest, as `name.pdf`, `name.png`, `name.jpg` or `name.html`. The options
 are `blank-margin=PX`, `transparent`, `budget=MS` and `quality=Q`. Naming
 targets renders only those. It logs `rendered NAME`, `rendered NAME (not
 cached: REASON)`, `unchanged NAME` or `failed NAME: ERROR` for each target
-in manifest order, then a count. A failed target exits 1, and so does an
+in manifest order, then a count. Targets render in parallel, so a target
+that loads another target's output fails. A failed target exits 1, and so does an
 unreadable manifest; an invalid manifest line or an unknown target name
 exits 2 before anything renders.
 

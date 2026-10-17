@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -52,6 +53,21 @@ func (r record) current() bool {
 		}
 	}
 	return true
+}
+
+// inputPaths is the path of every input, served or missing.
+func (r record) inputPaths() []string {
+	paths := make([]string, len(r.Inputs))
+	for i, f := range r.Inputs {
+		paths[i] = f.Path
+	}
+	return paths
+}
+
+// paths is every local file l served or found missing.
+func (l loadSet) paths() []string {
+	paths := slices.Sorted(maps.Keys(l.Files))
+	return append(paths, l.Missing...)
 }
 
 // writes reports whether the record's outputs are exactly paths.

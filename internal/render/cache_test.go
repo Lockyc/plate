@@ -7,6 +7,7 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -132,11 +133,11 @@ func write(t *testing.T, p, s string) {
 
 func TestCacheSecondRunSkips(t *testing.T) {
 	e := cacheEnv(t)
-	if res := e.result(t, e.pngOpts()); res != (Result{Outcome: Rendered}) {
-		t.Fatalf("first run %+v, want Rendered", res)
+	if res := e.result(t, e.pngOpts()); res.Outcome != Rendered || res.Reason != "" || !slices.Equal(res.Inputs, []string{e.page}) {
+		t.Fatalf("first run %+v, want Rendered from %s", res, e.page)
 	}
-	if !e.render(t, e.pngOpts()) {
-		t.Error("second identical run rendered")
+	if res := e.result(t, e.pngOpts()); res.Outcome != Unchanged || !slices.Equal(res.Inputs, []string{e.page}) {
+		t.Errorf("second identical run %+v, want Unchanged from %s", res, e.page)
 	}
 	if n := e.calls(t); n != 1 {
 		t.Errorf("chrome called %d times, want 1", n)
@@ -251,7 +252,7 @@ func TestCacheForce(t *testing.T) {
 func TestCacheExternalNotCached(t *testing.T) {
 	e := cacheEnv(t)
 	t.Setenv("FIXTURE_URLS", "http://example.invalid/")
-	if res := e.result(t, e.pngOpts()); res != (Result{Uncacheable, "loads example.invalid"}) {
+	if res := e.result(t, e.pngOpts()); res.Outcome != Uncacheable || res.Reason != "loads example.invalid" {
 		t.Errorf("result %+v", res)
 	}
 	if e.render(t, e.pngOpts()) {
@@ -262,7 +263,7 @@ func TestCacheExternalNotCached(t *testing.T) {
 func TestCacheRemotePageNotCached(t *testing.T) {
 	e := cacheEnv(t)
 	o := Options{Page: "https://example.org/x", PDF: e.out("p.pdf"), Scale: 1, Budget: DefaultBudget}
-	if res := e.result(t, o); res != (Result{Uncacheable, "remote page"}) {
+	if res := e.result(t, o); res.Outcome != Uncacheable || res.Reason != "remote page" || res.Inputs != nil {
 		t.Errorf("result %+v", res)
 	}
 	if e.render(t, o) {
@@ -322,7 +323,7 @@ func TestCacheUnstableInputNotCached(t *testing.T) {
 	// The stub loads FIXTURE_LOADS, runs FIXTURE_AFTER, then loads them again.
 	t.Setenv("FIXTURE_AFTER", "printf 'body{color:red}' > '"+css+"'")
 	t.Setenv("FIXTURE_RELOAD", "1")
-	if res := e.result(t, e.pngOpts()); res != (Result{Uncacheable, "a file changed while it rendered"}) {
+	if res := e.result(t, e.pngOpts()); res.Outcome != Uncacheable || res.Reason != "a file changed while it rendered" {
 		t.Errorf("result %+v", res)
 	}
 	t.Setenv("FIXTURE_AFTER", "")

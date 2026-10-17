@@ -228,3 +228,26 @@ func TestBuildOutRelativeToCwd(t *testing.T) {
 		t.Error(err)
 	}
 }
+
+// render deletes a target's outputs before it starts and build runs targets
+// in parallel, so a target that loads another's output renders against a
+// file that may be missing. Each such target fails, rendered or unchanged.
+func TestBuildRefusesLoadingAnotherOutput(t *testing.T) {
+	e := setup(t, "b")
+	aOut := filepath.Join(e.dir, "dist", "a.png")
+	t.Setenv("FIXTURE_URLS", "http://plate.invalid"+filepath.ToSlash(aOut))
+	if code := e.run(e.manifest); code != 0 {
+		t.Fatalf("b alone: code %d: %s", code, e.stderr.String())
+	}
+	os.WriteFile(filepath.Join(e.dir, "a.html"), []byte("<html>a</html>"), 0o644)
+	m, _ := os.ReadFile(e.manifest)
+	os.WriteFile(e.manifest, append([]byte("a  a.html  100x50  1  png\n"), m...), 0o644)
+	want := "failed b: loads a's output " + aOut + "; render a in a step before plate build, or split the manifest\n"
+	// b's record still holds: the cache hit is refused all the same.
+	if code := e.run(e.manifest, "b"); code != 1 || !strings.Contains(e.stderr.String(), want) {
+		t.Errorf("cache hit: code %d, stderr %q", code, e.stderr.String())
+	}
+	if code := e.run("--force", e.manifest); code != 1 || !strings.Contains(e.stderr.String(), want) || !strings.Contains(e.stderr.String(), "1 rendered, 0 unchanged, 1 failed") {
+		t.Errorf("render: code %d, stderr %q", code, e.stderr.String())
+	}
+}

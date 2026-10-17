@@ -14,6 +14,7 @@ import (
 	"runtime"
 
 	"github.com/lockyc/plate/internal/cli"
+	"github.com/lockyc/plate/internal/engine"
 	"github.com/lockyc/plate/internal/render"
 )
 
@@ -100,6 +101,9 @@ func Main(ctx context.Context, args []string, _, stderr io.Writer) int {
 		<-r.done
 		name := targets[i].Name
 		stderr.Write(r.warn.Bytes())
+		if r.err == nil {
+			r.err = loadsOutput(targets[i], r.res.Inputs, all)
+		}
 		switch {
 		case r.err != nil:
 			failed++
@@ -121,6 +125,25 @@ func Main(ctx context.Context, args []string, _, stderr io.Writer) int {
 	}
 	fmt.Fprintf(stderr, "%d rendered, %d unchanged\n", rendered, unchanged)
 	return 0
+}
+
+// loadsOutput refuses t when one of its inputs is another target's output:
+// render deletes its outputs before it starts and targets run in parallel,
+// so t rendered against a file that may have been missing or half-made.
+func loadsOutput(t Target, inputs []string, all []Target) error {
+	for _, o := range all {
+		if o.Name == t.Name {
+			continue
+		}
+		for _, out := range o.Opts.Outputs() {
+			for _, in := range inputs {
+				if engine.SameFile(in, out) {
+					return fmt.Errorf("loads %s's output %s; render %s in a step before plate build, or split the manifest", o.Name, out, o.Name)
+				}
+			}
+		}
+	}
+	return nil
 }
 
 // selectTargets is the targets named, in manifest order, or every target
