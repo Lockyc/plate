@@ -96,3 +96,19 @@ recipe  = "written for plate: a 256 px SVG of a 36-spoke starburst, hairline rin
 author  = "plate"
 licence = "CC0"
 sha256  = "41e192de94550f178b5148a9fcac7fcd68f6e05d7cd9194cc5560a4d26a25d03"
+
+[[asset]]
+file    = "two-a5.html"
+source  = "synthetic"
+recipe  = "written for plate: a two-page A5 flyer, front and back, each with a heading, body text, a hairline rule, a 1 px line grid and corner marks that differ between the sides, so a half that is moved, scaled, mirrored or turned shows"
+author  = "plate"
+licence = "CC0"
+sha256  = "19cb96d17bc5259a795e00f1fe4c302bbaebc55ad2636470ecb5550455a65da6"
+
+[[asset]]
+file    = "two-a5.pdf"
+source  = "synthetic"
+recipe  = "plate render --size 560x792 --pdf two-a5.pdf two-a5.html (Chrome's A5: 420 x 594 pt)"
+author  = "plate"
+licence = "CC0"
+sha256  = "3bd415cdd8bdb04e5b170b44673042f9c02c595b34accf7c57c967b8545c998e"

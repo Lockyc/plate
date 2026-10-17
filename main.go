@@ -20,6 +20,7 @@ import (
 	"github.com/lockyc/plate/internal/doctor"
 	"github.com/lockyc/plate/internal/fonts"
 	"github.com/lockyc/plate/internal/grade"
+	"github.com/lockyc/plate/internal/impose"
 	"github.com/lockyc/plate/internal/infill"
 	"github.com/lockyc/plate/internal/inpaint"
 	"github.com/lockyc/plate/internal/pdf"
@@ -49,6 +50,7 @@ var commands = []command{
 	{"build", "render every target in a manifest, skipping the unchanged ones", build.Main, false},
 	{"press", "PDF to a print master: outlined text, CMYK, checked against a soft proof", press.Main, false},
 	{"pdf", "inspect a PDF: info with a text-layer check, text, page renders, embedded images", pdf.Main, false},
+	{"impose", "two A5 pages onto both sides of an A4 sheet, to print double-sided and cut", impose.Main, false},
 	{"doc", "markdown or HTML to a PDF with a document stylesheet", doc.Main, false},
 	{"slides", "preview a Google Slides deck from its Slides API JSON, one PNG per slide", slides.Main, false},
 	{"shrink", "resize down to a small, sharp PNG or WebP for the web", shrink.Main, false},
