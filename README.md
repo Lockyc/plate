@@ -122,7 +122,8 @@ drawn either.
 within 1 mm, both portrait or both landscape; anything else is refused with
 the page count and size it found. Each copy keeps the source's vectors,
 text, fonts and images, unscaled; a landscape flyer is turned a quarter to
-fit its half. Links and tags are dropped. It refuses to replace an existing
+fit its half. A `press` master's output intent is kept; links and tags are
+dropped. It refuses to replace an existing
 output unless given `--force`.
 
 `shrink` scales the image down to fit `--width`, `--height` or both, or with
