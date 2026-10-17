@@ -126,7 +126,7 @@ func TestCacheKeyIncludesBlankMargin(t *testing.T) {
 func TestCheckMarginBandIsFloor(t *testing.T) {
 	// 23 CSS px at 150 dpi is 35.94 device px: the band is 35, so row 35 (the
 	// anti-aliased edge of content at the margin) passes and row 34 fails.
-	band := 23 * marginDPI / cssDPI
+	band := marginBand(23, marginScale)
 	if band != 35 {
 		t.Fatalf("band %d, want 35", band)
 	}
@@ -139,5 +139,18 @@ func TestCheckMarginBandIsFloor(t *testing.T) {
 	img.Set(100, band-1, color.Gray{200})
 	if got := checkMargin(img, band); !slices.Equal(got, []string{"top"}) {
 		t.Errorf("ink at row %d = %v, want [top]", band-1, got)
+	}
+}
+
+// The PDF's band at marginDPI and the PNG's at the same density come from
+// one floor, so the two checks cannot disagree on a margin.
+func TestMarginBandOneFloor(t *testing.T) {
+	for _, c := range []struct {
+		scale float64
+		want  int
+	}{{marginScale, 35}, {1.5625, 35}, {3.125, 71}} {
+		if got := marginBand(23, c.scale); got != c.want {
+			t.Errorf("marginBand(23, %g) = %d, want %d", c.scale, got, c.want)
+		}
 	}
 }

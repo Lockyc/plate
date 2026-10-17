@@ -13,12 +13,21 @@ import (
 )
 
 // marginDPI is the resolution a PDF's pages are rasterised at for the margin
-// check, and cssDPI the density of a CSS px, which turns --blank-margin's
-// CSS px into raster px.
+// check, cssDPI the density of a CSS px, and marginScale the device px per
+// CSS px of that raster.
 const (
-	marginDPI = 150
-	cssDPI    = 96
+	marginDPI   = 150
+	cssDPI      = 96
+	marginScale = float64(marginDPI) / cssDPI
 )
+
+// marginBand is a px CSS px margin in device px at devicePerCSS: the floor,
+// so only device pixels lying wholly inside the margin count. The epsilon
+// keeps a whole-number product that floating point lands a hair below from
+// flooring one short.
+func marginBand(px int, devicePerCSS float64) int {
+	return int(math.Floor(float64(px)*devicePerCSS + 1e-9))
+}
 
 // inkBelow is the Rec.709 luma, on 16-bit values, under which a pixel is ink:
 // anything darker than 99% of full scale. Transparent pixels count as white.
@@ -95,7 +104,7 @@ func (j job) checkMargins(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		band := j.blankMargin * marginDPI / cssDPI
+		band := marginBand(j.blankMargin, marginScale)
 		for i, p := range pages {
 			img, err := raster.Load(p)
 			if err != nil {
@@ -110,7 +119,7 @@ func (j job) checkMargins(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		found = checkMargin(img, int(math.Floor(float64(j.blankMargin)*j.scale+1e-9)))
+		found = checkMargin(img, marginBand(j.blankMargin, j.scale))
 	}
 	if len(found) > 0 {
 		return fmt.Errorf("ink in the %dpx blank margin: %s", j.blankMargin, strings.Join(found, ", "))
