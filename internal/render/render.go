@@ -342,7 +342,7 @@ func pageURL(arg string) (string, string, string, error) {
 		case "http", "https":
 			return arg, "", "", nil
 		case "file":
-			local := filepath.FromSlash(u.Path)
+			local := filepath.Clean(filepath.FromSlash(u.Path))
 			if _, err := os.Stat(local); err != nil {
 				return "", "", "", err
 			}
@@ -661,10 +661,20 @@ func (j job) print(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	// A named @page can size one page apart from the rest, so every page
+	// is checked, not only the first pdf.Read reports.
+	sizes := [][2]float64{{info.W, info.H}}
+	if info.Pages > 1 {
+		if sizes, err = pdf.PageSizes(ctx, j.pdf, info.Pages); err != nil {
+			return err
+		}
+	}
 	ww, wh := float64(j.w)*0.75, float64(j.h)*0.75
-	if math.Abs(info.W-ww) > pdfQuantum || math.Abs(info.H-wh) > pdfQuantum {
-		return fmt.Errorf("%s: the PDF page is %gx%g pt, not the %dx%d CSS px (%gx%g pt) asked for; give the page `@page { size: %dpx %dpx; margin: 0 }`",
-			j.pdf, info.W, info.H, j.w, j.h, ww, wh, j.w, j.h)
+	for i, s := range sizes {
+		if math.Abs(s[0]-ww) > pdfQuantum || math.Abs(s[1]-wh) > pdfQuantum {
+			return fmt.Errorf("%s: PDF page %d is %gx%g pt, not the %dx%d CSS px (%gx%g pt) asked for; give the page `@page { size: %dpx %dpx; margin: 0 }`",
+				j.pdf, i+1, s[0], s[1], j.w, j.h, ww, wh, j.w, j.h)
+		}
 	}
 	return nil
 }
