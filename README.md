@@ -70,14 +70,15 @@ sha256, in `$XDG_CACHE_HOME/plate/render/` (`~/.cache/plate/render/` when
 that is unset); a new plate build, `SOURCE_DATE_EPOCH` or
 `PLATE_ENGINE_CHROME_HEADLESS_SHELL` also misses. A remote page, or one that
 loads anything from another host, always renders. System fonts, the clock,
-the locale and a different Chrome at the same override path are not
-tracked: after changing one, pass `--force`.
+the locale, the installed ImageMagick and poppler versions and a different
+Chrome at the same override path are not tracked: after changing one, pass
+`--force`.
 
 `build` reads a manifest, one target per line, `#` starting a comment:
 
 ```
 # name  page        WxH       scale  outputs  [option...]
-flyer   flyer.html  794x1123  2      pdf,png  blank-margin=23
+flyer   flyer.html  792x1120  2      pdf,png  blank-margin=23
 ```
 
 The page is relative to the manifest and may carry a `?query`; each output
@@ -123,7 +124,9 @@ lossless alpha.
 `render` runs the page outside Chrome's sandbox with open network access. A
 local page, and any script it runs, including one loaded from the network,
 can read any file you can by absolute path through plate's proxy; a remote
-page cannot. Give it only pages you trust.
+page cannot. The proxy listens on loopback for the render's duration, so
+another account on the machine could reach it too. Give it only pages you
+trust.
 
 ⚠ These commands create pixels the source never had. A project that forbids
 this puts `synthesis = "forbid"` in a `plate.toml`, and they refuse to run.
