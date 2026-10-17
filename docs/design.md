@@ -23,8 +23,8 @@ wrapping it would add nothing; a resize down for the web goes through
 ```
 main.go              dispatch
 internal/<op>/       one package per command (cutout, inpaint, infill, upscale,
-                     grade, render, build, press, pdf, doc, slides, shrink,
-                     diff, fonts, qr, doctor)
+                     grade, render, build, press, pdf, impose, doc, slides,
+                     shrink, diff, fonts, qr, doctor)
 internal/cli/        flag, exit-code and error conventions every command shares
 internal/engine/     the one way an external tool is run
 internal/atomicfile/ a file written whole or not at all: a temp file beside it, renamed
@@ -146,7 +146,7 @@ colours, or renders what it is given.
 - **upscale** — DAT ×4 over the normalised frame in overlapping tiles
   (internal/ml/scripts/upscale.py); alpha, which the model does not take, is
   enlarged separately.
-- **inpaint, fonts, qr, pdf, doc, slides** — as the README table and each package's
+- **inpaint, fonts, qr, pdf, impose, doc, slides** — as the README table and each package's
   doc comment describe.
 
 ## Platforms and errors
