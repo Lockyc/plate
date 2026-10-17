@@ -221,9 +221,6 @@ func Run(ctx context.Context, o Options, warn io.Writer) (Result, error) {
 	if local == "" {
 		return Result{Outcome: Uncacheable, Reason: "remote page"}, nil
 	}
-	for i := range hashes {
-		hashes[i].Path = outs[i]
-	}
 	r, why := newRecord(loads, local, hashes)
 	if why != "" {
 		return Result{Outcome: Uncacheable, Reason: why, Inputs: loads.paths()}, nil
@@ -381,8 +378,8 @@ func (j job) inputs() []string {
 }
 
 // run renders the page and returns everything it loaded, the union of every
-// Chrome call, and the sha256 of each output it wrote, in PNG, PDF, HTML
-// order. A local page is served through a loopback proxy for the length of
+// Chrome call, and the sha256 of each output it wrote under its absolute
+// destination. A local page is served through a loopback proxy for the length of
 // the run so each load is recorded; a remote page goes to Chrome directly
 // and loads nothing local.
 //
@@ -488,7 +485,11 @@ func (j job) run(ctx context.Context) (_ loadSet, _ []fileHash, err error) {
 		if o.scratch {
 			continue
 		}
-		h := fileHash{o.dest, hashFile(o.tmp)}
+		abs, err := filepath.Abs(o.dest)
+		if err != nil {
+			return loads(), nil, err
+		}
+		h := fileHash{abs, hashFile(o.tmp)}
 		if h.SHA256 == "" {
 			return loads(), nil, fmt.Errorf("%s vanished before it could be moved to %s", o.tmp, o.dest)
 		}
