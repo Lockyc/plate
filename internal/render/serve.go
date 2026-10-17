@@ -45,6 +45,8 @@ type server struct {
 
 	mu                  sync.Mutex
 	files, missing, ext map[string]bool
+	tunnels             map[net.Conn]bool // hijacked CONNECT conns, which http.Server.Close leaves open
+	closed              bool
 }
 
 // serve starts the proxy on an ephemeral loopback port.
@@ -58,14 +60,42 @@ func serve() (*server, error) {
 		files:   map[string]bool{},
 		missing: map[string]bool{},
 		ext:     map[string]bool{},
+		tunnels: map[net.Conn]bool{},
 	}
 	s.srv = &http.Server{Handler: s}
 	go s.srv.Serve(ln)
 	return s, nil
 }
 
-// Close stops the proxy and drops its open connections.
-func (s *server) Close() { s.srv.Close() }
+// Close stops the proxy and drops its open connections, CONNECT tunnels
+// included.
+func (s *server) Close() {
+	s.srv.Close()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.closed = true
+	for c := range s.tunnels {
+		c.Close()
+	}
+}
+
+// track registers a tunnel conn for Close; false when the server is already
+// closed.
+func (s *server) track(c net.Conn) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return false
+	}
+	s.tunnels[c] = true
+	return true
+}
+
+func (s *server) untrack(c net.Conn) {
+	s.mu.Lock()
+	delete(s.tunnels, c)
+	s.mu.Unlock()
+}
 
 // proxyFlag is the Chrome flag that routes the page through the proxy. The
 // matching --proxy-bypass-list=<-loopback> is the caller's: without it Chrome
@@ -183,8 +213,15 @@ func (s *server) tunnel(w http.ResponseWriter, r *http.Request) {
 		up.Close()
 		return
 	}
+	if !s.track(down) {
+		down.Close()
+		up.Close()
+		return
+	}
+	defer s.untrack(down)
 	down.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n"))
 	go func() { io.Copy(up, down); up.Close() }()
 	io.Copy(down, up)
 	down.Close()
+	up.Close()
 }

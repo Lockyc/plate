@@ -55,7 +55,9 @@ func (m *multi) String() string     { return strings.Join(*m, ", ") }
 func (m *multi) Set(s string) error { *m = append(*m, s); return nil }
 
 type job struct {
-	url, local  string
+	url, local  string // url is the remote page, or the file URL before run swaps in the proxied one
+	query       string // the local page's "?…", kept
+	proxy       string // the --proxy-server flag, set by run for a local page
 	png, pdf    string
 	html        string
 	transparent bool
@@ -113,12 +115,12 @@ func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 			}
 		}
 	}
-	u, local, err := pageURL(rest[0])
+	u, local, query, err := pageURL(rest[0])
 	if err != nil {
 		return cli.Fail(stderr, "render", err)
 	}
-	j.url, j.local = u, local
-	if err := j.run(ctx); err != nil {
+	j.url, j.local, j.query = u, local, query
+	if _, err := j.run(ctx); err != nil {
 		return cli.Fail(stderr, "render", err)
 	}
 	return 0
@@ -127,11 +129,12 @@ func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 // PDF renders the page at path (a file or URL) to a PDF at out, under the
 // checks `plate render --pdf` runs. warn receives its warnings.
 func PDF(ctx context.Context, page, out string, warn io.Writer) error {
-	u, local, err := pageURL(page)
+	u, local, query, err := pageURL(page)
 	if err != nil {
 		return err
 	}
-	return job{url: u, local: local, pdf: out, scale: 1, budget: defaultBudget, warn: warn}.run(ctx)
+	_, err = job{url: u, local: local, query: query, pdf: out, scale: 1, budget: defaultBudget, warn: warn}.run(ctx)
+	return err
 }
 
 // PNG renders the page at path (a file or URL) to a w×h CSS px PNG at out,
@@ -140,11 +143,12 @@ func PNG(ctx context.Context, page, out string, w, h int, scale float64) error {
 	if w <= 0 || h <= 0 || !(scale > 0) || math.IsInf(scale, 0) {
 		return fmt.Errorf("render %dx%d at scale %g: want a positive size and scale", w, h, scale)
 	}
-	u, local, err := pageURL(page)
+	u, local, query, err := pageURL(page)
 	if err != nil {
 		return err
 	}
-	return job{url: u, local: local, png: out, w: w, h: h, scale: scale, budget: defaultBudget, warn: io.Discard}.run(ctx)
+	_, err = job{url: u, local: local, query: query, png: out, w: w, h: h, scale: scale, budget: defaultBudget, warn: io.Discard}.run(ctx)
+	return err
 }
 
 func parseSize(s string) (int, int, error) {
@@ -157,29 +161,33 @@ func parseSize(s string) (int, int, error) {
 	return w, h, nil
 }
 
-// pageURL returns the URL Chrome loads and the local file behind it ("" for
-// http and https).
-func pageURL(arg string) (string, string, error) {
+// pageURL returns the page's URL, the local file behind it ("" for http and
+// https) and, for a file URL, its query with the "?" (a plain path has none).
+func pageURL(arg string) (string, string, string, error) {
 	if u, err := url.Parse(arg); err == nil {
 		switch u.Scheme {
 		case "http", "https":
-			return arg, "", nil
+			return arg, "", "", nil
 		case "file":
 			local := filepath.FromSlash(u.Path)
 			if _, err := os.Stat(local); err != nil {
-				return "", "", err
+				return "", "", "", err
 			}
-			return arg, local, nil
+			query := ""
+			if u.RawQuery != "" || u.ForceQuery {
+				query = "?" + u.RawQuery
+			}
+			return arg, local, query, nil
 		}
 	}
 	abs, err := filepath.Abs(arg)
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 	if _, err := os.Stat(abs); err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
-	return (&url.URL{Scheme: "file", Path: abs}).String(), abs, nil
+	return (&url.URL{Scheme: "file", Path: abs}).String(), abs, "", nil
 }
 
 // inputs lists the local page as an engine input, so the engine refuses an
@@ -191,7 +199,11 @@ func (j job) inputs() []string {
 	return []string{j.local}
 }
 
-func (j job) run(ctx context.Context) (err error) {
+// run renders the page and returns everything it loaded, the union of every
+// Chrome call. A local page is served through a loopback proxy for the length
+// of the run so each load is recorded; a remote page goes to Chrome directly
+// and loads nothing local.
+func (j job) run(ctx context.Context) (_ loadSet, err error) {
 	var outputs []string
 	for _, o := range []string{j.png, j.pdf, j.html} {
 		if o != "" {
@@ -201,7 +213,7 @@ func (j job) run(ctx context.Context) (err error) {
 	if j.local != "" {
 		for _, o := range outputs {
 			if engine.SameFile(j.local, o) {
-				return fmt.Errorf("%s is the page being rendered; write the result elsewhere", o)
+				return loadSet{}, fmt.Errorf("%s is the page being rendered; write the result elsewhere", o)
 			}
 		}
 	}
@@ -209,7 +221,7 @@ func (j job) run(ctx context.Context) (err error) {
 	// earlier render may sit beside a fresh one.
 	for _, o := range outputs {
 		if err := os.Remove(o); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return err
+			return loadSet{}, err
 		}
 	}
 	defer func() {
@@ -219,31 +231,55 @@ func (j job) run(ctx context.Context) (err error) {
 			}
 		}
 	}()
+	var srv *server
+	if j.local != "" {
+		if srv, err = serve(); err != nil {
+			return loadSet{}, err
+		}
+		defer srv.Close()
+		j.url = plateURL(j.local, j.query)
+		j.proxy = srv.proxyFlag()
+	}
+	loads := func() loadSet {
+		if srv == nil {
+			return loadSet{}
+		}
+		return srv.loads()
+	}
 	if j.png != "" {
 		if err := j.screenshot(ctx); err != nil {
-			return err
+			return loads(), err
 		}
 	}
 	if j.pdf != "" {
 		if err := j.print(ctx); err != nil {
-			return err
+			return loads(), err
 		}
 	}
 	if j.html != "" {
 		if err := j.dump(ctx); err != nil {
-			return err
+			return loads(), err
 		}
 	}
-	return nil
+	return loads(), nil
 }
 
 // base is every Chrome call's flags. Never --user-data-dir: with it,
 // headless Chrome hangs after writing the screenshot. --virtual-time-budget
 // fast-forwards timers only on chrome-headless-shell, which is why that is
 // the pinned engine and not full Chrome.
+//
+// A local page is an http page on plate's proxy, so there is no
+// --allow-file-access-from-files: it would only let a remote page read local
+// files. Chrome skips a proxy for loopback hosts unless told otherwise, so
+// the bypass list is emptied of them.
 func (j job) base() []string {
-	return []string{"--headless", "--disable-gpu", "--no-sandbox", "--allow-file-access-from-files",
+	args := []string{"--headless", "--disable-gpu", "--no-sandbox",
 		"--hide-scrollbars", "--virtual-time-budget=" + strconv.Itoa(j.budget)}
+	if j.proxy != "" {
+		args = append(args, j.proxy, "--proxy-bypass-list=<-loopback>")
+	}
+	return args
 }
 
 func (j job) screenshot(ctx context.Context) error {
@@ -301,14 +337,24 @@ func (j job) print(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	args := append(j.base(), "--no-pdf-header-footer", "--print-to-pdf="+j.pdf, j.url)
-	if _, err := engine.Run(ctx, engine.Cmd{Engine: chrome, Args: args, Inputs: j.inputs(), Outputs: []string{j.pdf}, Timeout: 15 * time.Minute}); err != nil {
+	args := append(j.base(), "--no-pdf-header-footer", "--print-to-pdf="+j.pdf)
+	if len(j.failIf) > 0 {
+		// The DOM comes from the same load the PDF prints. Attribute
+		// markers never reach the PDF's text, so the text alone cannot see
+		// them.
+		args = append(args, "--dump-dom")
+	}
+	res, err := engine.Run(ctx, engine.Cmd{Engine: chrome, Args: append(args, j.url), Inputs: j.inputs(), Outputs: []string{j.pdf}, Timeout: 15 * time.Minute})
+	if err != nil {
 		return err
 	}
 	if err := pdf.PinDates(j.pdf, stamp); err != nil {
 		return err
 	}
 	if len(j.failIf) > 0 {
+		if err := sentinel(string(res.Stdout), j.failIf); err != nil {
+			return err
+		}
 		text, err := pdf.Text(ctx, j.pdf)
 		if err != nil {
 			return err

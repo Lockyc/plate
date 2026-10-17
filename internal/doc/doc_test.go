@@ -12,13 +12,14 @@ import (
 	"github.com/lockyc/plate/internal/enginetest"
 )
 
-// chromeStub writes the PDF and copies the page it was given (a file URL,
-// the last argument) to $CAPTURE.
+// chromeStub writes the PDF and fetches the page it was given (the last
+// argument, served by plate's proxy) to $CAPTURE.
 const chromeStub = `for a in "$@"; do
   case "$a" in --print-to-pdf=*) printf '%%PDF-1.4 stub' > "${a#--print-to-pdf=}" ;; esac
+  case "$a" in --proxy-server=*) proxy=${a#--proxy-server=} ;; esac
   page=$a
 done
-cp "${page#file://}" "$CAPTURE"`
+curl -s -x "$proxy" -o "$CAPTURE" "$page"`
 
 // pandocStub writes a standalone page to the path after -o.
 const pandocStub = `while [ "$1" != "-o" ]; do shift; done

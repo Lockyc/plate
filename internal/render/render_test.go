@@ -21,7 +21,11 @@ const chromeStub = `for a in "$@"; do
     --screenshot=*) [ -n "$FIXTURE_PNG" ] && cp "$FIXTURE_PNG" "${a#--screenshot=}" ;;
     --print-to-pdf=*) printf '%%PDF-1.4 stub' > "${a#--print-to-pdf=}" ;;
     --dump-dom) printf '%s' "$FIXTURE_DOM" ;;
+    --proxy-server=*) proxy="${a#--proxy-server=}" ;;
   esac
+done
+for p in $FIXTURE_LOADS; do
+  [ -n "$proxy" ] && curl -s -o /dev/null -x "$proxy" "http://plate.invalid$p"
 done
 exit ${CHROME_EXIT:-0}`
 
@@ -72,7 +76,7 @@ func TestRenderPNG(t *testing.T) {
 	if len(calls) != 1 || slices.Contains(calls[0], "--dump-dom") {
 		t.Fatalf("chrome calls %q, want 1 without --dump-dom (no --fail-if)", calls)
 	}
-	for _, want := range []string{"--window-size=100,50", "--force-device-scale-factor=2", "--virtual-time-budget=5000", "--hide-scrollbars", "--allow-file-access-from-files"} {
+	for _, want := range []string{"--window-size=100,50", "--force-device-scale-factor=2", "--virtual-time-budget=5000", "--hide-scrollbars", "--proxy-bypass-list=<-loopback>"} {
 		if !slices.Contains(calls[0], want) {
 			t.Errorf("chrome args lack %s: %q", want, calls[0])
 		}
@@ -259,24 +263,24 @@ func TestPageURLEscapes(t *testing.T) {
 	os.MkdirAll(dir, 0o755)
 	p := filepath.Join(dir, "page.html")
 	os.WriteFile(p, nil, 0o644)
-	got, _, err := pageURL(p)
+	got, _, _, err := pageURL(p)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.HasPrefix(got, "file:///") || !strings.Contains(got, "a%20b%23c%25d/page.html") {
 		t.Errorf("pageURL = %q", got)
 	}
-	if u, l, _ := pageURL("https://example.org/x"); l != "" || u != "https://example.org/x" {
+	if u, l, _, _ := pageURL("https://example.org/x"); l != "" || u != "https://example.org/x" {
 		t.Errorf("https URL rewritten to %q", u)
 	}
-	if _, _, err := pageURL(filepath.Join(t.TempDir(), "missing.html")); err == nil {
+	if _, _, _, err := pageURL(filepath.Join(t.TempDir(), "missing.html")); err == nil {
 		t.Error("missing page accepted")
 	}
-	if u, l, err := pageURL(got); err != nil || l != p {
+	if u, l, _, err := pageURL(got); err != nil || l != p {
 		t.Errorf("file URL to an existing page: %q, %q, %v", u, l, err)
 	}
 	missing := (&url.URL{Scheme: "file", Path: filepath.Join(t.TempDir(), "typo.html")}).String()
-	if _, _, err := pageURL(missing); err == nil {
+	if _, _, _, err := pageURL(missing); err == nil {
 		t.Error("file URL to a missing page accepted")
 	}
 }
@@ -388,5 +392,118 @@ func TestRenderTransparentNeedsPNG(t *testing.T) {
 	}
 	if len(enginetest.Calls(t, e.chrome)) != 0 {
 		t.Error("chrome ran")
+	}
+}
+
+func chromeArgs(t *testing.T, e *env) []string {
+	t.Helper()
+	calls := enginetest.Calls(t, e.chrome)
+	if len(calls) == 0 {
+		t.Fatal("chrome never ran")
+	}
+	return calls[0]
+}
+
+func TestRenderLoadsRecorded(t *testing.T) {
+	e := setup(t, 1, 1)
+	css := filepath.Join(e.dir, "a.css")
+	os.WriteFile(css, []byte("body{}"), 0o644)
+	t.Setenv("FIXTURE_LOADS", css+" "+filepath.Join(e.dir, "nope.js"))
+	u, local, query, err := pageURL(e.page)
+	if err != nil {
+		t.Fatal(err)
+	}
+	j := job{url: u, local: local, query: query, pdf: e.out("p.pdf"), scale: 1, budget: defaultBudget, warn: &e.stderr}
+	got, err := j.run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(got.Files, []string{css}) || !slices.Equal(got.Missing, []string{filepath.Join(e.dir, "nope.js")}) {
+		t.Errorf("loads = %+v", got)
+	}
+}
+
+func TestRenderLoadsRealPathOfAwkwardDir(t *testing.T) {
+	e := setup(t, 1, 1)
+	dir := filepath.Join(e.dir, "a b%c")
+	os.MkdirAll(dir, 0o755)
+	page := filepath.Join(dir, "page.html")
+	css := filepath.Join(dir, "x.css")
+	os.WriteFile(page, []byte("<html></html>"), 0o644)
+	os.WriteFile(css, []byte("body{}"), 0o644)
+	t.Setenv("FIXTURE_LOADS", "/"+strings.TrimPrefix((&url.URL{Path: css}).EscapedPath(), "/"))
+	u, local, query, err := pageURL(page)
+	if err != nil {
+		t.Fatal(err)
+	}
+	j := job{url: u, local: local, query: query, pdf: e.out("p.pdf"), scale: 1, budget: defaultBudget, warn: &e.stderr}
+	got, err := j.run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(got.Files, []string{css}) || len(got.Missing) != 0 {
+		t.Errorf("loads = %+v, want Files [%s]", got, css)
+	}
+}
+
+func TestRenderNoFileAccessFlag(t *testing.T) {
+	e := setup(t, 1, 1)
+	if code := e.run("--pdf", e.out("p.pdf"), e.page); code != 0 {
+		t.Fatalf("code %d: %s", code, e.stderr.String())
+	}
+	args := chromeArgs(t, e)
+	if !slices.Contains(args, "--proxy-bypass-list=<-loopback>") {
+		t.Errorf("no proxy bypass list: %q", args)
+	}
+	if !slices.ContainsFunc(args, func(a string) bool { return strings.HasPrefix(a, "--proxy-server=http://127.0.0.1:") }) {
+		t.Errorf("no proxy server: %q", args)
+	}
+	if slices.Contains(args, "--allow-file-access-from-files") {
+		t.Errorf("file access flag still passed: %q", args)
+	}
+}
+
+func TestRenderPDFFailIfReadsDOM(t *testing.T) {
+	e := setup(t, 1, 1)
+	t.Setenv("FIXTURE_DOM", `<html><p data-source-error="yes">x</p></html>`)
+	t.Setenv("PDF_TEXT", "fine")
+	if code := e.run("--pdf", e.out("p.pdf"), "--fail-if", `data-source-error="yes"`, e.page); code != 1 {
+		t.Fatalf("code %d", code)
+	}
+	if !strings.Contains(e.stderr.String(), `data-source-error=\"yes\"`) || exists(e.out("p.pdf")) {
+		t.Errorf("stderr %q, pdf left: %v", e.stderr.String(), exists(e.out("p.pdf")))
+	}
+	if calls := enginetest.Calls(t, e.chrome); len(calls) != 1 || !slices.Contains(calls[0], "--dump-dom") {
+		t.Errorf("chrome calls %q, want one print that also dumps the DOM", calls)
+	}
+}
+
+func TestRenderPageURLIsPlateOrigin(t *testing.T) {
+	e := setup(t, 1, 1)
+	arg := (&url.URL{Scheme: "file", Path: e.page, RawQuery: "x=1"}).String()
+	if code := e.run("--pdf", e.out("p.pdf"), arg); code != 0 {
+		t.Fatalf("code %d: %s", code, e.stderr.String())
+	}
+	args := chromeArgs(t, e)
+	last := args[len(args)-1]
+	if !strings.HasPrefix(last, "http://plate.invalid/") || !strings.HasSuffix(last, "page.html?x=1") {
+		t.Errorf("page URL = %q", last)
+	}
+}
+
+func TestRenderRemotePageSkipsProxy(t *testing.T) {
+	e := setup(t, 1, 1)
+	j := job{url: "https://example.org/x", pdf: e.out("p.pdf"), scale: 1, budget: defaultBudget, warn: &e.stderr}
+	got, err := j.run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Files)+len(got.Missing)+len(got.External) != 0 {
+		t.Errorf("loads = %+v", got)
+	}
+	for _, a := range chromeArgs(t, e) {
+		if strings.HasPrefix(a, "--proxy") {
+			t.Errorf("remote page given %s", a)
+		}
 	}
 }

@@ -1,8 +1,11 @@
 package render
 
 import (
+	"bufio"
 	"errors"
+	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -10,6 +13,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 // proxied returns a client that sends everything through srv and refuses to
@@ -126,5 +130,44 @@ func TestServerNoExtensionIsSniffed(t *testing.T) {
 	resp.Body.Close()
 	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "text/plain") {
 		t.Errorf("Content-Type = %q", ct)
+	}
+}
+
+func TestServerCloseDropsTunnels(t *testing.T) {
+	up, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer up.Close()
+	go func() {
+		for {
+			c, err := up.Accept()
+			if err != nil {
+				return
+			}
+			defer c.Close()
+		}
+	}()
+	srv, err := serve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn, err := net.Dial("tcp", strings.TrimPrefix(srv.proxyFlag(), "--proxy-server=http://"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	fmt.Fprintf(conn, "CONNECT %s HTTP/1.1\r\nHost: %s\r\n\r\n", up.Addr(), up.Addr())
+	br := bufio.NewReader(conn)
+	if line, err := br.ReadString('\n'); err != nil || !strings.Contains(line, "200") {
+		t.Fatalf("CONNECT reply %q, %v", line, err)
+	}
+	if blank, _ := br.ReadString('\n'); blank != "\r\n" {
+		t.Fatalf("reply headers end in %q", blank)
+	}
+	srv.Close()
+	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if _, err := br.ReadByte(); err == nil || errors.Is(err, os.ErrDeadlineExceeded) {
+		t.Errorf("tunnel still open after Close: %v", err)
 	}
 }
