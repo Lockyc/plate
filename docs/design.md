@@ -125,7 +125,9 @@ colours, or renders what it is given.
   `render.Validate` before anything renders, and runs `render.Run` on up to
   `--jobs` workers, logging in manifest order (`build.ParseManifest`). A
   target whose `render.Result.Inputs` holds another target's output fails
-  (`build.loadsOutput`).
+  (`build.loadsOutput`). A `2up` target's sheet is `impose.Run` on its
+  PDF, written when the PDF rendered or the sheet is missing or older
+  (`build.twoUp`).
 - **press** — Ghostscript pdfwrite with outlined text, CMYK conversion to a
   supplied ICC, fixed media from the input's page box, and images downsampled
   only above 1.5 × `--max-ppi`. It then checks the result has no fonts, no

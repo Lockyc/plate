@@ -86,10 +86,13 @@ flyer   flyer.html  792x1120  2      pdf,png  blank-margin=23
 The page is relative to the manifest and may carry a `?query`; each output
 (`pdf`, `png`, `jpeg`, `html`) goes to `--out`, by default `dist` beside the
 manifest, as `name.pdf`, `name.png`, `name.jpg` or `name.html`. The options
-are `blank-margin=PX`, `transparent`, `budget=MS` and `quality=Q`. Naming
-targets renders only those. It logs `rendered NAME`, `rendered NAME (not
-cached: REASON)`, `unchanged NAME` or `failed NAME: ERROR` for each target
-in manifest order, then a count. Targets render in parallel, so a target
+are `blank-margin=PX`, `transparent`, `budget=MS`, `quality=Q` and `2up`,
+which imposes the target's PDF onto `name-2up-a4.pdf` as `impose --force`
+does (the PDF must be an A5 front and back). Naming targets renders only
+those. It logs `rendered NAME`, `rendered NAME (not cached: REASON)`,
+`unchanged NAME` or `failed NAME: ERROR` for each target in manifest order,
+with `imposed NAME-2up-a4.pdf` after a target whose sheet was written, then
+a count. Targets render in parallel, so a target
 that loads another target's output fails. A failed target exits 1, and so does an
 unreadable manifest; an invalid manifest line or an unknown target name
 exits 2 before anything renders.
