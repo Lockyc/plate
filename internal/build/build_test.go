@@ -251,3 +251,15 @@ func TestBuildRefusesLoadingAnotherOutput(t *testing.T) {
 		t.Errorf("render: code %d, stderr %q", code, e.stderr.String())
 	}
 }
+
+// Go's flag package stops at the first positional argument, so a flag
+// after the manifest arrives as a target name.
+func TestBuildFlagAfterManifest(t *testing.T) {
+	e := setup(t, "a")
+	if code := e.run(e.manifest, "--force"); code != 2 || !strings.Contains(e.stderr.String(), "--force: flags go before the manifest") {
+		t.Errorf("code %d, stderr %q", code, e.stderr.String())
+	}
+	if len(enginetest.Calls(t, e.chrome)) != 0 {
+		t.Error("chrome ran")
+	}
+}

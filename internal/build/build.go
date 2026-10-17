@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	"github.com/lockyc/plate/internal/cli"
 	"github.com/lockyc/plate/internal/engine"
@@ -142,7 +143,8 @@ func loadsOutput(t Target, inputs []string, all []Target) error {
 }
 
 // selectTargets is the targets named, in manifest order, or every target
-// when none is named.
+// when none is named. An unknown name starting "-" is a flag given after
+// the manifest, where the flag package takes it as a name.
 func selectTargets(all []Target, names []string, path string) ([]Target, error) {
 	if len(names) == 0 {
 		return all, nil
@@ -159,6 +161,9 @@ func selectTargets(all []Target, names []string, path string) ([]Target, error) 
 		}
 	}
 	for _, n := range names {
+		if want[n] && strings.HasPrefix(n, "-") {
+			return nil, fmt.Errorf("%s: flags go before the manifest", n)
+		}
 		if want[n] {
 			return nil, fmt.Errorf("no target %q in %s", n, path)
 		}
