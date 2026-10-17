@@ -388,14 +388,14 @@ func TestMainReportsUnchanged(t *testing.T) {
 func TestCacheJPEGOnlyRecordsJPEG(t *testing.T) {
 	e := cacheEnv(t)
 	enginetest.Stub(t, "magick", magickStub)
-	o := Options{Page: e.page, JPEG: e.out("p.jpg"), Quality: 90, W: 100, H: 50, Scale: 2, Budget: defaultBudget}
+	o := Options{Page: e.page, JPEG: e.out("p.jpg"), Quality: ptr(90), W: 100, H: 50, Scale: 2, Budget: defaultBudget}
 	if e.render(t, o) {
 		t.Fatal("first render skipped")
 	}
 	if !e.render(t, o) {
 		t.Error("second render not skipped")
 	}
-	o.Quality = 80
+	o.Quality = ptr(80)
 	if e.render(t, o) {
 		t.Error("a changed --quality skipped on the old record")
 	}
@@ -404,7 +404,7 @@ func TestCacheJPEGOnlyRecordsJPEG(t *testing.T) {
 func TestCacheDeletedJPEGRerenders(t *testing.T) {
 	e := cacheEnv(t)
 	enginetest.Stub(t, "magick", magickStub)
-	o := Options{Page: e.page, JPEG: e.out("p.jpg"), Quality: 90, W: 100, H: 50, Scale: 2, Budget: defaultBudget}
+	o := Options{Page: e.page, JPEG: e.out("p.jpg"), Quality: ptr(90), W: 100, H: 50, Scale: 2, Budget: defaultBudget}
 	e.render(t, o)
 	os.Remove(o.JPEG)
 	if e.render(t, o) {
@@ -412,5 +412,18 @@ func TestCacheDeletedJPEGRerenders(t *testing.T) {
 	}
 	if !exists(o.JPEG) {
 		t.Error("JPEG not rewritten")
+	}
+}
+
+func ptr(n int) *int { return &n }
+
+func TestCacheKeyQualityDefaultEqualsExplicit(t *testing.T) {
+	e := cacheEnv(t)
+	enginetest.Stub(t, "magick", magickStub)
+	o := Options{Page: e.page, JPEG: e.out("p.jpg"), W: 100, H: 50, Scale: 2, Budget: defaultBudget}
+	e.render(t, o)
+	o.Quality = ptr(defaultQuality)
+	if !e.render(t, o) {
+		t.Error("an explicit default --quality missed the record of the implicit one")
 	}
 }

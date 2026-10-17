@@ -46,6 +46,9 @@ const (
 // defaultBudget is --budget's default, in ms.
 const defaultBudget = 5000
 
+// defaultQuality is --quality's default.
+const defaultQuality = 90
+
 // pdfQuantum is how far, in pt, Chrome's PDF page may sit from the size
 // asked for: it rounds page sizes to multiples of 8 CSS px (6 pt).
 const pdfQuantum = 6.0
@@ -76,7 +79,7 @@ type Options struct {
 	Page           string
 	PNG, PDF, HTML string
 	JPEG           string // the PNG screenshot converted by ImageMagick; needs a size
-	Quality        int    // the JPEG's quality, 1–100; 0 only when there is no JPEG
+	Quality        *int   // the JPEG's quality, 1–100; nil is defaultQuality
 	W, H           int
 	Scale          float64
 	Budget         int
@@ -113,10 +116,10 @@ func (o Options) validate() error {
 	if o.Transparent && o.PNG == "" {
 		return usageError("--transparent needs --png")
 	}
-	if o.JPEG == "" && o.Quality != 0 {
+	if o.JPEG == "" && o.Quality != nil {
 		return usageError("--quality needs --jpeg")
 	}
-	if o.JPEG != "" && (o.Quality < 1 || o.Quality > 100) {
+	if o.JPEG != "" && o.Quality != nil && (*o.Quality < 1 || *o.Quality > 100) {
 		return usageError("--quality must be between 1 and 100")
 	}
 	if o.JPEG != "" && o.W == 0 {
@@ -156,11 +159,15 @@ func Run(ctx context.Context, o Options, warn io.Writer) (Result, error) {
 	if err := o.validate(); err != nil {
 		return Result{}, err
 	}
+	if o.JPEG != "" && o.Quality == nil {
+		q := defaultQuality
+		o.Quality = &q
+	}
 	u, local, query, err := pageURL(o.Page)
 	if err != nil {
 		return Result{}, err
 	}
-	j := job{url: u, local: local, query: query, png: o.PNG, pdf: o.PDF, html: o.HTML, jpeg: o.JPEG, quality: o.Quality, transparent: o.Transparent,
+	j := job{url: u, local: local, query: query, png: o.PNG, pdf: o.PDF, html: o.HTML, jpeg: o.JPEG, quality: qualityOf(o), transparent: o.Transparent,
 		w: o.W, h: o.H, scale: o.Scale, budget: o.Budget, failIf: o.FailIf, warn: warn}
 	cacheWarn := func(err error) { fmt.Fprintf(warn, "plate render: warning: render cache: %v\n", err) }
 	page := u
@@ -234,7 +241,7 @@ func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	pdfOut := fs.String("pdf", "", "write a PDF here")
 	htmlOut := fs.String("html", "", "write the page's DOM here once scripts settle (a static copy with every script's work done)")
 	jpegOut := fs.String("jpeg", "", "write the screenshot as a JPEG here (needs --size); the PNG is kept only with --png")
-	quality := cli.Int(fs, "quality", 90, "JPEG quality, 1–100 (needs --jpeg)")
+	quality := cli.Int(fs, "quality", defaultQuality, "JPEG quality, 1–100 (needs --jpeg)")
 	transparent := fs.Bool("transparent", false, "give the PNG an alpha channel, with the page's transparent areas left transparent rather than white")
 	size := fs.String("size", "", "viewport and expected page size in CSS px, WxH (required with --png)")
 	scale := cli.Float(fs, "scale", 1, "device scale factor; the PNG is size × scale px at 96 × scale dpi")
@@ -252,21 +259,12 @@ func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	}
 	o := Options{Page: rest[0], PNG: *pngOut, PDF: *pdfOut, HTML: *htmlOut, JPEG: *jpegOut, Transparent: *transparent,
 		Scale: *scale, Budget: *budget, FailIf: failIf, Force: *force}
-	// The default quality belongs to a JPEG; an explicit --quality is passed
-	// on either way so Run can refuse it without --jpeg.
-	if o.JPEG != "" {
-		o.Quality = *quality
-	}
-	qualitySet := false
+	// An explicit --quality is passed as given; validate and Run own the rules and the default.
 	fs.Visit(func(f *flag.Flag) {
 		if f.Name == "quality" {
-			qualitySet = true
-			o.Quality = *quality
+			o.Quality = quality
 		}
 	})
-	if qualitySet && (o.JPEG == "" || *quality < 1 || *quality > 100) {
-		return usageErr("--quality needs --jpeg and a value from 1 to 100")
-	}
 	if *size != "" {
 		w, h, err := parseSize(*size)
 		if err != nil {
@@ -675,4 +673,13 @@ func sentinel(text string, failIf []string) error {
 		}
 	}
 	return nil
+}
+
+// qualityOf is the JPEG quality of o after Run has applied the default, 0
+// when there is no JPEG.
+func qualityOf(o Options) int {
+	if o.Quality == nil {
+		return 0
+	}
+	return *o.Quality
 }
