@@ -2,6 +2,8 @@ package render
 
 import (
 	"bufio"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -59,8 +61,50 @@ func TestServerServesFileAndRecords(t *testing.T) {
 	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "text/css") {
 		t.Errorf("Content-Type = %q", ct)
 	}
-	if got := srv.loads().Files; !reflect.DeepEqual(got, []string{p}) {
+	if got := srv.loads().Files; !reflect.DeepEqual(got, map[string]string{p: sumOf("body{}")}) {
 		t.Errorf("Files = %v", got)
+	}
+}
+
+func sumOf(s string) string {
+	sum := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(sum[:])
+}
+
+// A file served twice with different bytes in one run has no one hash that
+// says what was rendered.
+func TestServerUnstable(t *testing.T) {
+	tmp := t.TempDir()
+	p := filepath.Join(tmp, "a.css")
+	gone := filepath.Join(tmp, "b.css")
+	srv := startServer(t)
+	c := proxied(t, srv)
+	get := func(p string) {
+		resp, err := c.Get(PlateURL(p, ""))
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+	}
+	os.WriteFile(p, []byte("one"), 0o644)
+	get(p)
+	get(p)
+	if srv.loads().Unstable {
+		t.Fatal("the same bytes twice marked unstable")
+	}
+	os.WriteFile(p, []byte("two"), 0o644)
+	get(p)
+	if l := srv.loads(); !l.Unstable || l.Files[p] != sumOf("two") {
+		t.Errorf("loads = %+v, want unstable", l)
+	}
+
+	srv = startServer(t)
+	c = proxied(t, srv)
+	get(gone)
+	os.WriteFile(gone, []byte("now"), 0o644)
+	get(gone)
+	if !srv.loads().Unstable {
+		t.Error("a path both missing and served not marked unstable")
 	}
 }
 
@@ -100,7 +144,7 @@ func TestServerKeepsQuery(t *testing.T) {
 	if resp.StatusCode != 200 {
 		t.Fatalf("status %d", resp.StatusCode)
 	}
-	if got := srv.loads().Files; !reflect.DeepEqual(got, []string{p}) {
+	if got := srv.loads().Files; !reflect.DeepEqual(got, map[string]string{p: sumOf("<p>x")}) {
 		t.Errorf("Files = %v", got)
 	}
 }

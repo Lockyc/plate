@@ -1,7 +1,11 @@
 package render
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"io"
+	"maps"
 	"mime"
 	"net"
 	"net/http"
@@ -26,10 +30,18 @@ func PlateURL(local, query string) string {
 	return "http://" + plateHost + (&url.URL{Path: local}).EscapedPath() + query
 }
 
-// loadSet is everything a page asked for, each list sorted and deduplicated:
-// Files are local files that were served, Missing are paths that were not
-// there (or were directories), External are hosts the page reached out to.
-type loadSet struct{ Files, Missing, External []string }
+// loadSet is everything a page asked for, each list sorted and deduplicated.
+// Files maps each local file that was served to the sha256 of the bytes
+// served, hashed as they went out: a file edited after Chrome read it is
+// recorded as Chrome saw it, not as it ended up. Missing are paths that were
+// not there (or were directories), External are hosts the page reached out
+// to. Unstable is set when one path was served with two contents, or was both
+// served and missing, so no single set of bytes describes what was rendered.
+type loadSet struct {
+	Files             map[string]string
+	Missing, External []string
+	Unstable          bool
+}
 
 // server is a loopback HTTP proxy that Chrome is pointed at for the length
 // of one render. It exists so plate sees every file the page loads, which is
@@ -43,10 +55,12 @@ type server struct {
 	ln  net.Listener
 	srv *http.Server
 
-	mu                  sync.Mutex
-	files, missing, ext map[string]bool
-	tunnels             map[net.Conn]bool // hijacked CONNECT conns, which http.Server.Close leaves open
-	closed              bool
+	mu           sync.Mutex
+	files        map[string]string // path → sha256 of the bytes served
+	missing, ext map[string]bool
+	unstable     bool
+	tunnels      map[net.Conn]bool // hijacked CONNECT conns, which http.Server.Close leaves open
+	closed       bool
 }
 
 // serve starts the proxy on an ephemeral loopback port.
@@ -57,7 +71,7 @@ func serve() (*server, error) {
 	}
 	s := &server{
 		ln:      ln,
-		files:   map[string]bool{},
+		files:   map[string]string{},
 		missing: map[string]bool{},
 		ext:     map[string]bool{},
 		tunnels: map[net.Conn]bool{},
@@ -116,13 +130,33 @@ func (s *server) loads() loadSet {
 		sort.Strings(out)
 		return out
 	}
-	return loadSet{Files: keys(s.files), Missing: keys(s.missing), External: keys(s.ext)}
+	return loadSet{Files: maps.Clone(s.files), Missing: keys(s.missing), External: keys(s.ext), Unstable: s.unstable}
 }
 
 func (s *server) note(m map[string]bool, k string) {
 	s.mu.Lock()
 	m[k] = true
 	s.mu.Unlock()
+}
+
+// served records that p went out with sha256 sum.
+func (s *server) served(p, sum string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if old, ok := s.files[p]; (ok && old != sum) || s.missing[p] {
+		s.unstable = true
+	}
+	s.files[p] = sum
+}
+
+// absent records that p was asked for and not there.
+func (s *server) absent(p string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.files[p]; ok {
+		s.unstable = true
+	}
+	s.missing[p] = true
 }
 
 func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -145,31 +179,43 @@ func (s *server) file(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p := filepath.Clean(r.URL.Path)
-	fi, err := os.Stat(p)
-	if err != nil || !fi.Mode().IsRegular() {
-		s.note(s.missing, p)
+	data, mod, ok := readRegular(p)
+	if !ok {
+		s.absent(p)
 		http.NotFound(w, r)
 		return
 	}
-	f, err := os.Open(p)
-	if err != nil {
-		s.note(s.missing, p)
-		http.NotFound(w, r)
-		return
-	}
-	defer f.Close()
+	sum := sha256.Sum256(data)
+	s.served(p, hex.EncodeToString(sum[:]))
 	ct := mime.TypeByExtension(filepath.Ext(p))
 	if ct == "" {
-		var head [512]byte
-		n, _ := io.ReadFull(f, head[:])
-		ct = http.DetectContentType(head[:n])
-		f.Seek(0, io.SeekStart)
+		ct = http.DetectContentType(data)
 	}
-	s.note(s.files, p)
 	w.Header().Set("Content-Type", ct)
-	// ServeContent adds Last-Modified and ranges; with Content-Type set it
-	// never sniffs and never redirects.
-	http.ServeContent(w, r, "", fi.ModTime(), f)
+	// The bytes hashed are the bytes served. ServeContent adds Last-Modified
+	// and ranges; with Content-Type set it never sniffs and never redirects.
+	http.ServeContent(w, r, "", mod, bytes.NewReader(data))
+}
+
+// readRegular reads p whole when it is a regular file; false when it is
+// absent, not a regular file, or unreadable. The server and the cache's
+// check both judge a path through it, so a path the server called missing
+// still hashes as absent when the record is checked.
+func readRegular(p string) ([]byte, time.Time, bool) {
+	f, err := os.Open(p)
+	if err != nil {
+		return nil, time.Time{}, false
+	}
+	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil || !fi.Mode().IsRegular() {
+		return nil, time.Time{}, false
+	}
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return nil, time.Time{}, false
+	}
+	return data, fi.ModTime(), true
 }
 
 // forward relays a request for any other host and records the host.

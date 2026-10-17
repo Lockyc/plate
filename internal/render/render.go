@@ -28,7 +28,7 @@ import (
 	"github.com/lockyc/plate/internal/raster"
 )
 
-const usage = "render [--png out.png [--transparent]] [--pdf out.pdf] [--html out.html] [--size WxH] [--scale S] [--budget MS] [--fail-if TEXT]... <page.html|URL>"
+const usage = "render [--png out.png [--transparent]] [--pdf out.pdf] [--html out.html] [--size WxH] [--scale S] [--budget MS] [--fail-if TEXT]... [--force] <page.html|URL>"
 
 const chrome = "chrome-headless-shell"
 
@@ -68,6 +68,120 @@ type job struct {
 	warn        io.Writer
 }
 
+// Options is one render: the page (a path, a file URL that may carry a
+// query, or an http(s) URL), its outputs and the flags that shape them.
+type Options struct {
+	Page           string
+	PNG, PDF, HTML string
+	W, H           int
+	Scale          float64
+	Budget         int
+	FailIf         []string
+	Transparent    bool
+	Force          bool // render even when the cache says nothing changed
+}
+
+// usageError is a wrong combination of options, which Main reports with the
+// usage line and exit status 2.
+type usageError string
+
+func (e usageError) Error() string { return string(e) }
+
+// outputs lists o's outputs in flag order, PNG, PDF then HTML.
+func (o Options) outputs() []string {
+	var out []string
+	for _, p := range []string{o.PNG, o.PDF, o.HTML} {
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+func (o Options) validate() error {
+	if len(o.outputs()) == 0 {
+		return usageError("give --png, --pdf, --html or a combination")
+	}
+	if o.Transparent && o.PNG == "" {
+		return usageError("--transparent needs --png")
+	}
+	if o.W < 0 || o.H < 0 || (o.W == 0) != (o.H == 0) {
+		return usageError("--size wants WxH, both above 0")
+	}
+	if o.PNG != "" && o.W == 0 {
+		return usageError("--png needs --size")
+	}
+	if math.IsNaN(o.Scale) || math.IsInf(o.Scale, 0) || o.Scale <= 0 || o.Budget < 0 {
+		return usageError("--scale must be a finite number above 0 and --budget not below 0")
+	}
+	for _, p := range [][2]string{{"png", o.PNG}, {"pdf", o.PDF}, {"html", o.HTML}} {
+		for _, q := range [][2]string{{"png", o.PNG}, {"pdf", o.PDF}, {"html", o.HTML}} {
+			if p[0] < q[0] && p[1] != "" && q[1] != "" && engine.SameFile(p[1], q[1]) {
+				return usageError("--" + p[0] + " and --" + q[0] + " name the same file")
+			}
+		}
+	}
+	return nil
+}
+
+// Run renders o through the render cache: when the record of its last
+// success still matches every file it loaded and every file it wrote, the
+// render is skipped without starting Chrome and skipped is true. Force
+// renders regardless and still records. A remote page, a page that reached
+// another host, or a file that changed while it was served leaves no
+// record, so it renders every time. The old record goes before Chrome
+// starts, so a render that fails or is killed never leaves one behind.
+//
+// Only the CLI goes through Run; the library entry points PDF and PNG stay
+// uncached.
+func Run(ctx context.Context, o Options, warn io.Writer) (skipped bool, err error) {
+	if err := o.validate(); err != nil {
+		return false, err
+	}
+	u, local, query, err := pageURL(o.Page)
+	if err != nil {
+		return false, err
+	}
+	j := job{url: u, local: local, query: query, png: o.PNG, pdf: o.PDF, html: o.HTML, transparent: o.Transparent,
+		w: o.W, h: o.H, scale: o.Scale, budget: o.Budget, failIf: o.FailIf, warn: warn}
+	page := u
+	if local != "" {
+		page = PlateURL(local, query)
+	}
+	key, err := cacheKey(o, page)
+	if err != nil {
+		// No key, no record to trust or keep: render uncached.
+		_, err := j.run(ctx)
+		return false, err
+	}
+	var outs []string
+	for _, p := range o.outputs() {
+		abs, err := filepath.Abs(p)
+		if err != nil {
+			return false, err
+		}
+		outs = append(outs, abs)
+	}
+	if local != "" && !o.Force {
+		if r, ok := loadRecord(key); ok && r.writes(outs) && r.current() {
+			return true, nil
+		}
+	}
+	if err := dropRecord(key); err != nil {
+		fmt.Fprintf(warn, "plate render: warning: render cache: %v\n", err)
+	}
+	loads, err := j.run(ctx)
+	if err != nil || local == "" {
+		return false, err
+	}
+	if r, ok := newRecord(loads, local, outs); ok {
+		if err := saveRecord(key, r); err != nil {
+			fmt.Fprintf(warn, "plate render: warning: render cache: %v\n", err)
+		}
+	}
+	return false, nil
+}
+
 // Main runs `plate render`.
 func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := cli.Flags("render", usage, stderr)
@@ -80,48 +194,33 @@ func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	budget := cli.Int(fs, "budget", defaultBudget, "virtual-time budget in ms for scripts, fonts and images to settle")
 	var failIf multi
 	fs.Var(&failIf, "fail-if", "fail when `TEXT` appears in the page: its markup (dumped DOM) for --png, its extracted text for --pdf (repeatable)")
+	force := fs.Bool("force", false, "render even when nothing the page loaded and no output has changed since its last success")
 	rest, code, ok := cli.Parse(fs, args, 1)
 	if !ok {
 		return code
 	}
-	j := job{png: *pngOut, pdf: *pdfOut, html: *htmlOut, transparent: *transparent, scale: *scale, budget: *budget, failIf: failIf, warn: stderr}
 	usageErr := func(msg string) int {
 		defer fs.Usage()
 		return cli.Usage(stderr, "render", "%s", msg)
 	}
-	if j.png == "" && j.pdf == "" && j.html == "" {
-		return usageErr("give --png, --pdf, --html or a combination")
-	}
-	if j.transparent && j.png == "" {
-		return usageErr("--transparent needs --png")
-	}
+	o := Options{Page: rest[0], PNG: *pngOut, PDF: *pdfOut, HTML: *htmlOut, Transparent: *transparent,
+		Scale: *scale, Budget: *budget, FailIf: failIf, Force: *force}
 	if *size != "" {
 		w, h, err := parseSize(*size)
 		if err != nil {
 			return usageErr(err.Error())
 		}
-		j.w, j.h = w, h
+		o.W, o.H = w, h
 	}
-	if j.png != "" && j.w == 0 {
-		return usageErr("--png needs --size")
+	skipped, err := Run(ctx, o, stderr)
+	if ue := usageError(""); errors.As(err, &ue) {
+		return usageErr(ue.Error())
 	}
-	if math.IsNaN(j.scale) || math.IsInf(j.scale, 0) || j.scale <= 0 || j.budget < 0 {
-		return usageErr("--scale must be a finite number above 0 and --budget not below 0")
-	}
-	for _, p := range [][2]string{{"png", j.png}, {"pdf", j.pdf}, {"html", j.html}} {
-		for _, q := range [][2]string{{"png", j.png}, {"pdf", j.pdf}, {"html", j.html}} {
-			if p[0] < q[0] && p[1] != "" && q[1] != "" && engine.SameFile(p[1], q[1]) {
-				return usageErr("--" + p[0] + " and --" + q[0] + " name the same file")
-			}
-		}
-	}
-	u, local, query, err := pageURL(rest[0])
 	if err != nil {
 		return cli.Fail(stderr, "render", err)
 	}
-	j.url, j.local, j.query = u, local, query
-	if _, err := j.run(ctx); err != nil {
-		return cli.Fail(stderr, "render", err)
+	if skipped {
+		fmt.Fprintf(stderr, "plate render: unchanged: %s\n", o.outputs()[0])
 	}
 	return 0
 }

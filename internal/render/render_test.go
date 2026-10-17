@@ -5,6 +5,7 @@ import (
 	"context"
 	"image"
 	"image/png"
+	"maps"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -27,9 +28,17 @@ done
 page=
 for a in "$@"; do page=$a; done
 [ -n "$proxy" ] && curl -s -o /dev/null -x "$proxy" "$page"
-for p in $FIXTURE_LOADS; do
-  [ -n "$proxy" ] && curl -s -o /dev/null -x "$proxy" "http://plate.invalid$p"
+load() {
+  for p in $FIXTURE_LOADS; do
+    [ -n "$proxy" ] && curl -s -o /dev/null -x "$proxy" "http://plate.invalid$p"
+  done
+}
+load
+for u in $FIXTURE_URLS; do
+  [ -n "$proxy" ] && curl -s -o /dev/null -x "$proxy" "$u"
 done
+[ -n "$FIXTURE_AFTER" ] && sh -c "$FIXTURE_AFTER"
+[ -n "$FIXTURE_RELOAD" ] && load
 exit ${CHROME_EXIT:-0}`
 
 func fixturePNG(t *testing.T, w, h int) string {
@@ -421,7 +430,7 @@ func TestRenderLoadsRecorded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(got.Files, []string{css, e.page}) || !slices.Equal(got.Missing, []string{filepath.Join(e.dir, "nope.js")}) {
+	if !slices.Equal(slices.Sorted(maps.Keys(got.Files)), []string{css, e.page}) || !slices.Equal(got.Missing, []string{filepath.Join(e.dir, "nope.js")}) {
 		t.Errorf("loads = %+v", got)
 	}
 }
@@ -444,7 +453,7 @@ func TestRenderLoadsRealPathOfAwkwardDir(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(got.Files, []string{page, css}) || len(got.Missing) != 0 {
+	if !slices.Equal(slices.Sorted(maps.Keys(got.Files)), []string{page, css}) || len(got.Missing) != 0 {
 		t.Errorf("loads = %+v, want Files [%s %s]", got, page, css)
 	}
 }
