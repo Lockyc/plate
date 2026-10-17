@@ -23,8 +23,8 @@ wrapping it would add nothing; a resize down for the web goes through
 ```
 main.go              dispatch
 internal/<op>/       one package per command (cutout, inpaint, infill, upscale,
-                     grade, render, press, pdf, doc, slides, shrink, diff,
-                     fonts, qr, doctor)
+                     grade, render, build, press, pdf, doc, slides, shrink,
+                     diff, fonts, qr, doctor)
 internal/cli/        flag, exit-code and error conventions every command shares
 internal/engine/     the one way an external tool is run
 internal/atomicfile/ a file written whole or not at all: a temp file beside it, renamed
@@ -101,17 +101,28 @@ colours, or renders what it is given.
   values has its own `--despill-*` flag, which overrides the preset.
   `--height` sets the working size, and it must never be smaller than the
   largest size the cut-out will be drawn at.
-- **render** — refuses a PNG beyond the largest size verified whole on the
-  pinned engine (`render.maxSide`), since Chrome has cut large screenshots
-  short with exit 0; checks the PNG is exactly size × scale. It warns when a
-  PDF page size is not a multiple of 8 CSS px, which Chrome's PDF backend
-  rounds to, and fails when the PDF's page box does not match `--size` (no
-  matching `@page` prints Letter). It deletes stale outputs first, stamps the
-  PNG's pHYs at 96 × scale DPI, and fails if the page text contains a
-  `--fail-if` string: dumped DOM for PNG and HTML, `pdftotext` for PDF.
-  `--html` judges Chrome's output by content, not exit status: a dump ending
-  in `</html>` is whole, since Chrome's teardown watchdog can exit non-zero
-  after writing the full page (`engine.Cmd.AllowExit`).
+- **render** — a local page loads from `render.plateHost` through a
+  loopback proxy (`render.server`) that records each file it serves, with the
+  sha256 of the bytes sent, and each path that was absent; other hosts are
+  forwarded and recorded. Those loads are the cache's inputs: a successful
+  render writes a `render.record` under `$XDG_CACHE_HOME/plate/render/`, named
+  by `render.cacheKey`, and the next run with that key skips Chrome while
+  every input and output keeps its hash. A remote page or an external load is
+  never cached, nor are `render.PDF` and `render.PNG`. Each output is written,
+  checked and hashed under a temp name beside it, then renamed in. The checks:
+  a PNG beyond `render.maxSide` is refused, since Chrome has cut large
+  screenshots short with exit 0, and must be exactly size × scale, pHYs at
+  96 × scale DPI; a PDF page size off a multiple of 8 CSS px warns, which
+  Chrome's PDF backend rounds to, and a page box unlike `--size` fails (no
+  matching `@page` prints Letter); a `--fail-if` string in the dumped DOM, or
+  a PDF's `pdftotext`, fails; so does ink in the `--blank-margin` band
+  (`render.checkMargin`). `--jpeg` converts the same screenshot. `--html`
+  judges Chrome's output by content: a dump ending in `</html>` is whole,
+  since Chrome's teardown watchdog can exit non-zero after writing the full
+  page (`engine.Cmd.AllowExit`).
+- **build** — parses a manifest into `render.Options`, each checked by
+  `render.Validate` before anything renders, and runs `render.Run` on up to
+  `--jobs` workers, logging in manifest order (`build.ParseManifest`).
 - **press** — Ghostscript pdfwrite with outlined text, CMYK conversion to a
   supplied ICC, fixed media from the input's page box, and images downsampled
   only above 1.5 × `--max-ppi`. It then checks the result has no fonts, no
