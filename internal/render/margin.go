@@ -25,7 +25,9 @@ const (
 const inkBelow = 0.99 * 65535
 
 // checkMargin returns the sides of img whose outermost band px hold ink, in
-// the order top, bottom, left, right.
+// the order top, bottom, left, right. The band is the device pixels lying
+// wholly inside the margin (the floor of the margin in device px), so the
+// anti-aliased row of content placed exactly at the margin's edge is not ink.
 func checkMargin(img image.Image, band int) []string {
 	b := img.Bounds()
 	if band > b.Dx() {
@@ -40,7 +42,16 @@ func checkMargin(img image.Image, band int) []string {
 	inked := func(x0, y0, x1, y1 int) bool {
 		for y := y0; y < y1; y++ {
 			for x := x0; x < x1; x++ {
-				r, g, bl, a := img.At(x, y).RGBA()
+				var r, g, bl, a uint32
+				if p, ok := img.(*image.RGBA64); ok {
+					i := p.PixOffset(x, y)
+					r = uint32(p.Pix[i])<<8 | uint32(p.Pix[i+1])
+					g = uint32(p.Pix[i+2])<<8 | uint32(p.Pix[i+3])
+					bl = uint32(p.Pix[i+4])<<8 | uint32(p.Pix[i+5])
+					a = uint32(p.Pix[i+6])<<8 | uint32(p.Pix[i+7])
+				} else {
+					r, g, bl, a = img.At(x, y).RGBA()
+				}
 				// The values are premultiplied: adding the missing alpha
 				// composites the pixel on white.
 				w := 65535 - float64(a)
@@ -84,7 +95,7 @@ func (j job) checkMargins(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		band := int(math.Round(float64(j.blankMargin) * marginDPI / cssDPI))
+		band := j.blankMargin * marginDPI / cssDPI
 		for i, p := range pages {
 			img, err := raster.Load(p)
 			if err != nil {
@@ -99,7 +110,7 @@ func (j job) checkMargins(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		found = checkMargin(img, int(math.Round(float64(j.blankMargin)*j.scale)))
+		found = checkMargin(img, int(math.Floor(float64(j.blankMargin)*j.scale+1e-9)))
 	}
 	if len(found) > 0 {
 		return fmt.Errorf("ink in the %dpx blank margin: %s", j.blankMargin, strings.Join(found, ", "))

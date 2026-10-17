@@ -122,3 +122,22 @@ func TestCacheKeyIncludesBlankMargin(t *testing.T) {
 		t.Error("a new --blank-margin skipped on the old record")
 	}
 }
+
+func TestCheckMarginBandIsFloor(t *testing.T) {
+	// 23 CSS px at 150 dpi is 35.94 device px: the band is 35, so row 35 (the
+	// anti-aliased edge of content at the margin) passes and row 34 fails.
+	band := 23 * marginDPI / cssDPI
+	if band != 35 {
+		t.Fatalf("band %d, want 35", band)
+	}
+	img := whiteImg(300, 300)
+	img.Set(100, band, color.Gray{200})
+	if got := checkMargin(img, band); len(got) != 0 {
+		t.Errorf("ink at row %d = %v, want none", band, got)
+	}
+	img = whiteImg(300, 300)
+	img.Set(100, band-1, color.Gray{200})
+	if got := checkMargin(img, band); !slices.Equal(got, []string{"top"}) {
+		t.Errorf("ink at row %d = %v, want [top]", band-1, got)
+	}
+}
