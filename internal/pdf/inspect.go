@@ -318,3 +318,9 @@ func extractImages(ctx context.Context, in string, r pageRange, out string) (pat
 	}
 	return paths, nil
 }
+
+// RenderPages renders every page of in as a PNG at dpi into the directory
+// out, creating it if missing, and returns the paths in page order.
+func RenderPages(ctx context.Context, in, out string, dpi int) ([]string, error) {
+	return renderPages(ctx, in, pageRange{}, out, dpi)
+}

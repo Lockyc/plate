@@ -29,7 +29,7 @@ import (
 	"github.com/lockyc/plate/internal/raster"
 )
 
-const usage = "render [--png out.png [--transparent]] [--jpeg out.jpg [--quality Q]] [--pdf out.pdf] [--html out.html] [--size WxH] [--scale S] [--budget MS] [--fail-if TEXT]... [--force] <page.html|URL>"
+const usage = "render [--png out.png [--transparent]] [--jpeg out.jpg [--quality Q]] [--pdf out.pdf] [--html out.html] [--size WxH] [--scale S] [--blank-margin PX] [--budget MS] [--fail-if TEXT]... [--force] <page.html|URL>"
 
 const chrome = "chrome-headless-shell"
 
@@ -69,6 +69,7 @@ type job struct {
 	w, h        int
 	scale       float64
 	budget      int
+	blankMargin int
 	failIf      []string
 	warn        io.Writer
 }
@@ -83,6 +84,7 @@ type Options struct {
 	W, H           int
 	Scale          float64
 	Budget         int
+	BlankMargin    int // refuse ink within this many CSS px of the page edge; 0 is off
 	FailIf         []string
 	Transparent    bool
 	Force          bool // render even when the cache says nothing changed
@@ -134,6 +136,12 @@ func (o Options) validate() error {
 	if math.IsNaN(o.Scale) || math.IsInf(o.Scale, 0) || o.Scale <= 0 || o.Budget < 0 {
 		return usageError("--scale must be a finite number above 0 and --budget not below 0")
 	}
+	if o.BlankMargin < 0 {
+		return usageError("--blank-margin must not be below 0")
+	}
+	if o.BlankMargin > 0 && o.PNG == "" && o.PDF == "" && o.JPEG == "" {
+		return usageError("--blank-margin needs --png, --jpeg or --pdf: it checks a raster")
+	}
 	named := [][2]string{{"png", o.PNG}, {"pdf", o.PDF}, {"html", o.HTML}, {"jpeg", o.JPEG}}
 	for _, p := range named {
 		for _, q := range named {
@@ -168,7 +176,7 @@ func Run(ctx context.Context, o Options, warn io.Writer) (Result, error) {
 		return Result{}, err
 	}
 	j := job{url: u, local: local, query: query, png: o.PNG, pdf: o.PDF, html: o.HTML, jpeg: o.JPEG, quality: qualityOf(o), transparent: o.Transparent,
-		w: o.W, h: o.H, scale: o.Scale, budget: o.Budget, failIf: o.FailIf, warn: warn}
+		w: o.W, h: o.H, scale: o.Scale, budget: o.Budget, blankMargin: o.BlankMargin, failIf: o.FailIf, warn: warn}
 	cacheWarn := func(err error) { fmt.Fprintf(warn, "plate render: warning: render cache: %v\n", err) }
 	page := u
 	if local != "" {
@@ -248,6 +256,7 @@ func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	budget := cli.Int(fs, "budget", defaultBudget, "virtual-time budget in ms for scripts, fonts and images to settle")
 	var failIf multi
 	fs.Var(&failIf, "fail-if", "fail when `TEXT` appears in the page: its markup (dumped DOM) for --png, its extracted text for --pdf (repeatable)")
+	blankMargin := cli.Int(fs, "blank-margin", 0, "fail when ink sits within `PX` CSS px of a page edge, checked on the PDF's pages at 150 dpi or else the PNG (0 is off)")
 	force := fs.Bool("force", false, "render even when nothing the page loaded and no output has changed since its last success")
 	rest, code, ok := cli.Parse(fs, args, 1)
 	if !ok {
@@ -258,7 +267,7 @@ func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return cli.Usage(stderr, "render", "%s", msg)
 	}
 	o := Options{Page: rest[0], PNG: *pngOut, PDF: *pdfOut, HTML: *htmlOut, JPEG: *jpegOut, Transparent: *transparent,
-		Scale: *scale, Budget: *budget, FailIf: failIf, Force: *force}
+		Scale: *scale, Budget: *budget, BlankMargin: *blankMargin, FailIf: failIf, Force: *force}
 	// An explicit --quality is passed as given; validate and Run own the rules and the default.
 	fs.Visit(func(f *flag.Flag) {
 		if f.Name == "quality" {
@@ -453,6 +462,11 @@ func (j job) run(ctx context.Context) (_ loadSet, _ []fileHash, err error) {
 	}
 	if j.jpeg != "" {
 		if err := j.convert(ctx); err != nil {
+			return loads(), nil, err
+		}
+	}
+	if j.blankMargin > 0 {
+		if err := j.checkMargins(ctx); err != nil {
 			return loads(), nil, err
 		}
 	}
