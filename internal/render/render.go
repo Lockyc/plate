@@ -134,16 +134,17 @@ func (o Options) validate() error {
 //
 // Only the CLI goes through Run; the library entry points PDF and PNG stay
 // uncached.
-func Run(ctx context.Context, o Options, warn io.Writer) (skipped bool, err error) {
+func Run(ctx context.Context, o Options, warn io.Writer) (Result, error) {
 	if err := o.validate(); err != nil {
-		return false, err
+		return Result{}, err
 	}
 	u, local, query, err := pageURL(o.Page)
 	if err != nil {
-		return false, err
+		return Result{}, err
 	}
 	j := job{url: u, local: local, query: query, png: o.PNG, pdf: o.PDF, html: o.HTML, transparent: o.Transparent,
 		w: o.W, h: o.H, scale: o.Scale, budget: o.Budget, failIf: o.FailIf, warn: warn}
+	cacheWarn := func(err error) { fmt.Fprintf(warn, "plate render: warning: render cache: %v\n", err) }
 	page := u
 	if local != "" {
 		page = PlateURL(local, query)
@@ -151,35 +152,61 @@ func Run(ctx context.Context, o Options, warn io.Writer) (skipped bool, err erro
 	key, err := cacheKey(o, page)
 	if err != nil {
 		// No key, no record to trust or keep: render uncached.
-		_, err := j.run(ctx)
-		return false, err
+		cacheWarn(err)
+		if _, _, err := j.run(ctx); err != nil {
+			return Result{}, err
+		}
+		return Result{Uncacheable, "no cache key: " + err.Error()}, nil
 	}
 	var outs []string
 	for _, p := range o.outputs() {
 		abs, err := filepath.Abs(p)
 		if err != nil {
-			return false, err
+			return Result{}, err
 		}
 		outs = append(outs, abs)
 	}
 	if local != "" && !o.Force {
 		if r, ok := loadRecord(key); ok && r.writes(outs) && r.current() {
-			return true, nil
+			return Result{Outcome: Unchanged}, nil
 		}
 	}
 	if err := dropRecord(key); err != nil {
-		fmt.Fprintf(warn, "plate render: warning: render cache: %v\n", err)
+		cacheWarn(err)
 	}
-	loads, err := j.run(ctx)
-	if err != nil || local == "" {
-		return false, err
+	loads, hashes, err := j.run(ctx)
+	if err != nil {
+		return Result{}, err
 	}
-	if r, ok := newRecord(loads, local, outs); ok {
-		if err := saveRecord(key, r); err != nil {
-			fmt.Fprintf(warn, "plate render: warning: render cache: %v\n", err)
-		}
+	if local == "" {
+		return Result{Uncacheable, "remote page"}, nil
 	}
-	return false, nil
+	for i := range hashes {
+		hashes[i].Path = outs[i]
+	}
+	r, why := newRecord(loads, local, hashes)
+	if why != "" {
+		return Result{Uncacheable, why}, nil
+	}
+	if err := saveRecord(key, r); err != nil {
+		cacheWarn(err)
+	}
+	return Result{Outcome: Rendered}, nil
+}
+
+// Outcome is what Run did with a render that succeeded.
+type Outcome int
+
+const (
+	Rendered    Outcome = iota // rendered, and recorded for next time
+	Unchanged                  // skipped: nothing it loaded or wrote has changed
+	Uncacheable                // rendered, but no record can vouch for it; Result.Reason says why
+)
+
+// Result is Run's outcome, with the reason when it is Uncacheable.
+type Result struct {
+	Outcome Outcome
+	Reason  string
 }
 
 // Main runs `plate render`.
@@ -212,14 +239,14 @@ func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		}
 		o.W, o.H = w, h
 	}
-	skipped, err := Run(ctx, o, stderr)
+	res, err := Run(ctx, o, stderr)
 	if ue := usageError(""); errors.As(err, &ue) {
 		return usageErr(ue.Error())
 	}
 	if err != nil {
 		return cli.Fail(stderr, "render", err)
 	}
-	if skipped {
+	if res.Outcome == Unchanged {
 		fmt.Fprintf(stderr, "plate render: unchanged: %s\n", o.outputs()[0])
 	}
 	return 0
@@ -232,7 +259,7 @@ func PDF(ctx context.Context, page, out string, warn io.Writer) error {
 	if err != nil {
 		return err
 	}
-	_, err = job{url: u, local: local, query: query, pdf: out, scale: 1, budget: defaultBudget, warn: warn}.run(ctx)
+	_, _, err = job{url: u, local: local, query: query, pdf: out, scale: 1, budget: defaultBudget, warn: warn}.run(ctx)
 	return err
 }
 
@@ -246,7 +273,7 @@ func PNG(ctx context.Context, page, out string, w, h int, scale float64) error {
 	if err != nil {
 		return err
 	}
-	_, err = job{url: u, local: local, query: query, png: out, w: w, h: h, scale: scale, budget: defaultBudget, warn: io.Discard}.run(ctx)
+	_, _, err = job{url: u, local: local, query: query, png: out, w: w, h: h, scale: scale, budget: defaultBudget, warn: io.Discard}.run(ctx)
 	return err
 }
 
@@ -299,41 +326,62 @@ func (j job) inputs() []string {
 }
 
 // run renders the page and returns everything it loaded, the union of every
-// Chrome call. A local page is served through a loopback proxy for the length
-// of the run so each load is recorded; a remote page goes to Chrome directly
+// Chrome call, and the sha256 of each output it wrote, in PNG, PDF, HTML
+// order. A local page is served through a loopback proxy for the length of
+// the run so each load is recorded; a remote page goes to Chrome directly
 // and loads nothing local.
-func (j job) run(ctx context.Context) (_ loadSet, err error) {
-	var outputs []string
-	for _, o := range []string{j.png, j.pdf, j.html} {
-		if o != "" {
-			outputs = append(outputs, o)
+//
+// Each output is written and checked under a temporary name beside its
+// destination, hashed there, and only then renamed into place. The hash is
+// therefore of this render's bytes even when another writer (a parallel
+// target with the same output) lands on the destination meanwhile; hashing
+// the destination afterwards would record that writer's bytes under this
+// render's key.
+func (j job) run(ctx context.Context) (_ loadSet, _ []fileHash, err error) {
+	type output struct {
+		slot      *string // the job field, pointed at tmp while the stages run
+		dest, tmp string
+	}
+	var outputs []output
+	for _, p := range []*string{&j.png, &j.pdf, &j.html} {
+		if *p != "" {
+			outputs = append(outputs, output{slot: p, dest: *p})
 		}
 	}
 	if j.local != "" {
 		for _, o := range outputs {
-			if engine.SameFile(j.local, o) {
-				return loadSet{}, fmt.Errorf("%s is the page being rendered; write the result elsewhere", o)
+			if engine.SameFile(j.local, o.dest) {
+				return loadSet{}, nil, fmt.Errorf("%s is the page being rendered; write the result elsewhere", o.dest)
 			}
 		}
 	}
-	// Both outputs go first: whichever stage fails, no stale file from an
+	// Every output goes first: whichever stage fails, no stale file from an
 	// earlier render may sit beside a fresh one.
 	for _, o := range outputs {
-		if err := os.Remove(o); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return loadSet{}, err
+		if err := os.Remove(o.dest); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return loadSet{}, nil, err
 		}
 	}
 	defer func() {
-		if err != nil {
-			for _, o := range outputs {
-				os.Remove(o)
+		for _, o := range outputs {
+			if o.tmp != "" {
+				os.Remove(o.tmp)
+			}
+			if err != nil {
+				os.Remove(o.dest)
 			}
 		}
 	}()
+	for i := range outputs {
+		if outputs[i].tmp, err = tempName(outputs[i].dest); err != nil {
+			return loadSet{}, nil, err
+		}
+		*outputs[i].slot = outputs[i].tmp
+	}
 	var srv *server
 	if j.local != "" {
 		if srv, err = serve(); err != nil {
-			return loadSet{}, err
+			return loadSet{}, nil, err
 		}
 		defer srv.Close()
 		j.url = PlateURL(j.local, j.query)
@@ -347,20 +395,49 @@ func (j job) run(ctx context.Context) (_ loadSet, err error) {
 	}
 	if j.png != "" {
 		if err := j.screenshot(ctx); err != nil {
-			return loads(), err
+			return loads(), nil, err
 		}
 	}
 	if j.pdf != "" {
 		if err := j.print(ctx); err != nil {
-			return loads(), err
+			return loads(), nil, err
 		}
 	}
 	if j.html != "" {
 		if err := j.dump(ctx); err != nil {
-			return loads(), err
+			return loads(), nil, err
 		}
 	}
-	return loads(), nil
+	hashes := make([]fileHash, len(outputs))
+	for i, o := range outputs {
+		hashes[i] = fileHash{o.dest, hashFile(o.tmp)}
+		if hashes[i].SHA256 == "" {
+			return loads(), nil, fmt.Errorf("%s vanished before it could be moved to %s", o.tmp, o.dest)
+		}
+	}
+	for _, o := range outputs {
+		if err := os.Rename(o.tmp, o.dest); err != nil {
+			return loads(), nil, err
+		}
+	}
+	return loads(), hashes, nil
+}
+
+// tempName is an unused name beside dest, keeping its extension, for an
+// output to be written under before it is moved into place. The name is
+// reserved and then freed, so the writer creates the file with its usual
+// mode rather than CreateTemp's 0600.
+func tempName(dest string) (string, error) {
+	ext := filepath.Ext(dest)
+	if strings.Contains(ext, "*") {
+		ext = ""
+	}
+	f, err := os.CreateTemp(filepath.Dir(dest), ".plate-*"+ext)
+	if err != nil {
+		return "", err
+	}
+	f.Close()
+	return f.Name(), os.Remove(f.Name())
 }
 
 // base is every Chrome call's flags. Never --user-data-dir: with it,

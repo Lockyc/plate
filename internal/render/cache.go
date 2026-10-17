@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 
 	"github.com/lockyc/plate/internal/atomicfile"
@@ -194,15 +195,19 @@ func dropRecord(key string) error {
 }
 
 // newRecord builds the record for a successful render of the local page
-// that loaded l and wrote outputs; false when the render cannot be cached:
-// it reached another host, a file changed while it was served, or the page
-// itself was never served, so nothing says which bytes it rendered.
-func newRecord(l loadSet, page string, outputs []string) (record, bool) {
-	if len(l.External) > 0 || l.Unstable {
-		return record{}, false
+// that loaded l and wrote outputs, hashed by the render itself. When the
+// render cannot be cached it returns why instead: it reached another host,
+// a file changed while it was served, or the page itself was never served,
+// so nothing says which bytes it rendered.
+func newRecord(l loadSet, page string, outputs []fileHash) (record, string) {
+	if len(l.External) > 0 {
+		return record{}, "loads " + strings.Join(l.External, ", ")
+	}
+	if l.Unstable {
+		return record{}, "a file changed while it rendered"
 	}
 	if _, ok := l.Files[page]; !ok {
-		return record{}, false
+		return record{}, "the page was never served"
 	}
 	var r record
 	for p, sum := range l.Files {
@@ -212,12 +217,6 @@ func newRecord(l loadSet, page string, outputs []string) (record, bool) {
 		r.Inputs = append(r.Inputs, fileHash{p, ""})
 	}
 	slices.SortFunc(r.Inputs, func(a, b fileHash) int { return cmp.Compare(a.Path, b.Path) })
-	for _, p := range outputs {
-		sum := hashFile(p)
-		if sum == "" {
-			return record{}, false
-		}
-		r.Outputs = append(r.Outputs, fileHash{p, sum})
-	}
-	return r, true
+	r.Outputs = outputs
+	return r, ""
 }

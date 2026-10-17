@@ -3,6 +3,8 @@ package render
 import (
 	"context"
 	"encoding/json"
+	"image"
+	"image/png"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,21 +22,90 @@ func cacheEnv(t *testing.T) *env {
 	t.Setenv("FIXTURE_LOADS", "")
 	t.Setenv("FIXTURE_URLS", "")
 	t.Setenv("FIXTURE_AFTER", "")
+	t.Setenv("FIXTURE_RELOAD", "")
+	// The key reads these; the caller's environment must not leak in. The
+	// chrome override is already the test's own stub.
+	t.Setenv("SOURCE_DATE_EPOCH", "")
 	return e
+}
+
+// Another writer lands its bytes on the output path while this render runs,
+// as a parallel target with the same --png would. The render's own bytes end
+// up at the path, and the record names their hash, never the other
+// writer's: otherwise the next run would call the other render "unchanged".
+func TestCacheRecordsOwnOutput(t *testing.T) {
+	e := cacheEnv(t)
+	o := e.pngOpts()
+	other := filepath.Join(t.TempDir(), "other.png")
+	f, _ := os.Create(other)
+	img := image.NewRGBA(image.Rect(0, 0, 200, 100))
+	for i := range img.Pix {
+		img.Pix[i] = 255
+	}
+	png.Encode(f, img)
+	f.Close()
+	t.Setenv("FIXTURE_AFTER", "cp '"+other+"' '"+o.PNG+"'")
+	e.render(t, o)
+	got, err := os.Open(o.PNG)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := png.Decode(got)
+	got.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, a := m.At(0, 0).RGBA(); a != 0 {
+		t.Fatal("the output holds the other writer's image, not this render's")
+	}
+	recs := records(t)
+	if len(recs) != 1 {
+		t.Fatalf("records %q", recs)
+	}
+	b, _ := os.ReadFile(recs[0])
+	var r record
+	json.Unmarshal(b, &r)
+	if len(r.Outputs) != 1 || r.Outputs[0].SHA256 != hashFile(o.PNG) {
+		t.Errorf("record outputs %+v, want this render's hash %s", r.Outputs, hashFile(o.PNG))
+	}
+	if left, _ := filepath.Glob(filepath.Join(e.dir, ".plate-*")); len(left) != 0 {
+		t.Errorf("temporary files left: %q", left)
+	}
+}
+
+// A failed render leaves neither its output nor a temporary file.
+func TestCacheFailureLeavesNoTemp(t *testing.T) {
+	e := cacheEnv(t)
+	t.Setenv("CHROME_EXIT", "1")
+	if _, err := Run(context.Background(), e.pngOpts(), &e.stderr); err == nil {
+		t.Fatal("render succeeded")
+	}
+	if left, _ := filepath.Glob(filepath.Join(e.dir, "*.png")); len(left) != 0 {
+		t.Errorf("left %q", left)
+	}
+	if left, _ := filepath.Glob(filepath.Join(e.dir, ".plate-*")); len(left) != 0 {
+		t.Errorf("temporary files left: %q", left)
+	}
 }
 
 func (e *env) pngOpts() Options {
 	return Options{Page: e.page, PNG: e.out("p.png"), W: 100, H: 50, Scale: 2, Budget: defaultBudget}
 }
 
-// render runs o through Run and fails the test on an error.
+// render runs o through Run, fails the test on an error, and reports
+// whether the render was skipped as unchanged.
 func (e *env) render(t *testing.T, o Options) bool {
 	t.Helper()
-	skipped, err := Run(context.Background(), o, &e.stderr)
+	return e.result(t, o).Outcome == Unchanged
+}
+
+func (e *env) result(t *testing.T, o Options) Result {
+	t.Helper()
+	res, err := Run(context.Background(), o, &e.stderr)
 	if err != nil {
 		t.Fatalf("Run: %v (stderr %q)", err, e.stderr.String())
 	}
-	return skipped
+	return res
 }
 
 func (e *env) calls(t *testing.T) int {
@@ -61,8 +132,8 @@ func write(t *testing.T, p, s string) {
 
 func TestCacheSecondRunSkips(t *testing.T) {
 	e := cacheEnv(t)
-	if e.render(t, e.pngOpts()) {
-		t.Fatal("first run skipped")
+	if res := e.result(t, e.pngOpts()); res != (Result{Outcome: Rendered}) {
+		t.Fatalf("first run %+v, want Rendered", res)
 	}
 	if !e.render(t, e.pngOpts()) {
 		t.Error("second identical run rendered")
@@ -180,7 +251,9 @@ func TestCacheForce(t *testing.T) {
 func TestCacheExternalNotCached(t *testing.T) {
 	e := cacheEnv(t)
 	t.Setenv("FIXTURE_URLS", "http://example.invalid/")
-	e.render(t, e.pngOpts())
+	if res := e.result(t, e.pngOpts()); res != (Result{Uncacheable, "loads example.invalid"}) {
+		t.Errorf("result %+v", res)
+	}
 	if e.render(t, e.pngOpts()) {
 		t.Error("a render with an external load skipped")
 	}
@@ -189,7 +262,9 @@ func TestCacheExternalNotCached(t *testing.T) {
 func TestCacheRemotePageNotCached(t *testing.T) {
 	e := cacheEnv(t)
 	o := Options{Page: "https://example.org/x", PDF: e.out("p.pdf"), Scale: 1, Budget: defaultBudget}
-	e.render(t, o)
+	if res := e.result(t, o); res != (Result{Uncacheable, "remote page"}) {
+		t.Errorf("result %+v", res)
+	}
 	if e.render(t, o) {
 		t.Error("a remote page skipped")
 	}
@@ -247,7 +322,9 @@ func TestCacheUnstableInputNotCached(t *testing.T) {
 	// The stub loads FIXTURE_LOADS, runs FIXTURE_AFTER, then loads them again.
 	t.Setenv("FIXTURE_AFTER", "printf 'body{color:red}' > '"+css+"'")
 	t.Setenv("FIXTURE_RELOAD", "1")
-	e.render(t, e.pngOpts())
+	if res := e.result(t, e.pngOpts()); res != (Result{Uncacheable, "a file changed while it rendered"}) {
+		t.Errorf("result %+v", res)
+	}
 	t.Setenv("FIXTURE_AFTER", "")
 	t.Setenv("FIXTURE_RELOAD", "")
 	if e.render(t, e.pngOpts()) {
