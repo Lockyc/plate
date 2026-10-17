@@ -52,6 +52,19 @@ func TestCompareFindsShift(t *testing.T) {
 	}
 }
 
+// Every shift of two blank images scores 0%; the smallest one wins, so the
+// compared rows are the whole height.
+func TestCompareTiesPreferNoShift(t *testing.T) {
+	a := image.NewRGBA64(image.Rect(0, 0, 50, 200))
+	res, _, rows, err := Compare(a, a, 28, 60, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Shift != 0 || rows.Dy() != 200 {
+		t.Fatalf("Compare = %+v over %v, want shift 0 over all 200 rows", res, rows)
+	}
+}
+
 func TestCompareScoresChange(t *testing.T) {
 	a := noise(100, 100, 2)
 	b := image.NewRGBA64(a.Bounds())

@@ -91,7 +91,8 @@ func Compare(a, b *image.RGBA64, tol uint8, maxShift, step int) (Result, *image.
 			}
 		}
 		pct := 100 * float64(n) / float64(w*(bottom-top))
-		if best.Percent < 0 || pct < best.Percent {
+		// A tie goes to the smaller shift, which compares more rows.
+		if best.Percent < 0 || pct < best.Percent || pct == best.Percent && max(shift, -shift) < max(best.Shift, -best.Shift) {
 			best, bestTop, bestBottom = Result{Percent: pct, Shift: shift}, top, bottom
 		}
 	}
