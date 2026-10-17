@@ -112,6 +112,13 @@ independently of phase 5. Within a phase, order is open.
   case has many small holes on a large scan. Unlock: a `quality/` case of
   scattered specks on a large frame with its peak memory recorded, then
   per-component crops measured on it.
+- **diff reads pixels as stored.** It decodes in Go (`raster.Load`),
+  which ignores EXIF orientation, so a phone JPEG stored on its side
+  compared with its upright export scores as almost wholly changed. Every
+  other op reads sources upright. Deferred because its callers compare
+  renders, which carry no orientation. Unlock: a caller diffing camera
+  files, then the orientation applied in `raster.Load`, with a rotated
+  fixture in diff's tests.
 - **impose fits only A5 on A4.** Other two-up or n-up layouts (A6 four to
   an A4, DL three to an A4) and other sheets are refused. Deferred because
   the one caller prints A5 flyers. Unlock: a caller with another size, then

@@ -45,7 +45,8 @@ around plate, is the failure this rule exists to stop.
   error string.
 - **Python only for ML**, as embedded PEP 723 scripts with `exclude-newer`
   and a committed lockfile run `--locked`, model revisions pinned in
-  `internal/pins`; upstream CLIs (LaMa) through `uv tool run`.
+  `internal/pins` (or, where a library fetches the weights itself, by that
+  library's locked version); upstream CLIs (LaMa) through `uv tool run`.
 - **Portable.** No GNU-only or BSD-only flags in anything plate runs.
 - **Mark synthesis.** A command that creates pixels the source never had
   sets `synthesises` in main.go's command table, which applies the
