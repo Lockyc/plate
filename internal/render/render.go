@@ -107,10 +107,10 @@ func (o Options) validate() error {
 	if len(o.outputs()) == 0 {
 		return usageError("give --png, --jpeg, --pdf, --html or a combination")
 	}
+	if o.Transparent && o.JPEG != "" {
+		return usageError("--transparent can't be combined with --jpeg: a JPEG has no alpha channel")
+	}
 	if o.Transparent && o.PNG == "" {
-		if o.JPEG != "" {
-			return usageError("--transparent needs --png: a JPEG has no alpha channel")
-		}
 		return usageError("--transparent needs --png")
 	}
 	if o.JPEG == "" && o.Quality != 0 {
@@ -257,11 +257,16 @@ func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	if o.JPEG != "" {
 		o.Quality = *quality
 	}
+	qualitySet := false
 	fs.Visit(func(f *flag.Flag) {
 		if f.Name == "quality" {
+			qualitySet = true
 			o.Quality = *quality
 		}
 	})
+	if qualitySet && (o.JPEG == "" || *quality < 1 || *quality > 100) {
+		return usageErr("--quality needs --jpeg and a value from 1 to 100")
+	}
 	if *size != "" {
 		w, h, err := parseSize(*size)
 		if err != nil {

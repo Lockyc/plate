@@ -400,3 +400,17 @@ func TestCacheJPEGOnlyRecordsJPEG(t *testing.T) {
 		t.Error("a changed --quality skipped on the old record")
 	}
 }
+
+func TestCacheDeletedJPEGRerenders(t *testing.T) {
+	e := cacheEnv(t)
+	enginetest.Stub(t, "magick", magickStub)
+	o := Options{Page: e.page, JPEG: e.out("p.jpg"), Quality: 90, W: 100, H: 50, Scale: 2, Budget: defaultBudget}
+	e.render(t, o)
+	os.Remove(o.JPEG)
+	if e.render(t, o) {
+		t.Error("skipped with the JPEG deleted")
+	}
+	if !exists(o.JPEG) {
+		t.Error("JPEG not rewritten")
+	}
+}

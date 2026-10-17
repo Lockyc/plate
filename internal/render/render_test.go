@@ -597,3 +597,21 @@ func TestRenderJPEGFailureLeavesNothing(t *testing.T) {
 		t.Errorf("left behind: %q", left)
 	}
 }
+
+func TestRenderTransparentRefusesJPEG(t *testing.T) {
+	e := setup(t, 1, 1)
+	enginetest.Stub(t, "magick", magickStub)
+	if code := e.run("--size", "100x50", "--transparent", "--png", e.out("p.png"), "--jpeg", e.out("p.jpg"), e.page); code != 2 {
+		t.Fatalf("code %d, want 2", code)
+	}
+	if !strings.Contains(e.stderr.String(), "--transparent can't be combined with --jpeg: a JPEG has no alpha channel") {
+		t.Errorf("stderr %q", e.stderr.String())
+	}
+}
+
+func TestRenderExplicitZeroQualityNeedsJPEG(t *testing.T) {
+	e := setup(t, 1, 1)
+	if code := e.run("--size", "100x50", "--png", e.out("p.png"), "--quality", "0", e.page); code != 2 {
+		t.Errorf("code %d, want 2", code)
+	}
+}
