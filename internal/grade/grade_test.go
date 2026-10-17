@@ -12,7 +12,9 @@ import (
 	"github.com/lockyc/plate/internal/enginetest"
 )
 
-const magickStub = `if [ "$1" = identify ]; then printf '%s\n%s\n' "${IN_INFO:-False 200 100}" "${CLUT_INFO:-True 512 512}"; exit 0; fi
+// magickStub answers frame.Probe from $CLUT_INFO for h.png and $IN_INFO
+// for anything else, and otherwise writes its last argument.
+const magickStub = `case "$*" in *"%[opaque]"*) [ "$1" = h.png ] && i=${CLUT_INFO:-True 512 512} || i=${IN_INFO:-False 200 100}; printf '%s sRGB\n' "$i"; exit 0 ;; esac
 for a in "$@"; do last=$a; done
 printf png > "$last"`
 
@@ -32,10 +34,10 @@ func TestApplyKeepsAlpha(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("code %d: %s", code, stderr)
 	}
-	want := append(srgbPrefix(t, "in.png", calls[1]), "-write", "mpr:src", "-alpha", "off", "h.png", "-hald-clut",
+	want := append(srgbPrefix(t, "in.png", calls[2]), "-write", "mpr:src", "-alpha", "off", "h.png", "-hald-clut",
 		"(", "mpr:src", "-alpha", "extract", ")", "-alpha", "off", "-compose", "CopyOpacity", "-composite", out)
-	if !slices.Equal(calls[1], want) {
-		t.Errorf("args %q\nwant %q", calls[1], want)
+	if !slices.Equal(calls[2], want) {
+		t.Errorf("args %q\nwant %q", calls[2], want)
 	}
 }
 
@@ -43,7 +45,7 @@ func TestApplyOpaque(t *testing.T) {
 	t.Setenv("IN_INFO", "True 200 100")
 	out := filepath.Join(t.TempDir(), "o.png")
 	code, _, calls := run(t, "apply", "--clut", "h.png", "in.jpg", out)
-	if code != 0 || !slices.Equal(calls[1], append(srgbPrefix(t, "in.jpg", calls[1]), "-alpha", "off", "h.png", "-hald-clut", out)) {
+	if code != 0 || !slices.Equal(calls[2], append(srgbPrefix(t, "in.jpg", calls[2]), "-alpha", "off", "h.png", "-hald-clut", out)) {
 		t.Fatalf("code %d, args %q", code, calls)
 	}
 }

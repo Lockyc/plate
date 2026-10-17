@@ -19,7 +19,7 @@ import (
 // Options shape the frame.
 type Options struct {
 	Height int  // resize to this height; 0 keeps the source's
-	Opaque bool // drop alpha and write RGB; otherwise RGBA, opaque where the source has no alpha
+	Opaque bool // flatten onto black and write RGB, so a mask's transparent pixels are no hole; otherwise RGBA, opaque where the source has no alpha
 }
 
 // Args is the magick command line that writes in's frame to out. It orients,
@@ -34,7 +34,7 @@ func Args(in, out, srgb string, o Options) []string {
 	}
 	format := "PNG32:"
 	if o.Opaque {
-		a = append(a, "-alpha", "off")
+		a = append(a, "-background", "black", "-alpha", "remove", "-alpha", "off")
 		format = "PNG24:"
 	}
 	return append(a, "-depth", "8", format+out)
@@ -71,16 +71,48 @@ func Orient(ctx context.Context, in, out string) error {
 	return err
 }
 
-// RequireOpaque refuses a source with any transparent pixel, for an
-// operation that reads every pixel as picture and writes an opaque result:
-// it would fill from the colour stored under the transparency and show it.
-func RequireOpaque(ctx context.Context, in string) error {
-	res, err := engine.Run(ctx, engine.Cmd{Engine: "magick", Args: []string{"identify", "-format", "%[opaque]\n", in}, Inputs: []string{in}})
+// Info is what Probe reads of a source as displayed.
+type Info struct {
+	Opaque     bool   // no pixel is transparent
+	W, H       int    // EXIF rotation applied
+	Colorspace string // ImageMagick's name: sRGB, Gray, CMYK, …
+}
+
+// ProbeArgs is the magick command line Probe runs.
+func ProbeArgs(in string) []string {
+	return append(oriented(in), "-format", "%[opaque] %w %h %[colorspace]\n", "info:")
+}
+
+// Probe reads in's Info. A multi-frame input is refused: every operation
+// reads one picture, and magick would otherwise write one output per frame.
+func Probe(ctx context.Context, in string) (Info, error) {
+	res, err := engine.Run(ctx, engine.Cmd{Engine: "magick", Args: ProbeArgs(in), Inputs: []string{in}})
 	if err != nil {
-		return err
+		return Info{}, err
 	}
-	if !strings.HasPrefix(strings.TrimSpace(string(res.Stdout)), "True") {
-		return fmt.Errorf("%s has transparent pixels; flatten it onto its background first", in)
+	lines := strings.Split(strings.TrimSpace(string(res.Stdout)), "\n")
+	if len(lines) != 1 {
+		return Info{}, fmt.Errorf("could not read %s: expected one frame (a multi-frame input is not supported)", in)
 	}
-	return nil
+	f := strings.Fields(lines[0])
+	if len(f) != 4 {
+		return Info{}, fmt.Errorf("could not read %s", in)
+	}
+	w, errW := strconv.Atoi(f[1])
+	h, errH := strconv.Atoi(f[2])
+	if errW != nil || errH != nil || w < 1 || h < 1 {
+		return Info{}, fmt.Errorf("could not read the size of %s", in)
+	}
+	return Info{Opaque: f[0] == "True", W: w, H: h, Colorspace: f[3]}, nil
+}
+
+// RequireOpaque refuses a source with any transparent pixel, for an
+// operation that reads every pixel as picture: it would fill from, or cut
+// out, the colour stored under the transparency and show it.
+func RequireOpaque(ctx context.Context, in string) (Info, error) {
+	info, err := Probe(ctx, in)
+	if err == nil && !info.Opaque {
+		err = fmt.Errorf("%s has transparent pixels; flatten it onto its background first", in)
+	}
+	return info, err
 }

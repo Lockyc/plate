@@ -17,10 +17,11 @@ import (
 	"github.com/lockyc/plate/internal/raster"
 )
 
-// magick: `-format %wx%h info:` prints $SRC_DIMS; any other call copies
-// $FIXTURE_FRAME to its last argument, less a PNG24:/PNG32: prefix.
+// magick: the frame.Probe call answers $SRC_OPAQUE and $SRC_DIMS (WxH); any
+// other call copies $FIXTURE_FRAME to its last argument, less a
+// PNG24:/PNG32: prefix.
 const magickStub = `case "$*" in
-  *info:*) printf '%s' "${SRC_DIMS:-800x1200}" ;;
+  *info:*) d=${SRC_DIMS:-800x1200}; printf '%s %s %s sRGB\n' "${SRC_OPAQUE:-True}" "${d%x*}" "${d#*x}" ;;
   *) for a in "$@"; do last=$a; done; last=${last#PNG24:}; cp "$FIXTURE_FRAME" "${last#PNG32:}" ;;
 esac`
 
@@ -128,6 +129,16 @@ func TestContextSize(t *testing.T) {
 		if cw*ch > contextSide*contextSide {
 			t.Errorf("contextSize(%d, %d) = %dx%d, over %d² px", c.w, c.h, cw, ch, contextSide)
 		}
+	}
+}
+
+// The frame drops alpha, so whatever colour a transparent source stores
+// under its transparency would be cut out as picture.
+func TestCutoutRefusesTransparentSource(t *testing.T) {
+	e := setup(t)
+	t.Setenv("SRC_OPAQUE", "False")
+	if code := e.run("--coarse", "birefnet"); code != 1 || !strings.Contains(e.stderr.String(), "transparent pixels") {
+		t.Fatalf("code %d: %s", code, e.stderr.String())
 	}
 }
 

@@ -26,7 +26,7 @@ func pngOf(t *testing.T, dir, name string, w, h int) string {
 // --output under its own name, and answers the device probe with mps.
 func stubs(t *testing.T) (magick, uv string) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
-	return enginetest.Stub(t, "magick", `[ "$1" = identify ] && { echo "${OPAQUE:-True}"; exit 0; }
+	return enginetest.Stub(t, "magick", `case "$*" in *"%[opaque]"*) echo "${OPAQUE:-True} 1 1 sRGB"; exit 0 ;; esac
 for a in "$@"; do last=$a; done
 src=$1; [ -n "$ROT" ] && [ "$(basename "$1")" = in.png ] && src=$ROT
 cp "$src" "${last#PNG24:}"`), enginetest.Stub(t, "uv", `[ "$7" = python ] && { echo mps; exit 0; }
@@ -45,7 +45,7 @@ func TestInpaint(t *testing.T) {
 		t.Fatalf("code %d: %s", code, e.String())
 	}
 	m := enginetest.Calls(t, magick)
-	if len(m) != 4 || m[0][0] != "identify" {
+	if len(m) != 4 || m[0][len(m[0])-1] != "info:" {
 		t.Fatalf("%d magick calls, want the opacity check, frame, mask, output: %q", len(m), m)
 	}
 	m = m[1:]

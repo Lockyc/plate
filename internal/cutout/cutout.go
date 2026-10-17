@@ -175,14 +175,13 @@ func (j job) run(ctx context.Context) (int, int, error) {
 	if engine.SameFile(j.in, j.out) {
 		return 0, 0, fmt.Errorf("%s is both the input and the output", j.in)
 	}
-	res, err := engine.Run(ctx, engine.Cmd{Engine: "magick", Args: []string{j.in, "-auto-orient", "-format", "%wx%h", "info:"}, Inputs: []string{j.in}})
+	// The frame drops alpha, so a transparent source's stored colour would
+	// read as picture.
+	src, err := imgframe.RequireOpaque(ctx, j.in)
 	if err != nil {
 		return 0, 0, err
 	}
-	var sw, sh int
-	if _, err := fmt.Sscanf(strings.TrimSpace(string(res.Stdout)), "%dx%d", &sw, &sh); err != nil {
-		return 0, 0, fmt.Errorf("could not read the size of %s", j.in)
-	}
+	sh := src.H
 	h := j.height
 	if h == 0 {
 		h = sh

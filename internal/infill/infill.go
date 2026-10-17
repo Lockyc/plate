@@ -68,8 +68,14 @@ func run(ctx context.Context, in, mask, out string, radii []int, grain float64, 
 	// Oriented as displayed, so a mask drawn on the displayed image lines
 	// up, and otherwise as stored: the result keeps the source's bit depth
 	// and profile.
-	if err := frame.RequireOpaque(ctx, in); err != nil {
+	info, err := frame.RequireOpaque(ctx, in)
+	if err != nil {
 		return err
+	}
+	// A PNG holds no CMYK, so writing one would convert without the
+	// profile and shift every colour.
+	if info.Colorspace == "CMYK" {
+		return fmt.Errorf("%s is CMYK, which the PNG result cannot keep; convert it to RGB with its profile first", in)
 	}
 	img, m := filepath.Join(tmp, "in.png"), filepath.Join(tmp, "mask.png")
 	if err := frame.Orient(ctx, in, img); err != nil {
@@ -94,7 +100,9 @@ func run(ctx context.Context, in, mask, out string, radii []int, grain float64, 
 		return err
 	}
 	holes := filepath.Join(tmp, "holes.png")
-	if err := magick([]string{img, m}, img, "(", m, "-negate", ")", "-alpha", "off", "-compose", "CopyOpacity", "-composite", holes); err != nil {
+	// The mask is flattened onto black first, so its transparent pixels are
+	// no hole whatever colour they store.
+	if err := magick([]string{img, m}, img, "(", m, "-background", "black", "-alpha", "remove", "-negate", ")", "-alpha", "off", "-compose", "CopyOpacity", "-composite", holes); err != nil {
 		return err
 	}
 	// The levels see only the ground each hole reaches without crossing a

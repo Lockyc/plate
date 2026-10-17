@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/lockyc/plate/internal/enginetest"
+	"github.com/lockyc/plate/internal/frame"
 )
 
 // magickStub answers the size probe from $INFO, and otherwise writes to its
@@ -17,7 +18,7 @@ import (
 // short one for the rest, so the smallest-PNG choice is visible. A WebP
 // encode fails when $FAIL_WEBP is set.
 const magickStub = `for a in "$@"; do last=$a; done
-if [ "$last" = info: ]; then printf '%s\n' "${INFO:-True 1080 720}"; exit 0; fi
+if [ "$last" = info: ]; then printf '%s sRGB\n' "${INFO:-True 1080 720}"; exit 0; fi
 case "$last" in WEBP:*) [ -n "$FAIL_WEBP" ] && exit 1 ;; esac
 body=small
 for a in "$@"; do [ "$a" = png:compression-strategy=0 ] && body=larger-body; done
@@ -62,7 +63,7 @@ func TestShrink(t *testing.T) {
 	if len(calls) != 5 {
 		t.Fatalf("want probe, resample, two PNG tries and a WebP; got %q", calls)
 	}
-	if want := []string{"in.jpg", "-auto-orient", "-format", "%[opaque] %w %h\n", "info:"}; !slices.Equal(calls[0], want) {
+	if want := frame.ProbeArgs("in.jpg"); !slices.Equal(calls[0], want) {
 		t.Errorf("probe %q, want %q", calls[0], want)
 	}
 	r := calls[1]

@@ -136,21 +136,11 @@ func run(ctx context.Context, in string, outs []string, boxW, boxH, quality int)
 			}
 		}
 	}()
-	res, err := engine.Run(ctx, engine.Cmd{Engine: "magick", Args: []string{in, "-auto-orient", "-format", "%[opaque] %w %h\n", "info:"}, Inputs: []string{in}})
+	src, err := frame.Probe(ctx, in)
 	if err != nil {
 		return 0, 0, err
 	}
-	lines := strings.Split(strings.TrimSpace(string(res.Stdout)), "\n")
-	f := strings.Fields(lines[0])
-	if len(lines) != 1 || len(f) != 3 {
-		return 0, 0, fmt.Errorf("could not read %s: expected one frame (a multi-frame input is not supported)", in)
-	}
-	opaque := f[0] == "True"
-	sw, errW := strconv.Atoi(f[1])
-	sh, errH := strconv.Atoi(f[2])
-	if errW != nil || errH != nil || sw < 1 || sh < 1 {
-		return 0, 0, fmt.Errorf("could not read the size of %s", in)
-	}
+	opaque, sw, sh := src.Opaque, src.W, src.H
 	w, h = Target(sw, sh, boxW, boxH)
 	if w > sw || h > sh {
 		return 0, 0, fmt.Errorf("%s is %dx%d, smaller than %dx%d; shrink never enlarges", in, sw, sh, w, h)
