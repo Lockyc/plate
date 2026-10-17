@@ -20,11 +20,6 @@ import (
 
 const usage = "build [--out DIR] [--jobs N] [--force] [--fail-if TEXT]... <manifest> [NAME...]"
 
-type multi []string
-
-func (m *multi) String() string     { return fmt.Sprint(*m) }
-func (m *multi) Set(s string) error { *m = append(*m, s); return nil }
-
 // result is one target's render: its warnings, buffered so they print with
 // its line, and how it went.
 type result struct {
@@ -41,7 +36,7 @@ func Main(ctx context.Context, args []string, _, stderr io.Writer) int {
 	out := fs.String("out", "", "write the outputs to `DIR` (default: dist beside the manifest)")
 	jobs := cli.Int(fs, "jobs", min(4, runtime.NumCPU()), "render up to `N` targets at once")
 	force := fs.Bool("force", false, "render every target even when nothing it loaded or wrote has changed")
-	var failIf multi
+	var failIf cli.Multi
 	fs.Var(&failIf, "fail-if", "fail a target when `TEXT` appears in its page, as render --fail-if (repeatable)")
 	rest, code, ok := cli.Parse(fs, args, -1)
 	if !ok {

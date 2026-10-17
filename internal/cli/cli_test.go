@@ -72,3 +72,16 @@ func TestIntIsDecimal(t *testing.T) {
 		}
 	}
 }
+
+func TestMulti(t *testing.T) {
+	var errb bytes.Buffer
+	fs := Flags("demo", "demo [--x X]...", &errb)
+	var xs Multi
+	fs.Var(&xs, "x", "repeatable")
+	if _, _, ok := Parse(fs, []string{"--x", "a", "--x", "b c"}, 0); !ok {
+		t.Fatal(errb.String())
+	}
+	if len(xs) != 2 || xs[0] != "a" || xs[1] != "b c" {
+		t.Errorf("Multi = %q, want [a, b c]", xs)
+	}
+}

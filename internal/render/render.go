@@ -56,11 +56,6 @@ const defaultQuality = 90
 // asked for: it rounds page sizes to multiples of 8 CSS px (6 pt).
 const pdfQuantum = 6.0
 
-type multi []string
-
-func (m *multi) String() string     { return strings.Join(*m, ", ") }
-func (m *multi) Set(s string) error { *m = append(*m, s); return nil }
-
 type job struct {
 	url, local  string // url is the remote page, or the file URL before run swaps in the proxied one
 	query       string // the local page's "?…", kept
@@ -261,7 +256,7 @@ func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	size := fs.String("size", "", "viewport and expected page size in CSS px, WxH (required with --png)")
 	scale := cli.Float(fs, "scale", 1, "device scale factor; the PNG is size × scale px at 96 × scale dpi")
 	budget := cli.Int(fs, "budget", DefaultBudget, "virtual-time budget in ms for scripts, fonts and images to settle")
-	var failIf multi
+	var failIf cli.Multi
 	fs.Var(&failIf, "fail-if", "fail when `TEXT` appears in the page's markup (dumped DOM) or, with --pdf, the PDF's extracted text (repeatable)")
 	blankMargin := cli.Int(fs, "blank-margin", 0, "fail when ink sits within `PX` CSS px of a page edge, checked on the PDF's pages at 150 dpi or else the PNG (0 is off)")
 	force := fs.Bool("force", false, "render even when nothing the page loaded and no output has changed since its last success")
