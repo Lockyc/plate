@@ -99,9 +99,8 @@ type usageError string
 
 func (e usageError) Error() string { return string(e) }
 
-// outputs lists o's outputs in the order run hashes them: PNG, PDF, HTML
-// then JPEG.
-func (o Options) outputs() []string {
+// Outputs lists o's outputs as given, PNG, PDF, HTML then JPEG.
+func (o Options) Outputs() []string {
 	var out []string
 	for _, p := range []string{o.PNG, o.PDF, o.HTML, o.JPEG} {
 		if p != "" {
@@ -116,7 +115,7 @@ func (o Options) outputs() []string {
 // front, so a bad one is refused before any of them start. The messages
 // name render's flags.
 func (o Options) Validate() error {
-	if len(o.outputs()) == 0 {
+	if len(o.Outputs()) == 0 {
 		return usageError("give --png, --jpeg, --pdf, --html or a combination")
 	}
 	if o.Transparent && o.JPEG != "" {
@@ -193,13 +192,14 @@ func Run(ctx context.Context, o Options, warn io.Writer) (Result, error) {
 	if err != nil {
 		// No key, no record to trust or keep: render uncached.
 		cacheWarn(err)
-		if _, _, err := j.run(ctx); err != nil {
-			return Result{}, err
+		loads, _, runErr := j.run(ctx)
+		if runErr != nil {
+			return Result{}, runErr
 		}
-		return Result{Uncacheable, "no cache key: " + err.Error()}, nil
+		return Result{Outcome: Uncacheable, Reason: "no cache key: " + err.Error(), Inputs: loads.paths()}, nil
 	}
 	var outs []string
-	for _, p := range o.outputs() {
+	for _, p := range o.Outputs() {
 		abs, err := filepath.Abs(p)
 		if err != nil {
 			return Result{}, err
@@ -208,7 +208,7 @@ func Run(ctx context.Context, o Options, warn io.Writer) (Result, error) {
 	}
 	if local != "" && !o.Force {
 		if r, ok := loadRecord(key); ok && r.writes(outs) && r.current() {
-			return Result{Outcome: Unchanged}, nil
+			return Result{Outcome: Unchanged, Inputs: r.inputPaths()}, nil
 		}
 	}
 	if err := dropRecord(key); err != nil {
@@ -219,19 +219,19 @@ func Run(ctx context.Context, o Options, warn io.Writer) (Result, error) {
 		return Result{}, err
 	}
 	if local == "" {
-		return Result{Uncacheable, "remote page"}, nil
+		return Result{Outcome: Uncacheable, Reason: "remote page"}, nil
 	}
 	for i := range hashes {
 		hashes[i].Path = outs[i]
 	}
 	r, why := newRecord(loads, local, hashes)
 	if why != "" {
-		return Result{Uncacheable, why}, nil
+		return Result{Outcome: Uncacheable, Reason: why, Inputs: loads.paths()}, nil
 	}
 	if err := saveRecord(key, r); err != nil {
 		cacheWarn(err)
 	}
-	return Result{Outcome: Rendered}, nil
+	return Result{Outcome: Rendered, Inputs: r.inputPaths()}, nil
 }
 
 // Outcome is what Run did with a render that succeeded.
@@ -247,6 +247,9 @@ const (
 type Result struct {
 	Outcome Outcome
 	Reason  string
+	// Inputs is every local file the page loaded or asked for and found
+	// missing, from the record on a skip; nil for a remote page.
+	Inputs []string
 }
 
 // Main runs `plate render`.
@@ -296,7 +299,7 @@ func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return cli.Fail(stderr, "render", err)
 	}
 	if res.Outcome == Unchanged {
-		fmt.Fprintf(stderr, "plate render: unchanged: %s\n", o.outputs()[0])
+		fmt.Fprintf(stderr, "plate render: unchanged: %s\n", o.Outputs()[0])
 	}
 	return 0
 }
