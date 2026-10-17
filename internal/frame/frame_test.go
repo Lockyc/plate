@@ -15,7 +15,7 @@ func TestArgsOrder(t *testing.T) {
 		want []string
 	}{
 		{Options{}, []string{"in.jpg", "-auto-orient", "-profile", "s.icc", "-strip", "-depth", "8", "PNG32:o.png"}},
-		{Options{Height: 600, Opaque: true}, []string{"in.jpg", "-auto-orient", "-profile", "s.icc", "-strip", "-resize", "x600", "-alpha", "off", "-depth", "8", "PNG24:o.png"}},
+		{Options{Height: 600, Opaque: true}, []string{"in.jpg", "-auto-orient", "-profile", "s.icc", "-strip", "-resize", "x600", "-background", "black", "-alpha", "remove", "-alpha", "off", "-depth", "8", "PNG24:o.png"}},
 	} {
 		if got := Args("in.jpg", "o.png", "s.icc", c.o); !slices.Equal(got, c.want) {
 			t.Errorf("%+v: args %q, want %q", c.o, got, c.want)

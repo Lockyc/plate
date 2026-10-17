@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/lockyc/plate/internal/enginetest"
+	"github.com/lockyc/plate/internal/frame"
 	"github.com/lockyc/plate/internal/raster"
 )
 
@@ -49,7 +50,7 @@ func holedPNG(t *testing.T, dir string, w, h int, band bool) string {
 // calls is the stub's log less the opacity checks, which every run makes
 // first.
 func calls(t *testing.T, log string) [][]string {
-	return slices.DeleteFunc(enginetest.Calls(t, log), func(c []string) bool { return c[0] == "identify" })
+	return slices.DeleteFunc(enginetest.Calls(t, log), func(c []string) bool { return slices.Equal(c, frame.ProbeArgs(c[0])) })
 }
 
 func TestInfillRefusesTransparentSource(t *testing.T) {
@@ -66,12 +67,28 @@ func TestInfillRefusesTransparentSource(t *testing.T) {
 	}
 }
 
+// The PNG result cannot hold CMYK, and converting without the profile
+// shifts every colour.
+func TestInfillRefusesCMYK(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	t.Setenv("COLORSPACE", "CMYK")
+	log := enginetest.Stub(t, "magick", orientStub)
+	var o, e bytes.Buffer
+	if code := Main(context.Background(), []string{"--mask", pngOf(t, dir, "m.png", 40, 30), pngOf(t, dir, "in.png", 40, 30), filepath.Join(dir, "out.png")}, &o, &e); code != 1 || !strings.Contains(e.String(), "CMYK") {
+		t.Errorf("code %d, %q", code, e.String())
+	}
+	if n := len(calls(t, log)); n != 0 {
+		t.Errorf("%d magick calls after the refusal", n)
+	}
+}
+
 func TestInfillRefusesAnUnreachedHole(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
 	t.Setenv("FIXTURE", holedPNG(t, dir, 80, 60, false))
 	t.Setenv("REACH", "0")
-	enginetest.Stub(t, "magick", `[ "$1" = identify ] && { echo True; exit 0; }
+	enginetest.Stub(t, "magick", `case "$*" in *"%[opaque]"*) echo "True 1 1 sRGB"; exit 0 ;; esac
 case "$*" in *fx:minima*) echo "$REACH"; exit 0 ;; esac
 for a in "$@"; do last=$a; done; cp "$FIXTURE" "$last"`)
 	out := filepath.Join(dir, "out.png")
@@ -93,7 +110,7 @@ func TestInfill(t *testing.T) {
 			dir := t.TempDir()
 			t.Chdir(dir)
 			t.Setenv("FIXTURE", holedPNG(t, dir, 80, 60, c.band))
-			log := enginetest.Stub(t, "magick", `[ "$1" = identify ] && { echo "${OPAQUE:-True}"; exit 0; }
+			log := enginetest.Stub(t, "magick", `case "$*" in *"%[opaque]"*) echo "${OPAQUE:-True} 1 1 ${COLORSPACE:-sRGB}"; exit 0 ;; esac
 case "$*" in *fx:minima*) echo "${REACH:-1}"; exit 0 ;; esac
 for a in "$@"; do last=$a; done; cp "$FIXTURE" "$last"`)
 			in, mask, out := pngOf(t, dir, "in.png", 80, 60), pngOf(t, dir, "m.png", 80, 60), filepath.Join(dir, "out.png")
@@ -146,9 +163,9 @@ for a in "$@"; do last=$a; done; cp "$FIXTURE" "$last"`)
 
 // orientStub plays magick: an -auto-orient call copies its input, or the
 // image at $ROT for in.png when ROT is set, playing a source whose EXIF
-// rotation turns it; identify answers opaque; any other call fails with
+// rotation turns it; the probe answers $OPAQUE and $COLORSPACE; any other call fails with
 // status 3.
-const orientStub = `[ "$1" = identify ] && { echo "${OPAQUE:-True}"; exit 0; }
+const orientStub = `case "$*" in *"%[opaque]"*) echo "${OPAQUE:-True} 1 1 ${COLORSPACE:-sRGB}"; exit 0 ;; esac
 for a in "$@"; do last=$a; done
 [ "$2" = -auto-orient ] || exit 3
 src=$1; [ -n "$ROT" ] && [ "$(basename "$1")" = in.png ] && src=$ROT
