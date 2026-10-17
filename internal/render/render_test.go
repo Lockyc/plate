@@ -201,6 +201,18 @@ func TestRenderPDFPageMismatch(t *testing.T) {
 	}
 }
 
+// A named @page sizes one page apart from the first.
+func TestRenderPDFLaterPageMismatch(t *testing.T) {
+	e := setup(t, 1, 1)
+	enginetest.Stub(t, "pdfinfo", `printf 'Pages: 2\nPage size: 900 x 675 pts\nPage    1 size: 900 x 675 pts\nPage    2 size: 612 x 792 pts\n'`)
+	if code := e.run("--size", "1200x900", "--pdf", e.out("p.pdf"), e.page); code != 1 {
+		t.Fatalf("code %d", code)
+	}
+	if !strings.Contains(e.stderr.String(), "PDF page 2 is 612x792 pt") || exists(e.out("p.pdf")) {
+		t.Errorf("stderr %q", e.stderr.String())
+	}
+}
+
 func TestRenderPDFFailIf(t *testing.T) {
 	e := setup(t, 1, 1)
 	t.Setenv("PDF_TEXT", "Lot 4 nothing matches")
@@ -296,6 +308,12 @@ func TestPageURLEscapes(t *testing.T) {
 	}
 	if u, l, _, err := pageURL(got); err != nil || l != p {
 		t.Errorf("file URL to an existing page: %q, %q, %v", u, l, err)
+	}
+	// The proxy records the cleaned path it served; the cache looks the
+	// page up by this one.
+	dotted := (&url.URL{Scheme: "file", Path: filepath.ToSlash(dir) + "/./x/../page.html"}).String()
+	if _, l, _, err := pageURL(dotted); err != nil || l != p {
+		t.Errorf("non-canonical file URL: local %q, %v; want %q", l, err, p)
 	}
 	missing := (&url.URL{Scheme: "file", Path: filepath.Join(t.TempDir(), "typo.html")}).String()
 	if _, _, _, err := pageURL(missing); err == nil {
