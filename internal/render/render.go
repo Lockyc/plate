@@ -260,7 +260,7 @@ func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	scale := cli.Float(fs, "scale", 1, "device scale factor; the PNG is size × scale px at 96 × scale dpi")
 	budget := cli.Int(fs, "budget", DefaultBudget, "virtual-time budget in ms for scripts, fonts and images to settle")
 	var failIf multi
-	fs.Var(&failIf, "fail-if", "fail when `TEXT` appears in the page: its markup (dumped DOM) for --png, its extracted text for --pdf (repeatable)")
+	fs.Var(&failIf, "fail-if", "fail when `TEXT` appears in the page's markup (dumped DOM) or, with --pdf, the PDF's extracted text (repeatable)")
 	blankMargin := cli.Int(fs, "blank-margin", 0, "fail when ink sits within `PX` CSS px of a page edge, checked on the PDF's pages at 150 dpi or else the PNG (0 is off)")
 	force := fs.Bool("force", false, "render even when nothing the page loaded and no output has changed since its last success")
 	rest, code, ok := cli.Parse(fs, args, 1)

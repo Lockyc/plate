@@ -7,7 +7,7 @@
 
 Image, render and document operations for print and web pipelines, as one
 command: lift a subject out of a photo, fill, enlarge or shrink artwork, render HTML to
-PNG, PDF or its settled DOM, preview a Google Slides deck, turn markdown into a
+PNG, JPEG, PDF or its settled DOM, skipping what has not changed, preview a Google Slides deck, turn markdown into a
 PDF, look inside a PDF, make a press-ready PDF, match a colour grade. Each
 operation wraps an engine at a pinned version, and its output is checked
 against a committed set of test images.
@@ -27,7 +27,8 @@ the exceptions listed under [Platforms](#platforms). What comes next is in
 | `upscale` ⚠ | Enlarges 4× with DAT, sharpening existing detail without inventing texture | `plate upscale <in> <out.png>` |
 | `grade fit` | Recovers a reference image's colour grade as a lookup table | `plate grade fit --ref ref.png [--ref-crop x,y,w,h] [--exclude x,y,w,h]... [--level 8] [--min-inliers 40] <subject.png> <out-hald.png>` |
 | `grade apply` | Applies that lookup table, keeping transparency | `plate grade apply --clut hald.png <in> <out.png>` |
-| `render` | HTML to PNG, PDF or settled HTML with headless Chrome, guarded against Chrome's silent failures | `plate render [--png out.png [--transparent]] [--pdf out.pdf] [--html out.html] [--size WxH] [--scale S] [--budget MS] [--fail-if TEXT]... <page.html\|http(s) or file URL>` |
+| `render` | HTML to PNG, JPEG, PDF or settled HTML with headless Chrome, guarded against Chrome's silent failures, skipped when nothing changed | `plate render [--png out.png [--transparent]] [--jpeg out.jpg [--quality Q]] [--pdf out.pdf] [--html out.html] [--size WxH] [--scale S] [--blank-margin PX] [--budget MS] [--fail-if TEXT]... [--force] <page.html\|http(s) or file URL>` |
+| `build` | Renders every target in a manifest in parallel, skipping the unchanged ones | `plate build [--out DIR] [--jobs N] [--force] [--fail-if TEXT]... <manifest> [NAME...]` |
 | `press` | Converts a PDF to a print master (text as outlines, CMYK colour) and checks it against a soft proof | `plate press --icc profile.icc [--max-ppi N] [--max-rmse R] [--region x,y,w,h:max]... [--proof-width PX] <in.pdf> <out.pdf>` |
 | `pdf info` | Prints a PDF's metadata and whether it has a text layer, which says whether to read its text or render its pages | `plate pdf info <in.pdf>` |
 | `pdf text` | Extracts a PDF's text with its layout | `plate pdf text [--pages N\|N-M] <in.pdf>` |
@@ -51,6 +52,38 @@ copy to publish; it needs no `--size`, and refuses a page that does not end in
 `render --png --transparent` gives the PNG an alpha channel: whatever the
 page leaves transparent (a `background: transparent` html and body) is
 alpha 0 rather than white, for artwork laid over other artwork.
+
+`render --jpeg` writes the screenshot as a JPEG at `--quality` (default 90);
+it needs `--size` and refuses `--transparent`.
+
+`render --blank-margin PX` fails when ink sits within PX CSS px of a page
+edge, where a printer cannot print: on every page of the PDF, or on the PNG
+when there is no PDF.
+
+`render` skips a local page whose outputs are still those its last
+successful run with the same options made, and prints `unchanged: <output>`.
+plate records every file the page loaded and every output, each with its
+sha256, in `$XDG_CACHE_HOME/plate/render/` (`~/.cache/plate/render/` when
+that is unset); a new plate build, `SOURCE_DATE_EPOCH` or
+`PLATE_ENGINE_CHROME_HEADLESS_SHELL` also misses. A remote page, or one that
+loads anything from another host, always renders. System fonts, the clock,
+the locale and a different Chrome at the same override path are not
+tracked: after changing one, pass `--force`.
+
+`build` reads a manifest, one target per line, `#` starting a comment:
+
+```
+# name  page        WxH       scale  outputs  [option...]
+flyer   flyer.html  794x1123  2      pdf,png  blank-margin=23
+```
+
+The page is relative to the manifest and may carry a `?query`; each output
+(`pdf`, `png`, `jpeg`, `html`) goes to `--out`, by default `dist` beside the
+manifest, as `name.pdf`, `name.png`, `name.jpg` or `name.html`. The options
+are `blank-margin=PX`, `transparent`, `budget=MS` and `quality=Q`. Naming
+targets renders only those. It logs `rendered`, `unchanged` or `failed` for
+each target in manifest order, then a count; a failed target exits 1, and a
+bad manifest exits 2 before anything renders.
 
 A PDF from `render --pdf` or `doc` is dated `SOURCE_DATE_EPOCH`, or
 1970-01-01 when that is unset, so an unchanged page renders to identical
@@ -81,8 +114,9 @@ drawn either.
 format; `o.png o.webp` writes both, so you can keep the smaller. WebP is lossy at `--quality` (default 90) with
 lossless alpha.
 
-`render` runs the page outside Chrome's sandbox, with read access to your
-files and open network access: give it only pages you trust.
+`render` runs the page outside Chrome's sandbox with open network access, and
+a local page can read any of your files through plate's proxy, which is how
+it loads its own: give it only pages you trust.
 
 ⚠ These commands create pixels the source never had. A project that forbids
 this puts `synthesis = "forbid"` in a `plate.toml`, and they refuse to run.
