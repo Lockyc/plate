@@ -44,7 +44,7 @@ func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		}
 	}
 	fmt.Fprintf(stderr, "usage: plate %s\n", usage)
-	return 2
+	return cli.VerbUsageCode(args)
 }
 
 // pageRange is --pages: 1-based and inclusive; zero when not given.
