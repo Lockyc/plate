@@ -28,8 +28,10 @@ internal/<op>/       one package per command (cutout, inpaint, infill, upscale,
 internal/cli/        flag, exit-code and error conventions every command shares
 internal/engine/     the one way an external tool is run
 internal/atomicfile/ a file written whole or not at all: a temp file beside it, renamed
+internal/outdir/     the --out directory a command writes several files into
 internal/frame/      the source pre-pass the ML ops read: oriented, sRGB, 8-bit
-                     RGB(A) PNG; or oriented only, for infill
+                     RGB(A) PNG; or oriented only, for infill; and Probe, the
+                     one read of a source's opacity, size and colourspace
 internal/icc/        the embedded sRGB profile
 internal/imgsize/    image dimensions without decoding pixels
 internal/enginetest/ sh stubs that stand in for engines in tests

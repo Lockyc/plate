@@ -15,6 +15,7 @@ import (
 
 	"github.com/lockyc/plate/internal/cli"
 	"github.com/lockyc/plate/internal/engine"
+	"github.com/lockyc/plate/internal/outdir"
 )
 
 const usage = "pdf info <in.pdf>\n" +
@@ -149,35 +150,6 @@ func textMain(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 	return 0
 }
 
-// outDir makes the destination: --out, created if missing (poppler creates
-// none and dies with a message that reads like a corrupt file), else a fresh
-// temporary directory. made says the directory is plate's own, to remove
-// when the verb fails.
-func outDir(out, verb string) (dir string, made bool, err error) {
-	if out == "" {
-		dir, err = os.MkdirTemp("", "plate-pdf-"+verb+"-")
-		return dir, err == nil, err
-	}
-	if err := os.MkdirAll(out, 0o755); err != nil {
-		return "", false, err
-	}
-	// Absolute, so a directory named like a flag never reaches an engine as one.
-	dir, err = filepath.Abs(out)
-	return dir, false, err
-}
-
-// refuseExisting fails when any of names is already in dir. A destination
-// that holds an earlier run's files would mix them with this run's; it is
-// refused, never cleared.
-func refuseExisting(dir string, names []string) error {
-	for _, n := range names {
-		if _, err := os.Lstat(filepath.Join(dir, n)); err == nil {
-			return fmt.Errorf("%s already holds %s; pass a fresh --out (nothing was deleted)", dir, n)
-		}
-	}
-	return nil
-}
-
 func pagesMain(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := cli.Flags("pdf pages", "pdf pages [--pages N|N-M] [--out DIR] [--dpi N] <in.pdf>", stderr)
 	pages := pagesFlag(fs)
@@ -217,7 +189,7 @@ func renderPages(ctx context.Context, in string, r pageRange, out string, dpi in
 	for n := r.first; n <= r.last; n++ {
 		names = append(names, fmt.Sprintf("page-%0*d.png", width, n))
 	}
-	dir, made, err := outDir(out, "pages")
+	dir, made, err := outdir.Make(out, "plate-pdf-pages-")
 	if err != nil {
 		return nil, err
 	}
@@ -233,7 +205,7 @@ func renderPages(ctx context.Context, in string, r pageRange, out string, dpi in
 			os.Remove(p)
 		}
 	}()
-	if err := refuseExisting(dir, names); err != nil {
+	if err := outdir.RefuseExisting(dir, names); err != nil {
 		return nil, err
 	}
 	// Pages render concurrently, each its own pdftoppm call: rendering, not
@@ -290,7 +262,7 @@ func imagesMain(ctx context.Context, args []string, stdout, stderr io.Writer) in
 // then moves the files out. pdfimages exits 0 having written nothing when
 // the PDF holds no rasters; that is refused here.
 func extractImages(ctx context.Context, in string, r pageRange, out string) (paths []string, err error) {
-	dir, made, err := outDir(out, "images")
+	dir, made, err := outdir.Make(out, "plate-pdf-images-")
 	if err != nil {
 		return nil, err
 	}
@@ -326,7 +298,7 @@ func extractImages(ctx context.Context, in string, r pageRange, out string) (pat
 	for _, e := range entries {
 		names = append(names, e.Name())
 	}
-	if err := refuseExisting(dir, names); err != nil {
+	if err := outdir.RefuseExisting(dir, names); err != nil {
 		return nil, err
 	}
 	for _, n := range names {

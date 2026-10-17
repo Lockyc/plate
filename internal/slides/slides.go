@@ -36,6 +36,7 @@ import (
 
 	"github.com/lockyc/plate/internal/cli"
 	"github.com/lockyc/plate/internal/fonts"
+	"github.com/lockyc/plate/internal/outdir"
 	"github.com/lockyc/plate/internal/render"
 )
 
@@ -148,13 +149,8 @@ const (
 )
 
 func run(ctx context.Context, d *Deck, picked []int, out string, scale float64, warn io.Writer) (paths []string, err error) {
-	made := false
-	if out == "" {
-		if out, err = os.MkdirTemp("", "plate-slides-"); err != nil {
-			return nil, err
-		}
-		made = true
-	} else if err := os.MkdirAll(out, 0o755); err != nil {
+	out, made, err := outdir.Make(out, "plate-slides-")
+	if err != nil {
 		return nil, err
 	}
 	// created lists, in order, what this run wrote into a caller's --out; a
@@ -178,10 +174,8 @@ func run(ctx context.Context, d *Deck, picked []int, out string, scale float64, 
 	for _, i := range picked {
 		names = append(names, name(i)+".html", name(i)+".png")
 	}
-	for _, n := range names {
-		if _, err := os.Lstat(filepath.Join(out, n)); err == nil {
-			return nil, fmt.Errorf("%s already holds %s; pass a fresh --out (nothing was deleted)", out, n)
-		}
+	if err := outdir.RefuseExisting(out, names); err != nil {
+		return nil, err
 	}
 
 	w, h := d.PageSize.Width.pt(0), d.PageSize.Height.pt(0)
