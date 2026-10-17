@@ -98,6 +98,15 @@ func Parse(fs *flag.FlagSet, args []string, positional int) (rest []string, code
 	return fs.Args(), 0, true
 }
 
+// VerbUsageCode is the exit status for a command with verbs that printed
+// its usage given args: 0 when they asked for help, as Parse returns, else 2.
+func VerbUsageCode(args []string) int {
+	if len(args) == 1 && (args[0] == "-h" || args[0] == "-help" || args[0] == "--help") {
+		return 0
+	}
+	return 2
+}
+
 // Usage reports a usage error for op and returns exit status 2.
 func Usage(stderr io.Writer, op, format string, a ...any) int {
 	fmt.Fprintf(stderr, "plate %s: %s\n", op, fmt.Sprintf(format, a...))

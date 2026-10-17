@@ -45,7 +45,8 @@ the exceptions listed under [Platforms](#platforms). What comes next is in
 | `doctor` | Checks every engine against its pin, installs the ones plate manages, and prints the install command for the rest | `plate doctor [--install]` |
 | `version` | Prints plate's version | `plate version` |
 
-`plate <command> -h` lists each flag with its default.
+`plate <command> -h` lists each flag with its default; for `pdf` and
+`grade`, `plate <command> <verb> -h` does.
 
 `render --html` writes the page's DOM after its scripts have run, a static
 copy to publish; it needs no `--size`, and refuses a page that does not end in

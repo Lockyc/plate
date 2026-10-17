@@ -33,7 +33,7 @@ func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		}
 	}
 	fmt.Fprintf(stderr, "usage: plate %s\n", usage)
-	return 2
+	return cli.VerbUsageCode(args)
 }
 
 func applyMain(ctx context.Context, args []string, stdout, stderr io.Writer) int {

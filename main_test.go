@@ -76,6 +76,17 @@ func TestEngineUsedByNamesCommands(t *testing.T) {
 	}
 }
 
+// Help is not a usage error, whether a command has verbs or flags.
+func TestHelpExitsZero(t *testing.T) {
+	t.Chdir(t.TempDir())
+	for _, c := range commands {
+		var out, errb bytes.Buffer
+		if code := run(context.Background(), []string{c.name, "-h"}, &out, &errb); code != 0 {
+			t.Errorf("%s -h: code %d, %q", c.name, code, errb.String())
+		}
+	}
+}
+
 func TestSynthesisPolicy(t *testing.T) {
 	t.Chdir(t.TempDir())
 	os.WriteFile("plate.toml", []byte(`synthesis = "forbid"`), 0o644)
