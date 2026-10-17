@@ -1,0 +1,16 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+@page{size:560px 792px;margin:0}
+html,body{margin:0}
+.p{position:relative;width:560px;height:792px;overflow:hidden;break-after:page;font-family:sans-serif}
+.p:last-child{break-after:auto}
+h1{position:absolute;left:40px;top:60px;margin:0;font-size:72px;color:#062d5f}
+p{position:absolute;left:40px;top:180px;width:470px;margin:0;font-size:20px;line-height:1.4;color:#111}
+.tl{position:absolute;left:24px;top:24px;width:0;height:0;border-left:20px solid transparent;border-right:20px solid transparent;border-bottom:34px solid #c0392b}
+.br{position:absolute;right:24px;bottom:24px;width:120px;height:60px;background:#f7a81b}
+.rule{position:absolute;left:40px;right:40px;top:420px;height:0;border-top:1px solid #000}
+.grid{position:absolute;left:40px;top:460px;width:240px;height:240px;background:repeating-linear-gradient(90deg,#000 0 1px,#fff 1px 6px)}
+</style></head><body>
+<div class="p"><div class="tl"></div><h1>Front</h1><p>Side one of a two-sided A5 sheet: the arrow points to the top, the block sits bottom right.</p><div class="rule"></div><div class="grid"></div><div class="br"></div></div>
+<div class="p" style="background:#eaf2fb"><div class="tl" style="left:auto;right:24px"></div><h1>Back</h1><p>Side two: the arrow points to the top at the right, the block sits bottom left.</p><div class="rule"></div><div class="grid" style="left:auto;right:40px"></div><div class="br" style="right:auto;left:24px"></div></div>
+</body></html>

@@ -504,3 +504,36 @@ run    = ["shrink", "--fit", "512", "{tmp:small.png}", "{tmp:o.png}"]
 exit   = 1
 stderr = "never enlarges"
 absent = ["{tmp:o.png}"]
+
+# impose: each half of the sheet, rendered on a page-sized canvas moved to
+# that half by Ghostscript's Install procedure (exact, sub-pixel), against
+# the source page rendered the same way. The asset is Chrome's A5, 420 x 594
+# pt, so the halves sit at x 0.472441 and 421.417323, y 0.637795.
+
+[[case]]
+name   = "impose-halves-match-source"
+why    = "each half of the 2-up sheet must be its source page, unscaled, unmoved within its half and the right way up, or the cut flyer is not the flyer as designed"
+run    = ["impose", "-o", "{tmp:sheet.pdf}", "{asset:two-a5.pdf}"]
+post   = [
+  ["gs", "-q", "-dNOPAUSE", "-dBATCH", "-dSAFER", "-sDEVICE=png16m", "-r150", "-dDEVICEWIDTHPOINTS=420", "-dDEVICEHEIGHTPOINTS=594", "-dFIXEDMEDIA", "-sOutputFile={tmp:src-%d.png}", "{asset:two-a5.pdf}"],
+  ["gs", "-q", "-dNOPAUSE", "-dBATCH", "-dSAFER", "-sDEVICE=png16m", "-r150", "-dDEVICEWIDTHPOINTS=420", "-dDEVICEHEIGHTPOINTS=594", "-dFIXEDMEDIA", "-sOutputFile={tmp:left-%d.png}", "-c", "<</Install {-0.472441 -0.637795 translate}>> setpagedevice", "-f", "{tmp:sheet.pdf}"],
+  ["gs", "-q", "-dNOPAUSE", "-dBATCH", "-dSAFER", "-sDEVICE=png16m", "-r150", "-dDEVICEWIDTHPOINTS=420", "-dDEVICEHEIGHTPOINTS=594", "-dFIXEDMEDIA", "-sOutputFile={tmp:right-%d.png}", "-c", "<</Install {-421.417323 -0.637795 translate}>> setpagedevice", "-f", "{tmp:sheet.pdf}"],
+  ["magick", "{tmp:src-1.png}", "{tmp:src-1.png}", "{tmp:src-2.png}", "{tmp:src-2.png}", "+append", "{tmp:want.png}"],
+  ["magick", "{tmp:left-1.png}", "{tmp:right-1.png}", "{tmp:left-2.png}", "{tmp:right-2.png}", "+append", "{tmp:got.png}"],
+]
+metric = "diff"
+params = { a = "{tmp:want.png}", b = "{tmp:got.png}" }
+max    = 0.001
+
+[[case]]
+name   = "impose-keeps-images-whole"
+why    = "a photo under a curved clip (CSS border-radius) must stay the source's one image; Ghostscript's pdfwrite cuts it into one-pixel strips per copy, 49 times the source's bytes"
+files  = { "page.html" = '''<!doctype html><style>@page{size:560px 792px;margin:0}html,body{margin:0}.p{width:560px;height:792px;break-after:page;display:flex;align-items:center;justify-content:center}.p:last-child{break-after:auto}img{width:480px;height:640px;border-radius:32px}</style><div class="p"><img src="photo.jpg"></div><div class="p"><img src="photo.jpg" style="border-radius:50%"></div>''' }
+setup  = [
+  ["magick", "-size", "1200x1600", "gradient:#c9a27e-#35606b", "-seed", "7", "-attenuate", "0.3", "+noise", "Gaussian", "-quality", "85", "{tmp:photo.jpg}"],
+  ["plate", "render", "--size", "560x792", "--pdf", "{tmp:src.pdf}", "{tmp:page.html}"],
+]
+run    = ["impose", "-o", "{tmp:sheet.pdf}", "{tmp:src.pdf}"]
+metric = "bytes"
+params = { image = "{tmp:sheet.pdf}" }
+max    = 230000

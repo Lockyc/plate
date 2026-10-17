@@ -53,3 +53,31 @@ func TestPageSizesRejectsZeroPages(t *testing.T) {
 		t.Fatal("0 pages accepted")
 	}
 }
+
+func TestPages(t *testing.T) {
+	log := enginetest.Stub(t, "pdfinfo", `case "$1" in
+  -box) printf 'Page    1 rot:   0\nPage    2 rot:   90\nPage    1 CropBox:       0.00     0.00   420.00   594.00\nPage    2 CropBox:      10.00    20.00   604.00   440.00\n' ;;
+  *) printf 'Pages:          2\nPage size:      420 x 594 pts\n' ;;
+esac`)
+	got, err := Pages(context.Background(), "in.pdf")
+	want := []Page{{Crop: [4]float64{0, 0, 420, 594}}, {Crop: [4]float64{10, 20, 604, 440}, Rotate: 90}}
+	if err != nil || len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("Pages = %v, %v", got, err)
+	}
+	if w, h := got[1].Size(); w != 420 || h != 594 {
+		t.Errorf("rotated Size = %gx%g, want 420x594", w, h)
+	}
+	if c := enginetest.Calls(t, log)[1]; c[0] != "-box" || c[4] != "2" {
+		t.Errorf("args %q", c)
+	}
+}
+
+func TestPagesRefusesAMissingBox(t *testing.T) {
+	enginetest.Stub(t, "pdfinfo", `case "$1" in
+  -box) printf 'Page    1 rot:   0\n' ;;
+  *) printf 'Pages:          1\nPage size:      420 x 594 pts\n' ;;
+esac`)
+	if _, err := Pages(context.Background(), "in.pdf"); err == nil {
+		t.Fatal("a page without a crop box accepted")
+	}
+}

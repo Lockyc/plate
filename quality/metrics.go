@@ -11,6 +11,7 @@ import (
 	"github.com/makiuchi-d/gozxing"
 	"github.com/makiuchi-d/gozxing/qrcode"
 
+	"github.com/lockyc/plate/internal/diff"
 	"github.com/lockyc/plate/internal/raster"
 )
 
@@ -479,4 +480,40 @@ func fileBytes(p Params) (float64, error) {
 		return 0, err
 	}
 	return float64(fi.Size()), nil
+}
+
+func init() {
+	Metrics["diff"] = diffPercent
+}
+
+// diffPercent is the percent of pixels internal/diff counts as changed
+// between a and b, at tolerance (default 28, as `plate diff`) and a vertical
+// search of max-shift px (default 0: the images must already line up).
+func diffPercent(p Params) (float64, error) {
+	var imgs [2]*image.RGBA64
+	for i, k := range []string{"a", "b"} {
+		path, err := p.Path(k)
+		if err != nil {
+			return 0, err
+		}
+		if imgs[i], err = raster.Load(path); err != nil {
+			return 0, err
+		}
+	}
+	if imgs[0].Bounds().Size() != imgs[1].Bounds().Size() {
+		return 0, fmt.Errorf("a and b sizes differ")
+	}
+	tol, err := p.Float("tolerance", 28)
+	if err != nil {
+		return 0, err
+	}
+	shift, err := p.Float("max-shift", 0)
+	if err != nil {
+		return 0, err
+	}
+	if tol < 0 || tol > 255 || shift < 0 {
+		return 0, fmt.Errorf("diff: want tolerance 0-255 and max-shift >= 0")
+	}
+	res, _, _, err := diff.Compare(imgs[0], imgs[1], uint8(tol), int(shift), 1)
+	return res.Percent, err
 }

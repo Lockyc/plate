@@ -80,7 +80,7 @@ var Engines = []Engine{
 		Install: map[string]string{"darwin": "brew install ghostscript", "linux": "sudo apt install ghostscript"},
 		UsedBy:  []string{"press"},
 	},
-	poppler("pdfinfo", "render", "build", "press", "pdf"),
+	poppler("pdfinfo", "render", "build", "press", "pdf", "impose"),
 	poppler("pdffonts", "press"),
 	poppler("pdfimages", "press", "pdf"),
 	poppler("pdftotext", "render", "build", "pdf"),
@@ -101,7 +101,7 @@ var Engines = []Engine{
 		Name: "qpdf", Kind: Minimum,
 		VersionArgs: []string{"--version"}, VersionRe: `qpdf version (\d+\.\d+\.\d+)`, Min: "11.0.0",
 		Install: map[string]string{"darwin": "brew install qpdf", "linux": "sudo apt install qpdf"},
-		UsedBy:  []string{"press"},
+		UsedBy:  []string{"press", "impose"},
 	},
 	{
 		Name: "qrencode", Kind: Minimum,
