@@ -377,14 +377,16 @@ func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	if *out == "" {
 		return cli.Usage(stderr, "impose", "-o out.pdf is required")
 	}
-	if err := run(ctx, rest[0], *out, *cutMark, *force); err != nil {
+	if err := Run(ctx, rest[0], *out, *cutMark, *force); err != nil {
 		return cli.Fail(stderr, "impose", err)
 	}
 	fmt.Fprintf(stdout, "wrote %s\n", *out)
 	return 0
 }
 
-func run(ctx context.Context, in, out string, cutMark, force bool) error {
+// Run imposes the two A5 pages of in onto the A4 sheet out, as `plate
+// impose` does; an existing out is replaced only when force is set.
+func Run(ctx context.Context, in, out string, cutMark, force bool) error {
 	if engine.SameFile(in, out) {
 		return fmt.Errorf("%s is both the input and the output; write the sheet elsewhere", out)
 	}

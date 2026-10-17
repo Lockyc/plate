@@ -5,6 +5,7 @@ import (
 	"context"
 	"image"
 	"image/png"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -13,7 +14,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lockyc/plate/internal/engine"
 	"github.com/lockyc/plate/internal/enginetest"
+	"github.com/lockyc/plate/internal/pdf"
 )
 
 // chromeStub writes the fixture as the screenshot and fetches the page
@@ -21,6 +24,7 @@ import (
 const chromeStub = `for a in "$@"; do
   case "$a" in
     --screenshot=*) cp "$FIXTURE_PNG" "${a#--screenshot=}" ;;
+    --print-to-pdf=*) cp "$FIXTURE_PDF" "${a#--print-to-pdf=}" ;;
     --proxy-server=*) proxy="${a#--proxy-server=}" ;;
   esac
 done
@@ -257,6 +261,116 @@ func TestBuildRefusesLoadingAnotherOutput(t *testing.T) {
 func TestBuildFlagAfterManifest(t *testing.T) {
 	e := setup(t, "a")
 	if code := e.run(e.manifest, "--force"); code != 2 || !strings.Contains(e.stderr.String(), "--force: flags go before the manifest") {
+		t.Errorf("code %d, stderr %q", code, e.stderr.String())
+	}
+	if len(enginetest.Calls(t, e.chrome)) != 0 {
+		t.Error("chrome ran")
+	}
+}
+
+// setupTwoUp is setup with one A5 PDF target carrying 2up, under a stub
+// Chrome that prints the PDF at FIXTURE_PDF. Imposing runs the real qpdf.
+func setupTwoUp(t *testing.T, fixture string) *env {
+	t.Helper()
+	needPDFEngines(t)
+	e := setup(t)
+	t.Setenv("FIXTURE_PDF", fixture)
+	os.WriteFile(filepath.Join(e.dir, "f.html"), []byte("<html>f</html>"), 0o644)
+	os.WriteFile(e.manifest, []byte("f  f.html  560x792  1  pdf  2up\n"), 0o644)
+	return e
+}
+
+// twoA5 is the impose quality case's two-page A5 flyer.
+var twoA5, _ = filepath.Abs(filepath.Join("..", "..", "quality", "assets", "two-a5.pdf"))
+
+func TestBuildTwoUpWritesTheSheet(t *testing.T) {
+	e := setupTwoUp(t, twoA5)
+	if code := e.run(e.manifest); code != 0 {
+		t.Fatalf("code %d: %s", code, e.stderr.String())
+	}
+	if want := "rendered f\nimposed f-2up-a4.pdf\n1 rendered, 0 unchanged\n"; e.stderr.String() != want {
+		t.Errorf("stderr %q, want %q", e.stderr.String(), want)
+	}
+	sheet := filepath.Join(e.dir, "dist", "f-2up-a4.pdf")
+	pages, err := pdf.Pages(context.Background(), sheet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pages) != 2 {
+		t.Fatalf("%d pages, want 2", len(pages))
+	}
+	for i, p := range pages {
+		if w, h := p.Size(); math.Abs(w-841.89) > 1 || math.Abs(h-595.28) > 1 {
+			t.Errorf("page %d is %gx%g pt, want A4 landscape", i+1, w, h)
+		}
+	}
+}
+
+func TestBuildTwoUpUnchangedSkipsBoth(t *testing.T) {
+	e := setupTwoUp(t, twoA5)
+	if code := e.run(e.manifest); code != 0 {
+		t.Fatalf("code %d: %s", code, e.stderr.String())
+	}
+	sheet := filepath.Join(e.dir, "dist", "f-2up-a4.pdf")
+	later := time.Now().Add(time.Hour).Truncate(time.Second)
+	os.Chtimes(sheet, later, later)
+	if code := e.run(e.manifest); code != 0 {
+		t.Fatalf("code %d: %s", code, e.stderr.String())
+	}
+	if want := "unchanged f\n0 rendered, 1 unchanged\n"; e.stderr.String() != want {
+		t.Errorf("stderr %q, want %q", e.stderr.String(), want)
+	}
+	if fi, err := os.Stat(sheet); err != nil || !fi.ModTime().Equal(later) {
+		t.Errorf("the sheet was rewritten: %v", err)
+	}
+	// A sheet that is missing, or older than its PDF, is imposed again
+	// though the target is unchanged.
+	os.Remove(sheet)
+	if code := e.run(e.manifest); code != 0 || e.stderr.String() != "unchanged f\nimposed f-2up-a4.pdf\n0 rendered, 1 unchanged\n" {
+		t.Errorf("missing: code %d, stderr %q", code, e.stderr.String())
+	}
+	earlier := time.Now().Add(-time.Hour)
+	os.Chtimes(sheet, earlier, earlier)
+	if code := e.run(e.manifest); code != 0 || e.stderr.String() != "unchanged f\nimposed f-2up-a4.pdf\n0 rendered, 1 unchanged\n" {
+		t.Errorf("stale: code %d, stderr %q", code, e.stderr.String())
+	}
+	if code := e.run("--force", e.manifest); code != 0 || e.stderr.String() != "rendered f\nimposed f-2up-a4.pdf\n1 rendered, 0 unchanged\n" {
+		t.Errorf("--force: code %d, stderr %q", code, e.stderr.String())
+	}
+}
+
+func TestBuildTwoUpRefusesNotTwoA5(t *testing.T) {
+	needPDFEngines(t)
+	one := filepath.Join(t.TempDir(), "one.pdf")
+	if _, err := engine.Run(context.Background(), engine.Cmd{Engine: "qpdf", Args: []string{"--empty", "--pages", twoA5, "1", "--", one}, Inputs: []string{twoA5}, Outputs: []string{one}}); err != nil {
+		t.Fatal(err)
+	}
+	e := setupTwoUp(t, one)
+	if code := e.run(e.manifest); code != 1 {
+		t.Fatalf("code %d: %s", code, e.stderr.String())
+	}
+	if s := e.stderr.String(); !strings.Contains(s, "failed f: 2up: want 2 A5 pages, found 1 pages") || !strings.HasSuffix(s, "0 rendered, 0 unchanged, 1 failed\n") {
+		t.Errorf("stderr %q", s)
+	}
+	if _, err := os.Stat(filepath.Join(e.dir, "dist", "f-2up-a4.pdf")); err == nil {
+		t.Error("a sheet was written")
+	}
+}
+
+// needPDFEngines skips a test that imposes when qpdf or pdfinfo is missing.
+func needPDFEngines(t *testing.T) {
+	t.Helper()
+	for _, n := range []string{"qpdf", "pdfinfo"} {
+		if _, err := engine.Resolve(n); err != nil {
+			t.Skip(err)
+		}
+	}
+}
+
+func TestBuildTwoUpWithoutPDFIsRefused(t *testing.T) {
+	e := setup(t, "a")
+	os.WriteFile(e.manifest, []byte("a  a.html  100x50  1  png  2up\n"), 0o644)
+	if code := e.run(e.manifest); code != 2 || !strings.Contains(e.stderr.String(), e.manifest+":1: 2up needs the pdf output") {
 		t.Errorf("code %d, stderr %q", code, e.stderr.String())
 	}
 	if len(enginetest.Calls(t, e.chrome)) != 0 {
