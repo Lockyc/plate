@@ -46,7 +46,7 @@ type command struct {
 var commands = []command{
 	{"version", "print the plate version", versionMain, false},
 	{"doctor", "check every engine; --install fetches the ones plate manages", doctor.Main, false},
-	{"render", "HTML to PNG and/or PDF with headless Chrome", render.Main, false},
+	{"render", "HTML to PNG, JPEG, PDF or settled HTML with headless Chrome", render.Main, false},
 	{"build", "render every target in a manifest, skipping the unchanged ones", build.Main, false},
 	{"press", "PDF to a print master: outlined text, CMYK, checked against a soft proof", press.Main, false},
 	{"pdf", "inspect a PDF: info with a text-layer check, text, page renders, embedded images", pdf.Main, false},
