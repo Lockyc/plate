@@ -72,7 +72,7 @@ var Engines = []Engine{
 		Name: "magick", Kind: Minimum,
 		VersionArgs: []string{"-version"}, VersionRe: `Version: ImageMagick (\d+\.\d+\.\d+(?:-\d+)?)`, Min: "7.1.0",
 		Install: map[string]string{"darwin": "brew install imagemagick", "linux": "install ImageMagick from https://imagemagick.org/script/download.php (distribution packages are often too old)"},
-		UsedBy:  []string{"cutout", "infill", "inpaint", "grade", "upscale", "shrink"},
+		UsedBy:  []string{"cutout", "infill", "inpaint", "grade", "upscale", "shrink", "render", "build"},
 	},
 	{
 		Name: "gs", Kind: Minimum,
@@ -80,11 +80,11 @@ var Engines = []Engine{
 		Install: map[string]string{"darwin": "brew install ghostscript", "linux": "sudo apt install ghostscript"},
 		UsedBy:  []string{"press"},
 	},
-	poppler("pdfinfo", "render", "press", "pdf"),
+	poppler("pdfinfo", "render", "build", "press", "pdf"),
 	poppler("pdffonts", "press"),
 	poppler("pdfimages", "press", "pdf"),
-	poppler("pdftotext", "render", "pdf"),
-	poppler("pdftoppm", "pdf"),
+	poppler("pdftotext", "render", "build", "pdf"),
+	poppler("pdftoppm", "render", "build", "pdf"),
 	{
 		Name: "pandoc", Kind: Minimum,
 		VersionArgs: []string{"--version"}, VersionRe: `pandoc (\d+\.\d+(?:\.\d+)*)`, Min: "3.0",
@@ -128,7 +128,7 @@ var Engines = []Engine{
 			"darwin/amd64": chs("mac-x64", "a54292aaacbb77f76f6ef47558e7c51ab884044e0adacca315567f83c060bcc4"),
 			"linux/amd64":  chs("linux64", "636aa5c79f2693632e9921b8bbb050038ba11672e02346c06c20f991aed096f9"),
 		}},
-		UsedBy: []string{"render", "doc", "slides"},
+		UsedBy: []string{"render", "build", "doc", "slides"},
 	},
 }
 
