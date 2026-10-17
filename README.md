@@ -60,6 +60,9 @@ it needs `--size` and refuses `--transparent`.
 edge, where a printer cannot print: on every page of the PDF, or on the PNG
 when there is no PDF.
 
+`render` fails a local page that loads a `file://` URL, which Chrome blocks
+on a served page; reference the file by a relative or absolute path.
+
 `render` skips a local page whose outputs are still those its last
 successful run with the same options made, and prints `unchanged: <output>`.
 plate records every file the page loaded and every output, each with its

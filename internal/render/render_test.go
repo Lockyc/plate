@@ -37,6 +37,7 @@ load
 for u in $FIXTURE_URLS; do
   [ -n "$proxy" ] && curl -s -o /dev/null -x "$proxy" "$u"
 done
+[ -n "$FIXTURE_STDERR" ] && printf '%s\n' "$FIXTURE_STDERR" >&2
 [ -n "$FIXTURE_AFTER" ] && sh -c "$FIXTURE_AFTER"
 [ -n "$FIXTURE_RELOAD" ] && load
 exit ${CHROME_EXIT:-0}`

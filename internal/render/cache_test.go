@@ -427,3 +427,34 @@ func TestCacheKeyQualityDefaultEqualsExplicit(t *testing.T) {
 		t.Error("an explicit default --quality missed the record of the implicit one")
 	}
 }
+
+// Chrome blocks a file:// subresource of a served page and says so only in
+// a console line on stderr, exiting 0. Each Chrome stage fails on it, names
+// the URL, and leaves no output and no record.
+func TestBlockedFileURLFails(t *testing.T) {
+	const blocked = "file:///art/hero.png"
+	for name, args := range map[string][]string{
+		"png":  {"--size", "100x50", "--scale", "2", "--png"},
+		"pdf":  {"--pdf"},
+		"html": {"--html"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := cacheEnv(t)
+			t.Setenv("PDF_BOX", "75 x 37.5 pts")
+			t.Setenv("FIXTURE_STDERR", `[1017/120000.000000:INFO:CONSOLE(1)] "Not allowed to load local resource: `+blocked+`", source: http://plate.invalid/page.html (1)`)
+			out := e.out("p." + name)
+			if code := e.run(append(args, out, e.page)...); code != 1 {
+				t.Fatalf("code %d: %s", code, e.stderr.String())
+			}
+			if msg := e.stderr.String(); !strings.Contains(msg, blocked) || !strings.Contains(msg, "relative or absolute path") {
+				t.Errorf("stderr %q does not name %s and the fix", msg, blocked)
+			}
+			if exists(out) {
+				t.Error("the output was written")
+			}
+			if recs := records(t); len(recs) != 0 {
+				t.Errorf("records %q", recs)
+			}
+		})
+	}
+}

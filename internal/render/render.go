@@ -19,6 +19,8 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -583,7 +585,7 @@ func (j job) screenshot(ctx context.Context) error {
 		// The DOM comes from the same page load the screenshot shows.
 		args = append(args, "--dump-dom")
 	}
-	res, err := engine.Run(ctx, engine.Cmd{Engine: chrome, Args: append(args, j.url), Inputs: j.inputs(), Outputs: []string{j.png}, Timeout: 15 * time.Minute})
+	res, err := j.chromeRun(ctx, engine.Cmd{Args: append(args, j.url), Outputs: []string{j.png}})
 	if err != nil {
 		return err
 	}
@@ -634,7 +636,7 @@ func (j job) print(ctx context.Context) error {
 		// them.
 		args = append(args, "--dump-dom")
 	}
-	res, err := engine.Run(ctx, engine.Cmd{Engine: chrome, Args: append(args, j.url), Inputs: j.inputs(), Outputs: []string{j.pdf}, Timeout: 15 * time.Minute})
+	res, err := j.chromeRun(ctx, engine.Cmd{Args: append(args, j.url), Outputs: []string{j.pdf}})
 	if err != nil {
 		return err
 	}
@@ -674,7 +676,7 @@ func (j job) print(ctx context.Context) error {
 // ends in </html> — is the test.
 func (j job) dump(ctx context.Context) error {
 	args := append(j.base(), "--dump-dom", j.url)
-	res, err := engine.Run(ctx, engine.Cmd{Engine: chrome, Args: args, Inputs: j.inputs(), Timeout: 15 * time.Minute, AllowExit: true})
+	res, err := j.chromeRun(ctx, engine.Cmd{Args: args, AllowExit: true})
 	if err != nil {
 		return err
 	}
@@ -686,6 +688,31 @@ func (j job) dump(ctx context.Context) error {
 		return err
 	}
 	return os.WriteFile(j.html, []byte(dom), 0o644)
+}
+
+// blockedRe is the console line Chrome logs on stderr, and nowhere else,
+// when it refuses a file:// subresource of an http page, which every local
+// page is under plate's proxy.
+var blockedRe = regexp.MustCompile(`Not allowed to load local resource: ([^\s"]+)`)
+
+// chromeRun runs Chrome with args and fails when it refused a file://
+// subresource: Chrome draws the page without it and exits 0.
+func (j job) chromeRun(ctx context.Context, c engine.Cmd) (engine.Result, error) {
+	c.Engine, c.Inputs, c.Timeout = chrome, j.inputs(), 15*time.Minute
+	res, err := engine.Run(ctx, c)
+	if err != nil {
+		return res, err
+	}
+	var urls []string
+	for _, m := range blockedRe.FindAllStringSubmatch(string(res.Stderr), -1) {
+		if !slices.Contains(urls, m[1]) {
+			urls = append(urls, m[1])
+		}
+	}
+	if len(urls) > 0 {
+		return res, fmt.Errorf("Chrome blocked %s: a local page cannot load file:// URLs; reference the file by a relative or absolute path", strings.Join(urls, ", "))
+	}
+	return res, nil
 }
 
 func sentinel(text string, failIf []string) error {

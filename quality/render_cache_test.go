@@ -3,13 +3,17 @@
 package quality
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"fmt"
+	"image"
+	"image/png"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/lockyc/plate/internal/engine"
@@ -158,4 +162,30 @@ func diffPixels(t *testing.T, a, b string) int {
 		}
 	}
 	return n
+}
+
+// Chrome refuses a file:// image on the served page, logs it only to
+// stderr and exits 0; the render must fail rather than draw without it.
+func TestRealRenderBlockedFileURL(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	dir := t.TempDir()
+	img := filepath.Join(dir, "dot.png")
+	var b bytes.Buffer
+	png.Encode(&b, image.NewGray(image.Rect(0, 0, 50, 50)))
+	if err := os.WriteFile(img, b.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	page := filepath.Join(dir, "index.html")
+	body := `<!doctype html><meta charset=utf-8><body style="margin:0"><img src="file://` + filepath.ToSlash(img) + `">`
+	if err := os.WriteFile(page, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	o := render.Options{Page: page, PNG: filepath.Join(t.TempDir(), "p.png"), W: 200, H: 100, Scale: 1, Budget: render.DefaultBudget}
+	_, err := render.Run(context.Background(), o, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "file://"+filepath.ToSlash(img)) {
+		t.Fatalf("err %v, want the blocked file:// URL named", err)
+	}
+	if _, err := os.Stat(o.PNG); err == nil {
+		t.Error("the PNG was written")
+	}
 }
