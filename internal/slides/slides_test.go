@@ -145,6 +145,13 @@ func TestPage(t *testing.T) {
 	if !strings.Contains(second, "background:rgb(0,0,0);") {
 		t.Errorf("a theme-coloured background, DARK1 with no channels, is black:\n%s", second)
 	}
+
+	pictured := parse(t, `{"slides": [{"objectId": "p", "pageProperties": {"pageBackgroundFill": {"stretchedPictureFill": {"contentUrl": "BG_URL"}}}}]}`)
+	bg := newBuilder(pictured).page(&pictured.Slides[0], 720, 405, "fonts.css")
+	// <style> is raw text: an entity there is not decoded, and breaks the CSS.
+	if want := "background:url('" + imageName("BG_URL") + "') 0 0/100% 100% no-repeat;"; !strings.Contains(bg, want) {
+		t.Errorf("page lacks %s\n%s", want, bg)
+	}
 }
 
 func TestWeight(t *testing.T) {

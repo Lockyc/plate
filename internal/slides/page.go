@@ -185,9 +185,12 @@ func (b *builder) page(s *Page, w, h float64, fontsCSS string) string {
 	for _, e := range s.PageElements {
 		b.element(&body, &e, identity)
 	}
+	// bg goes into <style> unescaped: its text is raw there, so an entity
+	// would reach the CSS parser as written. plate built it from a colour
+	// or an image name, so it holds no "</".
 	return fmt.Sprintf("<!doctype html><meta charset=utf-8><link rel=stylesheet href=\"%s\">"+
 		"<style>html,body{margin:0}body{width:%gpx;height:%gpx;position:relative;overflow:hidden;%sfont-family:Arial}p{margin:0}</style>\n%s",
-		html.EscapeString(fontsCSS), w, h, html.EscapeString(bg), body.String())
+		html.EscapeString(fontsCSS), w, h, bg, body.String())
 }
 
 // image returns the local name for url, registering it to be fetched.
