@@ -135,3 +135,43 @@ func TestManifestReadErrorIsNotALineError(t *testing.T) {
 		}
 	}
 }
+
+func TestManifestTwoUp(t *testing.T) {
+	path, dir := manifest(t, "f f.html 560x792 1 pdf,png 2up\ng g.html 560x792 1 pdf\n")
+	out := filepath.Join(dir, "dist")
+	ts, err := ParseManifest(path, out, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ts[0].TwoUp != filepath.Join(out, "f-2up-a4.pdf") || ts[1].TwoUp != "" {
+		t.Errorf("f 2up %q, g 2up %q", ts[0].TwoUp, ts[1].TwoUp)
+	}
+}
+
+func TestManifestTwoUpBadLines(t *testing.T) {
+	for _, line := range []string{
+		"a a.html 560x792 1 png 2up",
+		"a a.html 560x792 1 pdf 2up=1",
+		"a a.html 560x792 1 pdf 2up 2up",
+		"OK-2up-a4 b.html 560x792 1 pdf",
+	} {
+		path, _ := manifest(t, "ok ok.html 560x792 1 pdf 2up\n"+line+"\n")
+		_, err := ParseManifest(path, t.TempDir(), nil)
+		var le *LineError
+		if !errors.As(err, &le) || le.Line != 2 {
+			t.Errorf("%q: %v", line, err)
+		}
+	}
+	path, _ := manifest(t, "a a.html 560x792 1 png 2up\n")
+	if _, err := ParseManifest(path, t.TempDir(), nil); err == nil || !strings.Contains(err.Error(), "2up needs the pdf output") {
+		t.Errorf("2up without pdf: %v", err)
+	}
+}
+
+func TestManifestTwoUpCollidesWithEarlierTarget(t *testing.T) {
+	path, _ := manifest(t, "a-2up-a4 b.html 560x792 1 pdf\na a.html 560x792 1 pdf 2up\n")
+	_, err := ParseManifest(path, t.TempDir(), nil)
+	if err == nil || !strings.Contains(err.Error(), ":2: ") || !strings.Contains(err.Error(), "line 1") {
+		t.Errorf("err %v", err)
+	}
+}

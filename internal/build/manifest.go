@@ -19,6 +19,8 @@ type Target struct {
 	Name string
 	Line int
 	Opts render.Options
+	// TwoUp is the A4 sheet the 2up option imposes Opts.PDF onto, or "".
+	TwoUp string
 }
 
 // kinds maps each output kind a manifest names to its file extension and
@@ -40,8 +42,10 @@ var kinds = map[string]struct {
 // with a field starting "#" commenting out the rest of the line. The page is
 // relative to the manifest's directory and may carry a ?query; outputs is a
 // comma list of pdf, png, jpeg and html, written to outDir/name.{pdf,png,jpg,html};
-// the options are blank-margin=PX, transparent, budget=MS and quality=Q.
-// Every target gets failIf. Each target is checked by render.Validate here,
+// the options are blank-margin=PX, transparent, budget=MS, quality=Q and
+// 2up, which imposes the target's PDF onto outDir/name-2up-a4.pdf as `plate
+// impose` does. No two targets may write the same file. Every target gets
+// failIf. Each target is checked by render.Validate here,
 // so a manifest with one bad target is refused before anything renders.
 // A bad line is a *LineError; any other error is the manifest's file
 // failing to read.
@@ -58,6 +62,9 @@ func ParseManifest(path, outDir string, failIf []string) ([]Target, error) {
 	// Each name's index in ts, keyed lower-cased: on a case-insensitive
 	// filesystem Promo and promo write the same files.
 	first := map[string]int{}
+	// The same for each output file: name-2up-a4.pdf is also target
+	// name-2up-a4's PDF.
+	writer := map[string]int{}
 	for i, line := range strings.Split(string(b), "\n") {
 		fields := strings.Fields(line)
 		for k, f := range fields {
@@ -77,11 +84,22 @@ func ParseManifest(path, outDir string, failIf []string) ([]Target, error) {
 				err = fmt.Errorf("target %q is already on line %d, as %q", t.Name, ts[prev].Line, ts[prev].Name)
 			}
 		}
+		if err == nil {
+			for _, out := range t.Outputs() {
+				if prev, dup := writer[strings.ToLower(out)]; dup {
+					err = fmt.Errorf("%s is also written by %q on line %d", filepath.Base(out), ts[prev].Name, ts[prev].Line)
+					break
+				}
+			}
+		}
 		if err != nil {
 			return nil, &LineError{Path: path, Line: n, Err: err}
 		}
 		t.Line = n
 		first[key] = len(ts)
+		for _, out := range t.Outputs() {
+			writer[strings.ToLower(out)] = len(ts)
+		}
 		ts = append(ts, t)
 	}
 	return ts, nil
@@ -136,6 +154,7 @@ func parseLine(fields []string, dir, outDir string, failIf []string) (Target, er
 		}
 		*slot = filepath.Join(outDir, name+k.ext)
 	}
+	t := Target{Name: name}
 	seen := map[string]bool{}
 	for _, opt := range fields[5:] {
 		key, val, hasVal := strings.Cut(opt, "=")
@@ -145,11 +164,15 @@ func parseLine(fields []string, dir, outDir string, failIf []string) (Target, er
 		seen[key] = true
 		var num *int
 		switch key {
-		case "transparent":
+		case "transparent", "2up":
 			if hasVal {
-				return Target{}, errors.New("transparent takes no value")
+				return Target{}, fmt.Errorf("%s takes no value", key)
 			}
-			o.Transparent = true
+			if key == "transparent" {
+				o.Transparent = true
+			} else {
+				t.TwoUp = filepath.Join(outDir, name+twoUpSuffix)
+			}
 			continue
 		case "blank-margin":
 			num = &o.BlankMargin
@@ -159,7 +182,7 @@ func parseLine(fields []string, dir, outDir string, failIf []string) (Target, er
 			o.Quality = new(int)
 			num = o.Quality
 		default:
-			return Target{}, fmt.Errorf("option %q: want blank-margin=PX, transparent, budget=MS or quality=Q", opt)
+			return Target{}, fmt.Errorf("option %q: want blank-margin=PX, transparent, budget=MS, quality=Q or 2up", opt)
 		}
 		v, err := strconv.ParseInt(val, 10, strconv.IntSize)
 		if !hasVal || err != nil {
@@ -167,8 +190,25 @@ func parseLine(fields []string, dir, outDir string, failIf []string) (Target, er
 		}
 		*num = int(v)
 	}
+	if t.TwoUp != "" && o.PDF == "" {
+		return Target{}, errors.New("2up needs the pdf output: it imposes the target's PDF")
+	}
 	if err := o.Validate(); err != nil {
 		return Target{}, err
 	}
-	return Target{Name: name, Opts: o}, nil
+	t.Opts = o
+	return t, nil
+}
+
+// twoUpSuffix ends the name of the sheet the 2up option writes.
+const twoUpSuffix = "-2up-a4.pdf"
+
+// Outputs lists every file t writes: its render's outputs, then the 2up
+// sheet.
+func (t Target) Outputs() []string {
+	out := t.Opts.Outputs()
+	if t.TwoUp != "" {
+		out = append(out, t.TwoUp)
+	}
+	return out
 }

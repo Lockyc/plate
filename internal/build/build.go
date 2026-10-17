@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/lockyc/plate/internal/cli"
 	"github.com/lockyc/plate/internal/engine"
+	"github.com/lockyc/plate/internal/impose"
 	"github.com/lockyc/plate/internal/render"
 )
 
@@ -24,10 +26,37 @@ const usage = "build [--out DIR] [--jobs N] [--force] [--fail-if TEXT]... <manif
 // result is one target's render: its warnings, buffered so they print with
 // its line, and how it went.
 type result struct {
-	warn bytes.Buffer
-	res  render.Result
-	err  error
-	done chan struct{}
+	warn    bytes.Buffer
+	res     render.Result
+	imposed bool // the 2up sheet was written
+	err     error
+	done    chan struct{}
+}
+
+// twoUp writes t's 2up sheet after its render: when the PDF was rendered,
+// or the sheet is missing or older than the PDF. A render that failed
+// leaves no PDF, so its sheet goes too.
+func twoUp(ctx context.Context, t Target, res render.Result, renderErr error) (imposed bool, err error) {
+	if renderErr != nil {
+		if err := os.Remove(t.TwoUp); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return false, errors.Join(renderErr, err)
+		}
+		return false, renderErr
+	}
+	if res.Outcome == render.Unchanged {
+		pdf, err := os.Stat(t.Opts.PDF)
+		if err != nil {
+			return false, err
+		}
+		if sheet, err := os.Stat(t.TwoUp); err == nil && !sheet.ModTime().Before(pdf.ModTime()) {
+			return false, nil
+		}
+	}
+	if err := impose.Run(ctx, t.Opts.PDF, t.TwoUp, false, true); err != nil {
+		os.Remove(t.TwoUp)
+		return false, fmt.Errorf("2up: %w", err)
+	}
+	return true, nil
 }
 
 // Main runs `plate build`. A target that fails does not stop the others;
@@ -90,6 +119,9 @@ func Main(ctx context.Context, args []string, _, stderr io.Writer) int {
 			}
 			defer func() { <-sem }()
 			r.res, r.err = render.Run(ctx, t.Opts, &r.warn)
+			if t.TwoUp != "" {
+				r.imposed, r.err = twoUp(ctx, t, r.res, r.err)
+			}
 		}()
 	}
 	var rendered, unchanged, failed int
@@ -114,6 +146,9 @@ func Main(ctx context.Context, args []string, _, stderr io.Writer) int {
 			rendered++
 			fmt.Fprintf(stderr, "rendered %s\n", name)
 		}
+		if r.err == nil && r.imposed {
+			fmt.Fprintf(stderr, "imposed %s\n", filepath.Base(targets[i].TwoUp))
+		}
 	}
 	if failed > 0 {
 		fmt.Fprintf(stderr, "%d rendered, %d unchanged, %d failed\n", rendered, unchanged, failed)
@@ -131,7 +166,7 @@ func loadsOutput(t Target, inputs []string, all []Target) error {
 		if o.Name == t.Name {
 			continue
 		}
-		for _, out := range o.Opts.Outputs() {
+		for _, out := range o.Outputs() {
 			for _, in := range inputs {
 				if engine.SameFile(in, out) {
 					return fmt.Errorf("loads %s's output %s; render %s in a step before plate build, or split the manifest", o.Name, out, o.Name)
