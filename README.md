@@ -7,7 +7,7 @@
 
 Image, render and document operations for print and web pipelines, as one
 command: lift a subject out of a photo, fill, enlarge or shrink artwork, render HTML to
-PNG, JPEG, PDF or its settled DOM, skipping what has not changed, preview a Google Slides deck, turn markdown into a
+PNG, JPEG, PDF or its settled DOM, preview a Google Slides deck, turn markdown into a
 PDF, look inside a PDF, make a press-ready PDF, match a colour grade. Each
 operation wraps an engine at a pinned version, and its output is checked
 against a committed set of test images.
@@ -81,9 +81,11 @@ The page is relative to the manifest and may carry a `?query`; each output
 (`pdf`, `png`, `jpeg`, `html`) goes to `--out`, by default `dist` beside the
 manifest, as `name.pdf`, `name.png`, `name.jpg` or `name.html`. The options
 are `blank-margin=PX`, `transparent`, `budget=MS` and `quality=Q`. Naming
-targets renders only those. It logs `rendered`, `unchanged` or `failed` for
-each target in manifest order, then a count; a failed target exits 1, and a
-bad manifest exits 2 before anything renders.
+targets renders only those. It logs `rendered NAME`, `rendered NAME (not
+cached: REASON)`, `unchanged NAME` or `failed NAME: ERROR` for each target
+in manifest order, then a count. A failed target exits 1, and so does an
+unreadable manifest; an invalid manifest line or an unknown target name
+exits 2 before anything renders.
 
 A PDF from `render --pdf` or `doc` is dated `SOURCE_DATE_EPOCH`, or
 1970-01-01 when that is unset, so an unchanged page renders to identical
@@ -114,9 +116,10 @@ drawn either.
 format; `o.png o.webp` writes both, so you can keep the smaller. WebP is lossy at `--quality` (default 90) with
 lossless alpha.
 
-`render` runs the page outside Chrome's sandbox with open network access, and
-a local page can read any of your files through plate's proxy, which is how
-it loads its own: give it only pages you trust.
+`render` runs the page outside Chrome's sandbox with open network access. A
+local page, and any script it runs, including one loaded from the network,
+can read any file you can by absolute path through plate's proxy; a remote
+page cannot. Give it only pages you trust.
 
 ⚠ These commands create pixels the source never had. A project that forbids
 this puts `synthesis = "forbid"` in a `plate.toml`, and they refuse to run.
