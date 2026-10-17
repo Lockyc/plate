@@ -6,6 +6,7 @@ package build
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -62,11 +63,11 @@ func Main(ctx context.Context, args []string, _, stderr io.Writer) int {
 		return cli.Fail(stderr, "build", err)
 	}
 	all, err := ParseManifest(path, dir, failIf)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return cli.Fail(stderr, "build", err)
-		}
+	if le := (*LineError)(nil); errors.As(err, &le) {
 		return cli.Usage(stderr, "build", "%v", err)
+	}
+	if err != nil {
+		return cli.Fail(stderr, "build", err)
 	}
 	targets, err := selectTargets(all, rest[1:], path)
 	if err != nil {

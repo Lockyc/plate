@@ -34,7 +34,8 @@ var ext = map[string]string{"pdf": ".pdf", "png": ".png", "jpeg": ".jpg", "html"
 // the options are blank-margin=PX, transparent, budget=MS and quality=Q.
 // Every target gets failIf. Each target is checked by render.Validate here,
 // so a manifest with one bad target is refused before anything renders.
-// An error names the line as path:line.
+// A bad line is a *LineError; any other error is the manifest's file
+// failing to read.
 func ParseManifest(path, outDir string, failIf []string) ([]Target, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -45,6 +46,8 @@ func ParseManifest(path, outDir string, failIf []string) ([]Target, error) {
 		return nil, err
 	}
 	var ts []Target
+	// Each name's index in ts, keyed lower-cased: on a case-insensitive
+	// filesystem Promo and promo write the same files.
 	first := map[string]int{}
 	for i, line := range strings.Split(string(b), "\n") {
 		fields := strings.Fields(line)
@@ -59,20 +62,32 @@ func ParseManifest(path, outDir string, failIf []string) ([]Target, error) {
 		}
 		n := i + 1
 		t, err := parseLine(fields, dir, outDir, failIf)
+		key := strings.ToLower(t.Name)
 		if err == nil {
-			if prev, dup := first[t.Name]; dup {
-				err = fmt.Errorf("target %q is already on line %d", t.Name, prev)
+			if prev, dup := first[key]; dup {
+				err = fmt.Errorf("target %q is already on line %d, as %q", t.Name, ts[prev].Line, ts[prev].Name)
 			}
 		}
 		if err != nil {
-			return nil, fmt.Errorf("%s:%d: %w", path, n, err)
+			return nil, &LineError{Path: path, Line: n, Err: err}
 		}
 		t.Line = n
-		first[t.Name] = n
+		first[key] = len(ts)
 		ts = append(ts, t)
 	}
 	return ts, nil
 }
+
+// LineError is a manifest line that is not a valid target.
+type LineError struct {
+	Path string // the manifest, as given
+	Line int
+	Err  error
+}
+
+func (e *LineError) Error() string { return fmt.Sprintf("%s:%d: %v", e.Path, e.Line, e.Err) }
+
+func (e *LineError) Unwrap() error { return e.Err }
 
 func parseLine(fields []string, dir, outDir string, failIf []string) (Target, error) {
 	if len(fields) < 5 {
@@ -84,15 +99,16 @@ func parseLine(fields []string, dir, outDir string, failIf []string) (Target, er
 	}
 	o := render.Options{Budget: render.DefaultBudget, FailIf: failIf}
 	file, query, hasQuery := strings.Cut(page, "?")
+	if filepath.IsAbs(file) || strings.HasPrefix(file, "/") || strings.Contains(file, "://") {
+		return Target{}, fmt.Errorf("page %q must be relative to the manifest", page)
+	}
 	o.Page = filepath.Join(dir, filepath.FromSlash(file))
 	if hasQuery {
 		o.Page = (&url.URL{Scheme: "file", Path: filepath.ToSlash(o.Page), RawQuery: query}).String()
 	}
-	ws, hs, ok := strings.Cut(size, "x")
-	w, err1 := strconv.Atoi(ws)
-	h, err2 := strconv.Atoi(hs)
-	if !ok || err1 != nil || err2 != nil {
-		return Target{}, fmt.Errorf("size %q: want WxH in CSS px, e.g. 1200x900", size)
+	w, h, err := render.ParseSize(size)
+	if err != nil {
+		return Target{}, err
 	}
 	o.W, o.H = w, h
 	s, ok := cli.Finite(scale)

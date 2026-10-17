@@ -1,6 +1,7 @@
 package build
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -89,11 +90,48 @@ func TestManifestBadLines(t *testing.T) {
 		"a a.html 100x50 1 jpeg quality=101",
 		"a a.html 100x50 1 jpeg transparent",
 		"../a a.html 100x50 1 png",
+		"a a.html 0x0 1 png",
+		"a a.html -5x50 1 png",
+		"a /abs/a.html 100x50 1 png",
+		"a http://example.org/a.html 100x50 1 png",
+		"a file:///a.html?x=1 100x50 1 png",
+		"OK b.html 100x50 1 png",
 	} {
 		path, _ := manifest(t, "# header\nok ok.html 100x50 1 png\n"+line+"\n")
 		_, err := ParseManifest(path, t.TempDir(), nil)
-		if err == nil || !strings.HasPrefix(err.Error(), path+":3: ") {
+		var le *LineError
+		if !errors.As(err, &le) || le.Line != 3 || !strings.HasPrefix(err.Error(), path+":3: ") {
 			t.Errorf("%q: %v", line, err)
+		}
+	}
+}
+
+func TestManifestCaseInsensitiveNames(t *testing.T) {
+	path, _ := manifest(t, "promo a.html 100x50 1 png\nPromo b.html 100x50 1 png\n")
+	_, err := ParseManifest(path, t.TempDir(), nil)
+	if err == nil || !strings.Contains(err.Error(), ":2: ") || !strings.Contains(err.Error(), `line 1, as "promo"`) {
+		t.Errorf("err %v", err)
+	}
+}
+
+func TestManifestCRLFAndBlankLines(t *testing.T) {
+	path, _ := manifest(t, "# header\r\n \t \r\na a.html 100x50 1 png\r\n\r\nb b.html 100x50 1 pdf budget=10\r\n")
+	ts, err := ParseManifest(path, t.TempDir(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ts) != 2 || ts[0].Line != 3 || ts[1].Line != 5 || ts[1].Opts.Budget != 10 || !strings.HasSuffix(ts[1].Opts.PDF, "b.pdf") {
+		t.Errorf("targets %+v", ts)
+	}
+}
+
+func TestManifestReadErrorIsNotALineError(t *testing.T) {
+	dir := t.TempDir()
+	for _, path := range []string{filepath.Join(dir, "missing.conf"), dir} {
+		_, err := ParseManifest(path, t.TempDir(), nil)
+		var le *LineError
+		if err == nil || errors.As(err, &le) {
+			t.Errorf("%s: %v", path, err)
 		}
 	}
 }

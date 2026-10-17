@@ -280,9 +280,9 @@ func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		}
 	})
 	if *size != "" {
-		w, h, err := parseSize(*size)
+		w, h, err := ParseSize(*size)
 		if err != nil {
-			return usageErr(err.Error())
+			return usageErr("--" + err.Error())
 		}
 		o.W, o.H = w, h
 	}
@@ -324,12 +324,15 @@ func PNG(ctx context.Context, page, out string, w, h int, scale float64) error {
 	return err
 }
 
-func parseSize(s string) (int, int, error) {
+// ParseSize reads a size written WxH in CSS px, both sides above 0. A
+// written size is never 0x0: Options takes 0x0 as no size at all, which
+// Validate cannot tell from a size someone wrote, so the refusal is here.
+func ParseSize(s string) (w, h int, err error) {
 	ws, hs, ok := strings.Cut(s, "x")
 	w, err1 := strconv.Atoi(ws)
 	h, err2 := strconv.Atoi(hs)
 	if !ok || err1 != nil || err2 != nil || w <= 0 || h <= 0 {
-		return 0, 0, fmt.Errorf("--size %q: want WxH in CSS px, e.g. 1200x900", s)
+		return 0, 0, fmt.Errorf("size %q: want WxH in CSS px, e.g. 1200x900", s)
 	}
 	return w, h, nil
 }

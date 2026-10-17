@@ -5,10 +5,13 @@ import (
 	"context"
 	"image"
 	"image/png"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/lockyc/plate/internal/enginetest"
 )
@@ -24,6 +27,13 @@ done
 page=
 for a in "$@"; do page=$a; done
 [ -n "$proxy" ] && curl -s -o /dev/null -x "$proxy" "$page"
+for u in $FIXTURE_URLS; do
+  [ -n "$proxy" ] && curl -s -o /dev/null -x "$proxy" "$u"
+done
+if [ -n "$CANCEL_URL" ]; then
+  curl -s -o /dev/null "$CANCEL_URL"
+  sleep 30
+fi
 exit 0`
 
 type env struct {
@@ -38,6 +48,8 @@ func setup(t *testing.T, names ...string) *env {
 	e := &env{chrome: enginetest.Stub(t, "chrome-headless-shell", chromeStub), dir: t.TempDir()}
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	t.Setenv("SOURCE_DATE_EPOCH", "")
+	t.Setenv("FIXTURE_URLS", "")
+	t.Setenv("CANCEL_URL", "")
 	fix := filepath.Join(t.TempDir(), "fixture.png")
 	f, err := os.Create(fix)
 	if err != nil {
@@ -56,10 +68,12 @@ func setup(t *testing.T, names ...string) *env {
 	return e
 }
 
-func (e *env) run(args ...string) int {
+func (e *env) run(args ...string) int { return e.runCtx(context.Background(), args...) }
+
+func (e *env) runCtx(ctx context.Context, args ...string) int {
 	e.stdout.Reset()
 	e.stderr.Reset()
-	return Main(context.Background(), args, &e.stdout, &e.stderr)
+	return Main(ctx, args, &e.stdout, &e.stderr)
 }
 
 func (e *env) built(name string) bool {
@@ -130,12 +144,77 @@ func TestBuildContinuesPastFailure(t *testing.T) {
 
 func TestBuildBadManifestRendersNothing(t *testing.T) {
 	e := setup(t, "a")
-	os.WriteFile(e.manifest, []byte("a a.html 100x50 1 png\nb b.html 100x50 1 gif\n"), 0o644)
-	if code := e.run(e.manifest); code != 2 || !strings.Contains(e.stderr.String(), e.manifest+":2: ") {
-		t.Errorf("code %d, stderr %q", code, e.stderr.String())
+	for _, bad := range []string{"b b.html 100x50 1 gif", "b b.html 0x0 1 png", "A b.html 100x50 1 png"} {
+		os.WriteFile(e.manifest, []byte("a a.html 100x50 1 png\n"+bad+"\n"), 0o644)
+		if code := e.run(e.manifest); code != 2 || !strings.Contains(e.stderr.String(), e.manifest+":2: ") {
+			t.Errorf("%q: code %d, stderr %q", bad, code, e.stderr.String())
+		}
 	}
 	if len(enginetest.Calls(t, e.chrome)) != 0 {
 		t.Error("chrome ran for a bad manifest")
+	}
+}
+
+func TestBuildUnreadableManifestFails(t *testing.T) {
+	e := setup(t)
+	for _, path := range []string{filepath.Join(e.dir, "missing.conf"), e.dir} {
+		if code := e.run(path); code != 1 || !strings.HasPrefix(e.stderr.String(), "plate build: ") {
+			t.Errorf("%s: code %d, stderr %q", path, code, e.stderr.String())
+		}
+	}
+}
+
+func TestBuildReportsNotCached(t *testing.T) {
+	e := setup(t, "a")
+	t.Setenv("FIXTURE_URLS", "http://example.invalid/")
+	if code := e.run(e.manifest); code != 0 {
+		t.Fatalf("code %d: %s", code, e.stderr.String())
+	}
+	if s := e.stderr.String(); !strings.Contains(s, "rendered a (not cached: ") || !strings.HasSuffix(s, "1 rendered, 0 unchanged\n") {
+		t.Errorf("stderr %q", s)
+	}
+}
+
+func TestBuildQueryPageInSpacedDir(t *testing.T) {
+	e := setup(t)
+	dir := filepath.Join(e.dir, "with space")
+	os.Mkdir(dir, 0o755)
+	os.WriteFile(filepath.Join(dir, "q.html"), []byte("<html>q</html>"), 0o644)
+	m := filepath.Join(dir, "m.conf")
+	os.WriteFile(m, []byte("q q.html?m=date 100x50 1 png\n"), 0o644)
+	if code := e.run(m); code != 0 {
+		t.Fatalf("code %d: %s", code, e.stderr.String())
+	}
+	if _, err := os.Stat(filepath.Join(dir, "dist", "q.png")); err != nil {
+		t.Error(err)
+	}
+	calls := enginetest.Calls(t, e.chrome)
+	if len(calls) != 1 || !strings.HasSuffix(calls[0][len(calls[0])-1], "?m=date") {
+		t.Errorf("chrome calls %q", calls)
+	}
+}
+
+// The stub's first call cancels the build and then hangs; the hung render is
+// killed and the queued one never starts.
+func TestBuildCancelled(t *testing.T) {
+	e := setup(t, "a", "b")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { cancel() }))
+	defer srv.Close()
+	t.Setenv("CANCEL_URL", srv.URL)
+	start := time.Now()
+	if code := e.runCtx(ctx, "--jobs", "1", e.manifest); code != 1 {
+		t.Fatalf("code %d: %s", code, e.stderr.String())
+	}
+	if d := time.Since(start); d > 20*time.Second {
+		t.Errorf("took %v: the hung render was not killed", d)
+	}
+	if s := e.stderr.String(); !strings.Contains(s, "failed a: ") || !strings.Contains(s, "failed b: ") || !strings.Contains(s, "0 rendered, 0 unchanged, 2 failed") {
+		t.Errorf("stderr %q", s)
+	}
+	if n := len(enginetest.Calls(t, e.chrome)); n != 1 {
+		t.Errorf("chrome called %d times, want 1", n)
 	}
 }
 
