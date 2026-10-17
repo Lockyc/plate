@@ -20,9 +20,9 @@ import (
 // real server.
 const plateHost = "plate.invalid"
 
-// plateURL is the URL Chrome loads for the local file at path local, with
+// PlateURL is the URL Chrome loads for the local file at path local, with
 // query (including its "?") kept so a page can still be parameterised.
-func plateURL(local, query string) string {
+func PlateURL(local, query string) string {
 	return "http://" + plateHost + (&url.URL{Path: local}).EscapedPath() + query
 }
 

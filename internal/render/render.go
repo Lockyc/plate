@@ -237,7 +237,7 @@ func (j job) run(ctx context.Context) (_ loadSet, err error) {
 			return loadSet{}, err
 		}
 		defer srv.Close()
-		j.url = plateURL(j.local, j.query)
+		j.url = PlateURL(j.local, j.query)
 		j.proxy = srv.proxyFlag()
 	}
 	loads := func() loadSet {

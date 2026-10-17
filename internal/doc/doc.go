@@ -15,7 +15,6 @@ import (
 	"fmt"
 	"html"
 	"io"
-	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -154,15 +153,11 @@ func Stage(page []byte, dir, css string) []byte {
 	} else if loc := doctypeRe.FindIndex(page); loc != nil {
 		at = loc[1]
 	}
-	block := "\n<base href=\"" + html.EscapeString(fileURL(dir)+"/") + "\">\n" +
-		"<link rel=\"stylesheet\" href=\"" + html.EscapeString(fileURL(css)) + "\">\n" +
+	block := "\n<base href=\"" + html.EscapeString(render.PlateURL(dir, "")+"/") + "\">\n" +
+		"<link rel=\"stylesheet\" href=\"" + html.EscapeString(render.PlateURL(css, "")) + "\">\n" +
 		"<script>" + titleJS + "</script>\n"
 	out := make([]byte, 0, len(page)+len(block))
 	out = append(out, page[:at]...)
 	out = append(out, block...)
 	return append(out, page[at:]...)
-}
-
-func fileURL(abs string) string {
-	return (&url.URL{Scheme: "file", Path: filepath.ToSlash(abs)}).String()
 }

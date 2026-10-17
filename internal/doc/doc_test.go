@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/lockyc/plate/internal/enginetest"
+	"github.com/lockyc/plate/internal/render"
 )
 
 // chromeStub writes the PDF and fetches the page it was given (the last
@@ -79,7 +80,7 @@ func TestMarkdownGoesThroughPandocWithTheDefaultLook(t *testing.T) {
 		t.Errorf("pandoc writes %s, want one named after the input", body)
 	}
 	page := e.staged(t)
-	if !strings.Contains(page, `<base href="file://`+filepath.ToSlash(filepath.Join(e.dir, "notes"))+`/">`) {
+	if !strings.Contains(page, `<base href="`+render.PlateURL(filepath.Join(e.dir, "notes"), "")+`/">`) {
 		t.Errorf("no <base> at the input's directory:\n%s", page)
 	}
 	if !strings.Contains(page, "--doc-title") || !strings.Contains(page, "From markdown") {
@@ -91,8 +92,8 @@ func TestMarkdownGoesThroughPandocWithTheDefaultLook(t *testing.T) {
 func TestDefaultStylesheetIsLinked(t *testing.T) {
 	e := setup(t)
 	enginetest.Stub(t, "chrome-headless-shell", chromeStub+`
-css=$(sed -n 's|.*<link rel="stylesheet" href="file://\([^"]*\)">.*|\1|p' "$CAPTURE")
-cp "$css" "$CAPTURE.css"`)
+css=$(sed -n 's|.*<link rel="stylesheet" href="\(http://plate.invalid[^"]*\)">.*|\1|p' "$CAPTURE")
+curl -s -x "$proxy" -o "$CAPTURE.css" "$css"`)
 	in := e.write("a.html", "<html><head></head><body></body></html>")
 	if code := e.run(in, filepath.Join(e.dir, "a.pdf")); code != 0 {
 		t.Fatalf("code %d: %s", code, e.stderr.String())
@@ -125,7 +126,7 @@ func TestCSSReplacesTheDefault(t *testing.T) {
 	if code := e.run("--css", css, in, filepath.Join(e.dir, "a.pdf")); code != 0 {
 		t.Fatalf("code %d: %s", code, e.stderr.String())
 	}
-	if want := `href="file://` + strings.ReplaceAll(filepath.ToSlash(css), " ", "%20") + `"`; !strings.Contains(e.staged(t), want) {
+	if want := `href="http://plate.invalid` + strings.ReplaceAll(filepath.ToSlash(css), " ", "%20") + `"`; !strings.Contains(e.staged(t), want) {
 		t.Errorf("staged page does not link %s:\n%s", want, e.staged(t))
 	}
 }
@@ -169,6 +170,15 @@ func TestStageInsertsAtTheTopOfHead(t *testing.T) {
 		}
 		if strings.Count(got, "<base") != 1 {
 			t.Errorf("Stage(%q) inserted the block more than once", page)
+		}
+	}
+}
+
+func TestStageUsesPlateOriginURLs(t *testing.T) {
+	got := string(Stage([]byte("<html><head></head></html>"), "/in dir", "/s.css"))
+	for _, want := range []string{`<base href="http://plate.invalid/in%20dir/">`, `href="http://plate.invalid/s.css"`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("staged block lacks %s:\n%s", want, got)
 		}
 	}
 }

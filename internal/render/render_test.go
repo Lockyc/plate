@@ -24,6 +24,9 @@ const chromeStub = `for a in "$@"; do
     --proxy-server=*) proxy="${a#--proxy-server=}" ;;
   esac
 done
+page=
+for a in "$@"; do page=$a; done
+[ -n "$proxy" ] && curl -s -o /dev/null -x "$proxy" "$page"
 for p in $FIXTURE_LOADS; do
   [ -n "$proxy" ] && curl -s -o /dev/null -x "$proxy" "http://plate.invalid$p"
 done
@@ -418,7 +421,7 @@ func TestRenderLoadsRecorded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(got.Files, []string{css}) || !slices.Equal(got.Missing, []string{filepath.Join(e.dir, "nope.js")}) {
+	if !slices.Equal(got.Files, []string{css, e.page}) || !slices.Equal(got.Missing, []string{filepath.Join(e.dir, "nope.js")}) {
 		t.Errorf("loads = %+v", got)
 	}
 }
@@ -441,8 +444,8 @@ func TestRenderLoadsRealPathOfAwkwardDir(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(got.Files, []string{css}) || len(got.Missing) != 0 {
-		t.Errorf("loads = %+v, want Files [%s]", got, css)
+	if !slices.Equal(got.Files, []string{page, css}) || len(got.Missing) != 0 {
+		t.Errorf("loads = %+v, want Files [%s %s]", got, page, css)
 	}
 }
 

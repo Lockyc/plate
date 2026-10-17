@@ -47,7 +47,7 @@ func TestServerServesFileAndRecords(t *testing.T) {
 		t.Fatal(err)
 	}
 	srv := startServer(t)
-	resp, err := proxied(t, srv).Get(plateURL(p, ""))
+	resp, err := proxied(t, srv).Get(PlateURL(p, ""))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +70,7 @@ func TestServerMissingAndDirectory(t *testing.T) {
 	srv := startServer(t)
 	c := proxied(t, srv)
 	for _, p := range []string{missing, tmp + "/"} {
-		resp, err := c.Get(plateURL(p, ""))
+		resp, err := c.Get(PlateURL(p, ""))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -92,7 +92,7 @@ func TestServerKeepsQuery(t *testing.T) {
 		t.Fatal(err)
 	}
 	srv := startServer(t)
-	resp, err := proxied(t, srv).Get(plateURL(p, "?m=date"))
+	resp, err := proxied(t, srv).Get(PlateURL(p, "?m=date"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +123,7 @@ func TestServerNoExtensionIsSniffed(t *testing.T) {
 		t.Fatal(err)
 	}
 	srv := startServer(t)
-	resp, err := proxied(t, srv).Get(plateURL(p, ""))
+	resp, err := proxied(t, srv).Get(PlateURL(p, ""))
 	if err != nil {
 		t.Fatal(err)
 	}
