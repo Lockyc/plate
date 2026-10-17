@@ -107,6 +107,9 @@ func pt(v float64) string { return strconv.FormatFloat(math.Round(v*100)/100, 'f
 // check refuses anything but a front and a back, each A5, both portrait or
 // both landscape.
 func check(pages []pdf.Page) error {
+	if len(pages) == 0 {
+		return fmt.Errorf("want 2 A5 pages, found 0 pages")
+	}
 	bad := pages[0]
 	for _, p := range pages {
 		if !isA5(p) {
@@ -305,10 +308,16 @@ func stream(d dict, data []byte) any {
 	return map[string]any{"stream": map[string]any{"dict": d, "data": base64.StdEncoding.EncodeToString(data)}}
 }
 
+// carried are the catalog entries that still describe the sheet: the output
+// intent a print master names, and the optional-content groups its forms'
+// content may switch on and off.
+var carried = []string{"/OutputIntents", "/OCProperties"}
+
 // update is the qpdf JSON update that turns the source into the sheet: a
 // form per source page, a sheet side drawing each twice, a new page tree,
-// and a catalog holding only that tree. The source's pages, its structure
-// tree and its outline become unreferenced, so qpdf leaves them out.
+// and a catalog holding that tree and the carried entries. The source's
+// pages, its structure tree and its outline become unreferenced, so qpdf
+// leaves them out.
 func update(ctx context.Context, in string, s *source, pages []pdf.Page, cutMark bool) ([]byte, error) {
 	var root struct {
 		Value struct {
@@ -341,7 +350,17 @@ func update(ctx context.Context, in string, s *source, pages []pdf.Page, cutMark
 		kids = append(kids, pageRef)
 	}
 	objs["obj:"+tree] = map[string]any{"value": dict{"/Type": raw("/Pages"), "/Kids": raw(kids), "/Count": raw(len(kids))}}
-	objs["obj:"+root.Value.Root] = map[string]any{"value": dict{"/Type": raw("/Catalog"), "/Pages": raw(tree)}}
+	catalog := dict{"/Type": raw("/Catalog"), "/Pages": raw(tree)}
+	old, err := s.value(root.Value.Root)
+	if err != nil {
+		return nil, err
+	}
+	for _, k := range carried {
+		if v, ok := old[k]; ok {
+			catalog[k] = v
+		}
+	}
+	objs["obj:"+root.Value.Root] = map[string]any{"value": catalog}
 	return json.Marshal(map[string]any{"qpdf": []any{s.header, objs}})
 }
 

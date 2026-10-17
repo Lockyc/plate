@@ -57,7 +57,13 @@ type tpage struct{ box, extra, content string }
 // writePDF writes a minimal PDF whose text is Helvetica.
 func writePDF(t *testing.T, pages ...tpage) string {
 	t.Helper()
-	objs := []string{"<< /Type /Catalog /Pages 2 0 R >>", ""}
+	return writePDFCatalog(t, "", pages...)
+}
+
+// writePDFCatalog is writePDF with further catalog entries.
+func writePDFCatalog(t *testing.T, catalog string, pages ...tpage) string {
+	t.Helper()
+	objs := []string{"<< /Type /Catalog /Pages 2 0 R " + catalog + " >>", ""}
 	var kids []string
 	for _, p := range pages {
 		page := len(objs) + 1
@@ -98,7 +104,7 @@ func blank(box string, n int) []tpage {
 }
 
 func TestImposeTwoA5(t *testing.T) {
-	needEngines(t, "qpdf", "gs", "pdfinfo")
+	needEngines(t, "qpdf", "pdfinfo")
 	pages, err := pdf.Pages(ctx, sheet(t, flyer))
 	if err != nil {
 		t.Fatal(err)
@@ -114,7 +120,7 @@ func TestImposeTwoA5(t *testing.T) {
 }
 
 func TestImposeKeepsText(t *testing.T) {
-	needEngines(t, "qpdf", "gs", "pdfinfo", "pdftotext")
+	needEngines(t, "qpdf", "pdfinfo", "pdftotext")
 	text, err := pdf.Text(ctx, sheet(t, flyer))
 	if err != nil {
 		t.Fatal(err)
@@ -253,7 +259,7 @@ func TestImposeBackForShortEdge(t *testing.T) {
 // under /Rotate 90, where a viewer shows it top left, and checks it is top
 // left on the sheet, so Ghostscript and place do not both apply the turn.
 func TestImposeHonoursPageRotation(t *testing.T) {
-	needEngines(t, "qpdf", "gs", "pdfinfo", "pdftoppm")
+	needEngines(t, "qpdf", "pdfinfo", "pdftoppm")
 	mark := tpage{box: "0 0 595.28 419.53", extra: "/Rotate 90", content: "0 0 0 rg 0 0 60 60 re f"}
 	out := sheet(t, writePDF(t, mark, mark))
 	png, err := pdf.RenderPages(ctx, out, filepath.Join(t.TempDir(), "pages"), 72)
@@ -275,7 +281,7 @@ func TestImposeHonoursPageRotation(t *testing.T) {
 }
 
 func TestImposeCutMark(t *testing.T) {
-	needEngines(t, "qpdf", "gs", "pdfinfo", "pdftoppm")
+	needEngines(t, "qpdf", "pdfinfo", "pdftoppm")
 	in := writePDF(t, blank(a5, 2)...)
 	for _, mark := range []bool{false, true} {
 		var flags []string
@@ -309,7 +315,7 @@ func TestImposeCutMark(t *testing.T) {
 }
 
 func TestImposeRefusesWrongInput(t *testing.T) {
-	needEngines(t, "qpdf", "gs", "pdfinfo")
+	needEngines(t, "qpdf", "pdfinfo")
 	cases := []struct {
 		pages []tpage
 		want  string
@@ -332,7 +338,7 @@ func TestImposeRefusesWrongInput(t *testing.T) {
 }
 
 func TestImposeOutput(t *testing.T) {
-	needEngines(t, "qpdf", "gs", "pdfinfo")
+	needEngines(t, "qpdf", "pdfinfo")
 	in := writePDF(t, blank(a5, 2)...)
 	out := filepath.Join(t.TempDir(), "sheet.pdf")
 	os.WriteFile(out, []byte("keep"), 0o644)
@@ -357,5 +363,63 @@ func TestImposeOutput(t *testing.T) {
 	}
 	if code, _ := impose(t, in); code != 2 {
 		t.Errorf("no -o: exit %d, want 2", code)
+	}
+}
+
+// TestImposeLandscapeOnPaper marks a landscape page's bottom-left corner (its
+// user-space origin, no /Rotate) on both sides. The front turns
+// anticlockwise, which carries that corner to the bottom right of each
+// half; the back turns clockwise, to the top left.
+func TestImposeLandscapeOnPaper(t *testing.T) {
+	needEngines(t, "qpdf", "pdfinfo", "pdftoppm")
+	mark := tpage{box: "0 0 595.28 419.53", content: "0 0 0 rg 0 0 60 60 re f"}
+	pngs, err := pdf.RenderPages(ctx, sheet(t, writePDF(t, mark, mark)), filepath.Join(t.TempDir(), "pages"), 72)
+	if err != nil {
+		t.Fatal(err)
+	}
+	type px struct {
+		x, y int
+		dark bool
+	}
+	want := [][]px{
+		{{400, 575, true}, {821, 575, true}, {20, 575, false}, {400, 20, false}, {20, 20, false}},
+		{{20, 20, true}, {441, 20, true}, {400, 20, false}, {20, 575, false}, {400, 575, false}},
+	}
+	for i, png := range pngs {
+		img, err := raster.Load(png)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, at := range want[i] {
+			if c := img.RGBA64At(at.x, at.y); (c.R < 0x8000) != at.dark {
+				t.Errorf("page %d pixel %d,%d: R %#x, want dark=%v", i+1, at.x, at.y, c.R, at.dark)
+			}
+		}
+	}
+}
+
+// TestImposeKeepsOutputIntents imposes a page whose catalog names an output
+// intent, as a `plate press` master does, and checks the sheet's catalog
+// still carries it, with the optional-content properties.
+func TestImposeKeepsOutputIntents(t *testing.T) {
+	needEngines(t, "qpdf", "pdfinfo")
+	catalog := "/OutputIntents [<< /Type /OutputIntent /S /GTS_PDFX /OutputConditionIdentifier (FOGRA39) >>] " +
+		"/OCProperties << /OCGs [] /D << /Order [] >> >>"
+	out := sheet(t, writePDFCatalog(t, catalog, blank(a5, 2)...))
+	res, err := engine.Run(ctx, engine.Cmd{Engine: "qpdf", Args: []string{"--json=2", "--json-key=qpdf", "--json-stream-data=none", out, "-"}, Inputs: []string{out}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(res.Stdout)
+	for _, want := range []string{`"/OutputIntents"`, `"u:FOGRA39"`, `"/GTS_PDFX"`, `"/OCProperties"`} {
+		if !strings.Contains(s, want) {
+			t.Errorf("the sheet lacks %s", want)
+		}
+	}
+}
+
+func TestCheckNoPages(t *testing.T) {
+	if err := check(nil); err == nil || !strings.Contains(err.Error(), "want 2 A5 pages, found 0 pages") {
+		t.Errorf("check(nil) = %v", err)
 	}
 }
