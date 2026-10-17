@@ -112,3 +112,8 @@ independently of phase 5. Within a phase, order is open.
   case has many small holes on a large scan. Unlock: a `quality/` case of
   scattered specks on a large frame with its peak memory recorded, then
   per-component crops measured on it.
+- **impose fits only A5 on A4.** Other two-up or n-up layouts (A6 four to
+  an A4, DL three to an A4) and other sheets are refused. Deferred because
+  the one caller prints A5 flyers. Unlock: a caller with another size, then
+  the sheet and grid as flags, each layout with its own `impose-halves`
+  quality case.

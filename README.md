@@ -8,7 +8,8 @@
 Image, render and document operations for print and web pipelines, as one
 command: lift a subject out of a photo, fill, enlarge or shrink artwork, render HTML to
 PNG, JPEG, PDF or its settled DOM, preview a Google Slides deck, turn markdown into a
-PDF, look inside a PDF, make a press-ready PDF, match a colour grade. Each
+PDF, look inside a PDF, make a press-ready PDF, put an A5 flyer two-up on
+an A4 sheet to print and cut, match a colour grade. Each
 operation wraps an engine at a pinned version, and its output is checked
 against a committed set of test images.
 
@@ -34,6 +35,7 @@ the exceptions listed under [Platforms](#platforms). What comes next is in
 | `pdf text` | Extracts a PDF's text with its layout | `plate pdf text [--pages N\|N-M] <in.pdf>` |
 | `pdf pages` | Renders PDF pages to PNG and prints each path | `plate pdf pages [--pages N\|N-M] [--out DIR] [--dpi N] <in.pdf>` |
 | `pdf images` | Extracts a PDF's embedded images and prints each path | `plate pdf images [--pages N\|N-M] [--out DIR] <in.pdf>` |
+| `impose` | Puts an A5 flyer's front and back two-up on both sides of an A4 sheet: print double-sided, flip on short edge, cut down the middle | `plate impose [--cut-mark] [--force] -o out.pdf <in.pdf>` |
 | `doc` | Renders markdown or HTML to a PDF with a plain document look: A4, a running head from the first heading, page numbers, ruled tables | `plate doc [--css FILE] <in.md\|in.html> <out.pdf>` |
 | `slides` | Previews a Google Slides deck that Drive will not export, from its Slides API JSON: one PNG per slide, in the fonts the deck names | `plate slides [--pages LIST] [--out DIR] [--scale S] <deck.json\|->` |
 | `shrink` | Resizes down to a small, sharp web asset: PNG at maximum lossless compression, or WebP, alpha kept, never enlarging | `plate shrink (--width PX \| --height PX \| --width PX --height PX \| --fit PX) [--quality Q] <in> <out.png\|out.webp>...` |
@@ -115,6 +117,13 @@ named on stderr. Picture URLs in the JSON expire about 30 minutes after it
 was fetched, so run `slides` within that window. Lines, tables, videos, charts and word art are not drawn, and
 it says which slides had them; bullets, autofit and a crop's rotation are not
 drawn either.
+
+`impose` takes exactly two pages, the front then the back, each A5 to
+within 1 mm, both portrait or both landscape; anything else is refused with
+the page count and size it found. Each copy keeps the source's vectors,
+text, fonts and images, unscaled; a landscape flyer is turned a quarter to
+fit its half. Links and tags are dropped. It refuses to replace an existing
+output unless given `--force`.
 
 `shrink` scales the image down to fit `--width`, `--height` or both, or with
 `--fit` so its longest side is that size. Each output's extension picks its
