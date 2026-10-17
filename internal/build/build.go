@@ -130,7 +130,11 @@ func Main(ctx context.Context, args []string, _, stderr io.Writer) int {
 		name := targets[i].Name
 		stderr.Write(r.warn.Bytes())
 		if r.err == nil {
-			r.err = loadsOutput(targets[i], r.res.Inputs, all)
+			if r.err = loadsOutput(targets[i], r.res.Inputs, all); r.err != nil {
+				for _, o := range targets[i].Outputs() {
+					os.Remove(o)
+				}
+			}
 		}
 		switch {
 		case r.err != nil:
@@ -161,6 +165,8 @@ func Main(ctx context.Context, args []string, _, stderr io.Writer) int {
 // loadsOutput refuses t when one of its inputs is another target's output:
 // render deletes its outputs before it starts and targets run in parallel,
 // so t rendered against a file that may have been missing or half-made.
+// Main then removes t's outputs, which its cache record names, so the
+// record cannot hit either.
 func loadsOutput(t Target, inputs []string, all []Target) error {
 	for _, o := range all {
 		if o.Name == t.Name {

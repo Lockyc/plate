@@ -254,6 +254,9 @@ func TestBuildRefusesLoadingAnotherOutput(t *testing.T) {
 	if code := e.run("--force", e.manifest); code != 1 || !strings.Contains(e.stderr.String(), want) || !strings.Contains(e.stderr.String(), "1 rendered, 0 unchanged, 1 failed") {
 		t.Errorf("render: code %d, stderr %q", code, e.stderr.String())
 	}
+	if left, _ := filepath.Glob(filepath.Join(e.dir, "dist", "b*")); len(left) > 0 {
+		t.Errorf("the refused target left %q behind", left)
+	}
 }
 
 // Go's flag package stops at the first positional argument, so a flag
