@@ -21,8 +21,17 @@ type Target struct {
 	Opts render.Options
 }
 
-// ext maps each output kind a manifest names to its file extension.
-var ext = map[string]string{"pdf": ".pdf", "png": ".png", "jpeg": ".jpg", "html": ".html"}
+// kinds maps each output kind a manifest names to its file extension and
+// the render option it sets.
+var kinds = map[string]struct {
+	ext  string
+	slot func(*render.Options) *string
+}{
+	"pdf":  {".pdf", func(o *render.Options) *string { return &o.PDF }},
+	"png":  {".png", func(o *render.Options) *string { return &o.PNG }},
+	"jpeg": {".jpg", func(o *render.Options) *string { return &o.JPEG }},
+	"html": {".html", func(o *render.Options) *string { return &o.HTML }},
+}
 
 // ParseManifest reads the manifest at path. Each line is
 //
@@ -117,14 +126,15 @@ func parseLine(fields []string, dir, outDir string, failIf []string) (Target, er
 	}
 	o.Scale = s
 	for _, kind := range strings.Split(outputs, ",") {
-		slot := map[string]*string{"pdf": &o.PDF, "png": &o.PNG, "jpeg": &o.JPEG, "html": &o.HTML}[kind]
-		if slot == nil {
+		k, ok := kinds[kind]
+		if !ok {
 			return Target{}, fmt.Errorf("output %q: want pdf, png, jpeg or html", kind)
 		}
+		slot := k.slot(&o)
 		if *slot != "" {
 			return Target{}, fmt.Errorf("output %s is listed twice", kind)
 		}
-		*slot = filepath.Join(outDir, name+ext[kind])
+		*slot = filepath.Join(outDir, name+k.ext)
 	}
 	seen := map[string]bool{}
 	for _, opt := range fields[5:] {
