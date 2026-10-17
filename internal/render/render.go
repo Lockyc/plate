@@ -8,6 +8,7 @@ package render
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"image"
 	"image/color"
@@ -28,7 +29,7 @@ import (
 	"github.com/lockyc/plate/internal/raster"
 )
 
-const usage = "render [--png out.png [--transparent]] [--pdf out.pdf] [--html out.html] [--size WxH] [--scale S] [--budget MS] [--fail-if TEXT]... [--force] <page.html|URL>"
+const usage = "render [--png out.png [--transparent]] [--jpeg out.jpg [--quality Q]] [--pdf out.pdf] [--html out.html] [--size WxH] [--scale S] [--budget MS] [--fail-if TEXT]... [--force] <page.html|URL>"
 
 const chrome = "chrome-headless-shell"
 
@@ -59,7 +60,8 @@ type job struct {
 	query       string // the local page's "?…", kept
 	proxy       string // the --proxy-server flag, set by run for a local page
 	png, pdf    string
-	html        string
+	html, jpeg  string
+	quality     int
 	transparent bool
 	w, h        int
 	scale       float64
@@ -73,6 +75,8 @@ type job struct {
 type Options struct {
 	Page           string
 	PNG, PDF, HTML string
+	JPEG           string // the PNG screenshot converted by ImageMagick; needs a size
+	Quality        int    // the JPEG's quality, 1–100; 0 only when there is no JPEG
 	W, H           int
 	Scale          float64
 	Budget         int
@@ -87,10 +91,11 @@ type usageError string
 
 func (e usageError) Error() string { return string(e) }
 
-// outputs lists o's outputs in flag order, PNG, PDF then HTML.
+// outputs lists o's outputs in the order run hashes them: PNG, PDF, HTML
+// then JPEG.
 func (o Options) outputs() []string {
 	var out []string
-	for _, p := range []string{o.PNG, o.PDF, o.HTML} {
+	for _, p := range []string{o.PNG, o.PDF, o.HTML, o.JPEG} {
 		if p != "" {
 			out = append(out, p)
 		}
@@ -100,10 +105,22 @@ func (o Options) outputs() []string {
 
 func (o Options) validate() error {
 	if len(o.outputs()) == 0 {
-		return usageError("give --png, --pdf, --html or a combination")
+		return usageError("give --png, --jpeg, --pdf, --html or a combination")
 	}
 	if o.Transparent && o.PNG == "" {
+		if o.JPEG != "" {
+			return usageError("--transparent needs --png: a JPEG has no alpha channel")
+		}
 		return usageError("--transparent needs --png")
+	}
+	if o.JPEG == "" && o.Quality != 0 {
+		return usageError("--quality needs --jpeg")
+	}
+	if o.JPEG != "" && (o.Quality < 1 || o.Quality > 100) {
+		return usageError("--quality must be between 1 and 100")
+	}
+	if o.JPEG != "" && o.W == 0 {
+		return usageError("--jpeg needs --size")
 	}
 	if o.W < 0 || o.H < 0 || (o.W == 0) != (o.H == 0) {
 		return usageError("--size wants WxH, both above 0")
@@ -114,8 +131,9 @@ func (o Options) validate() error {
 	if math.IsNaN(o.Scale) || math.IsInf(o.Scale, 0) || o.Scale <= 0 || o.Budget < 0 {
 		return usageError("--scale must be a finite number above 0 and --budget not below 0")
 	}
-	for _, p := range [][2]string{{"png", o.PNG}, {"pdf", o.PDF}, {"html", o.HTML}} {
-		for _, q := range [][2]string{{"png", o.PNG}, {"pdf", o.PDF}, {"html", o.HTML}} {
+	named := [][2]string{{"png", o.PNG}, {"pdf", o.PDF}, {"html", o.HTML}, {"jpeg", o.JPEG}}
+	for _, p := range named {
+		for _, q := range named {
 			if p[0] < q[0] && p[1] != "" && q[1] != "" && engine.SameFile(p[1], q[1]) {
 				return usageError("--" + p[0] + " and --" + q[0] + " name the same file")
 			}
@@ -142,7 +160,7 @@ func Run(ctx context.Context, o Options, warn io.Writer) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	j := job{url: u, local: local, query: query, png: o.PNG, pdf: o.PDF, html: o.HTML, transparent: o.Transparent,
+	j := job{url: u, local: local, query: query, png: o.PNG, pdf: o.PDF, html: o.HTML, jpeg: o.JPEG, quality: o.Quality, transparent: o.Transparent,
 		w: o.W, h: o.H, scale: o.Scale, budget: o.Budget, failIf: o.FailIf, warn: warn}
 	cacheWarn := func(err error) { fmt.Fprintf(warn, "plate render: warning: render cache: %v\n", err) }
 	page := u
@@ -215,6 +233,8 @@ func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	pngOut := fs.String("png", "", "write a PNG screenshot here")
 	pdfOut := fs.String("pdf", "", "write a PDF here")
 	htmlOut := fs.String("html", "", "write the page's DOM here once scripts settle (a static copy with every script's work done)")
+	jpegOut := fs.String("jpeg", "", "write the screenshot as a JPEG here (needs --size); the PNG is kept only with --png")
+	quality := cli.Int(fs, "quality", 90, "JPEG quality, 1–100 (needs --jpeg)")
 	transparent := fs.Bool("transparent", false, "give the PNG an alpha channel, with the page's transparent areas left transparent rather than white")
 	size := fs.String("size", "", "viewport and expected page size in CSS px, WxH (required with --png)")
 	scale := cli.Float(fs, "scale", 1, "device scale factor; the PNG is size × scale px at 96 × scale dpi")
@@ -230,8 +250,18 @@ func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		defer fs.Usage()
 		return cli.Usage(stderr, "render", "%s", msg)
 	}
-	o := Options{Page: rest[0], PNG: *pngOut, PDF: *pdfOut, HTML: *htmlOut, Transparent: *transparent,
+	o := Options{Page: rest[0], PNG: *pngOut, PDF: *pdfOut, HTML: *htmlOut, JPEG: *jpegOut, Transparent: *transparent,
 		Scale: *scale, Budget: *budget, FailIf: failIf, Force: *force}
+	// The default quality belongs to a JPEG; an explicit --quality is passed
+	// on either way so Run can refuse it without --jpeg.
+	if o.JPEG != "" {
+		o.Quality = *quality
+	}
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "quality" {
+			o.Quality = *quality
+		}
+	})
 	if *size != "" {
 		w, h, err := parseSize(*size)
 		if err != nil {
@@ -339,7 +369,7 @@ func (j job) inputs() []string {
 // render's key.
 func (j job) run(ctx context.Context) (_ loadSet, _ []fileHash, err error) {
 	var outputs []outFile
-	for _, p := range []*string{&j.png, &j.pdf, &j.html} {
+	for _, p := range []*string{&j.png, &j.pdf, &j.html, &j.jpeg} {
 		if *p != "" {
 			outputs = append(outputs, outFile{slot: p, dest: *p})
 		}
@@ -358,12 +388,19 @@ func (j job) run(ctx context.Context) (_ loadSet, _ []fileHash, err error) {
 			return loadSet{}, nil, err
 		}
 	}
+	// A JPEG without a PNG is converted from a screenshot that is only a
+	// scratch file: temporary like the outputs, but never hashed, recorded or
+	// moved into place. Its dest names the JPEG, so an error from the
+	// screenshot points at the file the caller asked for.
+	if j.jpeg != "" && j.png == "" {
+		outputs = append(outputs, outFile{slot: &j.png, dest: j.jpeg, scratch: true})
+	}
 	defer func() {
 		for _, o := range outputs {
 			if o.tmp != "" {
 				os.Remove(o.tmp)
 			}
-			if err != nil {
+			if err != nil && !o.scratch {
 				os.Remove(o.dest)
 			}
 		}
@@ -372,7 +409,11 @@ func (j job) run(ctx context.Context) (_ loadSet, _ []fileHash, err error) {
 		}
 	}()
 	for i := range outputs {
-		if outputs[i].tmp, err = tempName(outputs[i].dest); err != nil {
+		name := outputs[i].dest
+		if outputs[i].scratch {
+			name += ".png"
+		}
+		if outputs[i].tmp, err = tempName(name); err != nil {
 			return loadSet{}, nil, err
 		}
 		*outputs[i].slot = outputs[i].tmp
@@ -407,14 +448,26 @@ func (j job) run(ctx context.Context) (_ loadSet, _ []fileHash, err error) {
 			return loads(), nil, err
 		}
 	}
-	hashes := make([]fileHash, len(outputs))
-	for i, o := range outputs {
-		hashes[i] = fileHash{o.dest, hashFile(o.tmp)}
-		if hashes[i].SHA256 == "" {
-			return loads(), nil, fmt.Errorf("%s vanished before it could be moved to %s", o.tmp, o.dest)
+	if j.jpeg != "" {
+		if err := j.convert(ctx); err != nil {
+			return loads(), nil, err
 		}
 	}
+	var hashes []fileHash
 	for _, o := range outputs {
+		if o.scratch {
+			continue
+		}
+		h := fileHash{o.dest, hashFile(o.tmp)}
+		if h.SHA256 == "" {
+			return loads(), nil, fmt.Errorf("%s vanished before it could be moved to %s", o.tmp, o.dest)
+		}
+		hashes = append(hashes, h)
+	}
+	for _, o := range outputs {
+		if o.scratch {
+			continue
+		}
 		if err := os.Rename(o.tmp, o.dest); err != nil {
 			return loads(), nil, err
 		}
@@ -427,6 +480,7 @@ func (j job) run(ctx context.Context) (_ loadSet, _ []fileHash, err error) {
 type outFile struct {
 	slot      *string // the job field, pointed at tmp while the stages run
 	dest, tmp string
+	scratch   bool // an intermediate: removed at the end, never an output
 }
 
 // destErr is a run's error with each temporary name replaced by its
@@ -529,6 +583,15 @@ func (j job) screenshot(ctx context.Context) error {
 	// Chrome writes no pHYs, so the PNG would claim 72 dpi and misstate its
 	// print size. A CSS px is 1/96 in, so the true density is 96 × scale.
 	return raster.SetDPI(j.png, 96*j.scale)
+}
+
+// convert writes the checked screenshot j.png as the JPEG j.jpeg, stripped
+// of metadata, at j.quality.
+func (j job) convert(ctx context.Context) error {
+	_, err := engine.Run(ctx, engine.Cmd{Engine: "magick",
+		Args:   []string{j.png, "-strip", "-quality", strconv.Itoa(j.quality), j.jpeg},
+		Inputs: []string{j.png}, Outputs: []string{j.jpeg}, Timeout: 15 * time.Minute})
+	return err
 }
 
 func (j job) print(ctx context.Context) error {

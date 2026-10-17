@@ -384,3 +384,19 @@ func TestMainReportsUnchanged(t *testing.T) {
 		t.Errorf("chrome called %d times, want 2", n)
 	}
 }
+
+func TestCacheJPEGOnlyRecordsJPEG(t *testing.T) {
+	e := cacheEnv(t)
+	enginetest.Stub(t, "magick", magickStub)
+	o := Options{Page: e.page, JPEG: e.out("p.jpg"), Quality: 90, W: 100, H: 50, Scale: 2, Budget: defaultBudget}
+	if e.render(t, o) {
+		t.Fatal("first render skipped")
+	}
+	if !e.render(t, o) {
+		t.Error("second render not skipped")
+	}
+	o.Quality = 80
+	if e.render(t, o) {
+		t.Error("a changed --quality skipped on the old record")
+	}
+}

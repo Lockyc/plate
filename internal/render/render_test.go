@@ -524,3 +524,76 @@ func TestRenderRemotePageSkipsProxy(t *testing.T) {
 		}
 	}
 }
+
+// magickStub is ImageMagick writing its last argument.
+const magickStub = `for a in "$@"; do out=$a; done; printf jpeg > "$out"`
+
+func TestRenderJPEGOnly(t *testing.T) {
+	e := setup(t, 100, 50)
+	magick := enginetest.Stub(t, "magick", magickStub)
+	if code := e.run("--size", "100x50", "--jpeg", e.out("p.jpg"), "--quality", "88", e.page); code != 0 {
+		t.Fatalf("code %d: %s", code, e.stderr.String())
+	}
+	calls := enginetest.Calls(t, magick)
+	if len(calls) != 1 || len(calls[0]) != 5 || calls[0][1] != "-strip" || calls[0][2] != "-quality" || calls[0][3] != "88" {
+		t.Fatalf("magick calls %q, want <png> -strip -quality 88 <jpg>", calls)
+	}
+	if got, _ := os.ReadFile(e.out("p.jpg")); string(got) != "jpeg" {
+		t.Errorf("p.jpg = %q", got)
+	}
+	left, _ := filepath.Glob(filepath.Join(e.dir, "*.png"))
+	hidden, _ := filepath.Glob(filepath.Join(e.dir, ".plate-*"))
+	if len(left)+len(hidden) != 0 {
+		t.Errorf("PNG or temp left beside the output: %q %q", left, hidden)
+	}
+}
+
+func TestRenderJPEGAndPNG(t *testing.T) {
+	e := setup(t, 100, 50)
+	magick := enginetest.Stub(t, "magick", magickStub)
+	if code := e.run("--size", "100x50", "--png", e.out("p.png"), "--jpeg", e.out("p.jpg"), e.page); code != 0 {
+		t.Fatalf("code %d: %s", code, e.stderr.String())
+	}
+	if n := len(enginetest.Calls(t, e.chrome)); n != 1 {
+		t.Errorf("chrome ran %d times, want 1", n)
+	}
+	if calls := enginetest.Calls(t, magick); len(calls) != 1 || calls[0][3] != "90" {
+		t.Errorf("magick calls %q, want quality 90", calls)
+	}
+	if !exists(e.out("p.png")) || !exists(e.out("p.jpg")) {
+		t.Error("an output is missing")
+	}
+}
+
+func TestRenderQualityRange(t *testing.T) {
+	e := setup(t, 1, 1)
+	enginetest.Stub(t, "magick", magickStub)
+	for _, args := range [][]string{
+		{"--size", "100x50", "--jpeg", e.out("p.jpg"), "--quality", "0", e.page},
+		{"--size", "100x50", "--jpeg", e.out("p.jpg"), "--quality", "101", e.page},
+		{"--size", "100x50", "--png", e.out("p.png"), "--quality", "80", e.page},
+		{"--jpeg", e.out("p.jpg"), e.page},
+		{"--size", "100x50", "--transparent", "--jpeg", e.out("p.jpg"), e.page},
+	} {
+		if code := e.run(args...); code != 2 {
+			t.Errorf("%q: code %d, want 2", args, code)
+		}
+	}
+	if len(enginetest.Calls(t, e.chrome)) != 0 {
+		t.Error("chrome ran")
+	}
+}
+
+func TestRenderJPEGFailureLeavesNothing(t *testing.T) {
+	e := setup(t, 100, 50)
+	enginetest.Stub(t, "magick", `echo boom >&2; exit 3`)
+	if code := e.run("--size", "100x50", "--jpeg", e.out("p.jpg"), e.page); code != 1 {
+		t.Fatalf("code %d", code)
+	}
+	if strings.Contains(e.stderr.String(), ".plate-") {
+		t.Errorf("error names a temp: %s", e.stderr.String())
+	}
+	if left, _ := filepath.Glob(filepath.Join(e.dir, ".plate-*")); len(left) != 0 || exists(e.out("p.jpg")) {
+		t.Errorf("left behind: %q", left)
+	}
+}

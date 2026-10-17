@@ -113,7 +113,7 @@ func cacheKey(o Options, page string) (string, error) {
 		return "", fmt.Errorf("%s has no pinned download", chrome)
 	}
 	o.Page, o.Force = page, false
-	for _, p := range []*string{&o.PNG, &o.PDF, &o.HTML} {
+	for _, p := range []*string{&o.PNG, &o.PDF, &o.HTML, &o.JPEG} {
 		if *p != "" {
 			if *p, err = filepath.Abs(*p); err != nil {
 				return "", err
