@@ -160,8 +160,8 @@ colours, or renders what it is given.
   refuses before decoding what the log and probe can show, holds the encode
   to its checks, and publishes the set only whole (`clip.publish`). The
   encode settings, the resampling kernel and `clip.MinSharpness` are
-  measured by the `clip-text-*` and `clip-caption-sharp` quality cases;
-  `clip.MaxSeam` is provisional until a case measures it.
+  measured by the `clip-text-*` and `clip-caption-sharp` quality cases,
+  `clip.MaxSeam` by `clip-loop-crossfade`.
 - **inpaint, fonts, qr, pdf, impose, doc, slides** — as the README table and each package's
   doc comment describe.
 

@@ -11,10 +11,13 @@ import (
 )
 
 // The render's checks: the least Sharpness an encode may score, and the
-// most LoopSeam a clip may show where it loops.
+// most LoopSeam, percent, a clip may show where it loops. MaxSeam is 1.5
+// times the median Seam between consecutive frames of the
+// clip-loop-crossfade quality case's body, a square sliding 300 px/s: a
+// loop's cut may jump no more than a frame and a half of steady motion.
 const (
 	MinSharpness = 0.80
-	MaxSeam      = 1.0
+	MaxSeam      = 0.201
 )
 
 // sharpSigma is the detail scale Sharpness scores, px: at 3, 4:2:0's loss
