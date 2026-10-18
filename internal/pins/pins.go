@@ -33,6 +33,17 @@ type Engine struct {
 	Download    *Download         // Managed
 	GOOS        []string          // platforms it exists on; nil means every platform
 	UsedBy      []string          // the plate commands that need it
+	// Capabilities are features a build of the engine may lack.
+	Capabilities []Capability
+}
+
+// Capability is a feature an engine build may lack. Doctor and `clip render`
+// run Args and look for Token as a whole word in the output; For names what
+// needs it.
+type Capability struct {
+	Args  []string
+	Token string
+	For   string
 }
 
 // Download is a managed engine's pinned release.
@@ -66,13 +77,22 @@ func poppler(name string, usedBy ...string) Engine {
 	}
 }
 
+func ffmpegTool(name string, caps ...Capability) Engine {
+	return Engine{
+		Name: name, Kind: Minimum,
+		VersionArgs: []string{"-hide_banner", "-version"}, VersionRe: name + ` version n?(\d+\.\d+(?:\.\d+)?)`, Min: "7.1",
+		Install: map[string]string{"darwin": "brew install ffmpeg", "linux": "install ffmpeg 7.1 or later from https://ffmpeg.org/download.html (distribution packages are often too old)"},
+		UsedBy:  []string{"clip"}, Capabilities: caps,
+	}
+}
+
 // Engines is every external tool plate runs.
 var Engines = []Engine{
 	{
 		Name: "magick", Kind: Minimum,
 		VersionArgs: []string{"-version"}, VersionRe: `Version: ImageMagick (\d+\.\d+\.\d+(?:-\d+)?)`, Min: "7.1.0",
 		Install: map[string]string{"darwin": "brew install imagemagick", "linux": "install ImageMagick from https://imagemagick.org/script/download.php (distribution packages are often too old)"},
-		UsedBy:  []string{"cutout", "infill", "inpaint", "grade", "upscale", "shrink", "render", "build"},
+		UsedBy:  []string{"cutout", "infill", "inpaint", "grade", "upscale", "shrink", "render", "build", "clip"},
 	},
 	{
 		Name: "gs", Kind: Minimum,
@@ -121,6 +141,9 @@ var Engines = []Engine{
 		Install: map[string]string{"darwin": "xcode-select --install"},
 		UsedBy:  []string{"cutout"},
 	},
+	ffmpegTool("ffmpeg", Capability{Args: []string{"-hide_banner", "-encoders"}, Token: "libx264", For: "clip mp4"},
+		Capability{Args: []string{"-hide_banner", "-encoders"}, Token: "libvpx-vp9", For: "clip webm"}),
+	ffmpegTool("ffprobe"),
 	{
 		Name: "chrome-headless-shell", Kind: Managed,
 		Download: &Download{Version: chsVersion, Assets: map[string]Asset{
@@ -128,7 +151,7 @@ var Engines = []Engine{
 			"darwin/amd64": chs("mac-x64", "a54292aaacbb77f76f6ef47558e7c51ab884044e0adacca315567f83c060bcc4"),
 			"linux/amd64":  chs("linux64", "636aa5c79f2693632e9921b8bbb050038ba11672e02346c06c20f991aed096f9"),
 		}},
-		UsedBy: []string{"render", "build", "doc", "slides"},
+		UsedBy: []string{"render", "build", "doc", "slides", "clip"},
 	},
 }
 
