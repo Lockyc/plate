@@ -53,7 +53,7 @@ func TestExtractFramesArgs(t *testing.T) {
 	}
 	want := []string{"-hide_banner", "-loglevel", "error", "-nostdin",
 		"-i", "raw.mov",
-		"-vf", "fps=60:round=down,scale=in_color_matrix=bt709:in_range=auto,format=rgb24",
+		"-vf", "tpad=stop_mode=clone:stop_duration=1.5,fps=60:round=down,scale=in_color_matrix=bt709:in_range=auto,format=rgb24",
 		"-fps_mode", "cfr", "-ss", "1", "-frames:v", "30", "-start_number", "0", tmp}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("argv = %q\nwant   %q", got, want)
@@ -177,7 +177,7 @@ func TestExtractFramesConvertsWideGamutArgs(t *testing.T) {
 	got := enginetest.Calls(t, log)[0]
 	want := "colorspace=ispace=bt709:irange=tv:iprimaries=smpte432:itrc=iec61966-2-1:" +
 		"space=bt709:range=pc:primaries=bt709:trc=iec61966-2-1:format=yuv444p12," +
-		"fps=60:round=down,scale=in_color_matrix=bt709:in_range=auto,format=rgb24"
+		"tpad=stop_mode=clone:stop_duration=0.1,fps=60:round=down,scale=in_color_matrix=bt709:in_range=auto,format=rgb24"
 	if got[7] != want {
 		t.Fatalf("-vf %q\nwant %q", got[7], want)
 	}
@@ -250,5 +250,53 @@ for i in 0 1 2; do cp "$RGB" "$(printf "$pat" $i)"; done`)
 cp "$RGB" "$(printf "$pat" 0)"`)
 	if _, err := ExtractEncoded(context.Background(), "clip.mp4", []int{0, 30}, t.TempDir()); err == nil || !strings.Contains(err.Error(), "decoded 1 of 2 frames") {
 		t.Fatalf("short decode: err = %v", err)
+	}
+}
+
+// TestExtractFramesHoldsStaticTail decodes masters shaped like simctl's:
+// variable frame rate, frames only when the screen changes, here at 0 and
+// 0.5 s and none after, while the log runs to 3000 ms. Every output frame
+// must exist, the tail holding the 0.5 s frame; simctl's default codec,
+// HEVC, is decoded as well as H.264.
+func TestExtractFramesHoldsStaticTail(t *testing.T) {
+	if _, err := engine.Resolve("ffmpeg"); err != nil {
+		t.Skip(err)
+	}
+	fix := t.TempDir()
+	writePNG(t, filepath.Join(fix, "red.png"), solid(16, 16, red))
+	writePNG(t, filepath.Join(fix, "lime.png"), solid(16, 16, color.RGBA64{0, 0xffff, 0, 0xffff}))
+	concat := filepath.Join(fix, "list.txt")
+	list := fmt.Sprintf("file '%s'\nduration 0.5\nfile '%s'\nduration 0.0167\nfile '%s'\n",
+		filepath.Join(fix, "red.png"), filepath.Join(fix, "lime.png"), filepath.Join(fix, "lime.png"))
+	if err := os.WriteFile(concat, []byte(list), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, codec := range []string{"libx264", "libx265"} {
+		master := filepath.Join(fix, codec+".mp4")
+		if _, err := engine.Run(context.Background(), engine.Cmd{Engine: "ffmpeg",
+			Args: []string{"-hide_banner", "-loglevel", "error", "-nostdin", "-f", "concat", "-safe", "0", "-i", concat,
+				"-fps_mode", "passthrough", "-c:v", codec, "-pix_fmt", "yuv420p", "-x265-params", "log-level=none", master},
+			Inputs: []string{concat}, Outputs: []string{master}}); err != nil {
+			t.Logf("%s: %v", codec, err)
+			continue
+		}
+		m, err := ProbeMaster(context.Background(), master)
+		if err != nil || m.Duration > 1000 {
+			t.Fatalf("%s: probe %+v, %v; want a master well short of 3000 ms", codec, m, err)
+		}
+		frames, err := ExtractFrames(context.Background(), master, m.Colour, Window{Start: 0, End: 3000}, 60, t.TempDir())
+		if err != nil {
+			t.Fatalf("%s: %v", codec, err)
+		}
+		if len(frames) != 180 {
+			t.Fatalf("%s: %d frames, want 180", codec, len(frames))
+		}
+		for _, k := range []int{0, 29, 31, 120, 179} {
+			c := readRGBA64(t, frames[k]).RGBA64At(8, 8)
+			lime := c.G > 0xc000 && c.R < 0x4000
+			if lime != (k > 30) {
+				t.Errorf("%s: frame %d is %v", codec, k, c)
+			}
+		}
 	}
 }

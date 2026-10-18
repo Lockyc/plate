@@ -58,8 +58,9 @@ func TestCheckMaster(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "master is 1170x2532, events say 1206x2622") {
 		t.Fatalf("err = %v", err)
 	}
-	err = l.CheckMaster(Master{W: 1206, H: 2622, Duration: 8000})
-	if err == nil || !strings.Contains(err.Error(), "past the master's 8000 ms") {
-		t.Fatalf("err = %v", err)
+	// simctl writes no frame while the screen is still, so a master whose
+	// last change came early probes short of the log's end.
+	if err := l.CheckMaster(Master{W: 1206, H: 2622, Duration: 100}); err != nil {
+		t.Fatalf("a static tail: %v", err)
 	}
 }
