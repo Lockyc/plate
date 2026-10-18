@@ -293,3 +293,14 @@ func TestCapable(t *testing.T) {
 		t.Errorf("exit status 1 with the token printed: %v, %v; want true", got, err)
 	}
 }
+
+func TestCapableTimeoutIsAnError(t *testing.T) {
+	e := pins.Engine{Name: "ffmpeg", Kind: pins.Minimum}
+	enginetest.Stub(t, "ffmpeg", "sleep 30")
+	tctx, cancel := context.WithTimeout(ctx, 300*time.Millisecond)
+	defer cancel()
+	got, err := engine.Capable(tctx, e, pins.Capability{Args: []string{"-encoders"}, Token: "libx264", For: "x"})
+	if err == nil || !strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("Capable = %v, %v; want a timed-out error, not a missing capability", got, err)
+	}
+}
