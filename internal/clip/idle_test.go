@@ -95,9 +95,10 @@ func TestIdleCutsKeepTheHeadAndTail(t *testing.T) {
 
 func TestIdleCutsCountACaretBlinkIdle(t *testing.T) {
 	// Activity's own frames, 200 px across a 402 pt screen: an iOS caret,
-	// 2 by about 22 pt, is 1 by 11 px there; the fixture's is 2 by 12, on
-	// for half a second and off for half, through the whole gap. A square
-	// moves 0.5-1.0 s and 3.5-4.0 s.
+	// 2 by about 22 pt, downscales to a blur that moves 46 px a blink (the
+	// clip-idle-compress master's caret, 0.00053); the fixture's moves 48,
+	// on for half a second and off for half, through the whole gap. A
+	// square moves 0.5-1.0 s and 3.5-4.0 s.
 	frames := make([]*image.Gray, 300)
 	for i := range frames {
 		g := image.NewGray(image.Rect(0, 0, 200, 436))
@@ -120,7 +121,9 @@ func TestIdleCutsCountACaretBlinkIdle(t *testing.T) {
 		}
 		if i > 60 && i < 210 && (i/30)%2 == 0 {
 			for y := 100; y < 112; y++ {
-				g.Pix[y*200+100], g.Pix[y*200+101] = 230, 230
+				for x := 100; x < 104; x++ {
+					g.Pix[y*200+x] = 230
+				}
 			}
 		}
 		frames[i] = g
@@ -134,6 +137,17 @@ func TestIdleCutsCountACaretBlinkIdle(t *testing.T) {
 	cuts := IdleCuts(idleScript(t, ""), idleLog(1), act, Window{0, 4500}, 60)
 	if len(cuts) != 1 || Removed(cuts) < 1900 {
 		t.Fatalf("cuts = %+v: the blinking caret kept the gap", cuts)
+	}
+	// A 22 pt checkbox ticking, 11 by 11 px here, is activity.
+	box := image.NewGray(image.Rect(0, 0, 200, 436))
+	copy(box.Pix, frames[100].Pix)
+	for y := 200; y < 211; y++ {
+		for x := 50; x < 61; x++ {
+			box.Pix[y*200+x] = 230
+		}
+	}
+	if a := Activity([]*image.Gray{frames[100], box})[1]; a <= idleShare {
+		t.Errorf("a checkbox tick is activity %.5f, not above idleShare %g", a, idleShare)
 	}
 }
 

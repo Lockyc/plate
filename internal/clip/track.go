@@ -7,10 +7,14 @@ import (
 )
 
 // idleLuma is the luma step a pixel must exceed to count as moved;
-// idleShare is the share of moved pixels above which a frame counts as active.
+// idleShare is the share of moved pixels above which a frame counts as
+// active. At Activity's 200 px across a phone screen a blinking iOS caret
+// moves 0.00053 a blink and a 22 pt checkbox ticking 0.0014; idleShare sits
+// between them, about twice the caret, so a caret alone is idle
+// (TestIdleCutsCountACaretBlinkIdle) and the smallest control change is not.
 const (
 	idleLuma  = 8
-	idleShare = 0.0005
+	idleShare = 0.001
 )
 
 // easeInOutCubic maps 0..1 to 0..1, slow at both ends.
