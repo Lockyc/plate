@@ -61,6 +61,16 @@ var (
 // its start, where a blend shows both at once.
 var Loops = []string{"crossfade", "dip"}
 
+// The range output.max_idle_ms may take, ms. Below minIdleMS the step
+// before an idle stretch and the motion after it abut with no rest, which
+// reads as a jump cut, so 0 is refused; maxIdleMS, a minute, is longer
+// than any idle stretch a demo clip keeps, and is how a script keeps all
+// of them.
+const (
+	minIdleMS = 100
+	maxIdleMS = 60000
+)
+
 // Ext is the file extension a format is written with.
 func Ext(format string) string {
 	if format == "poster" {
@@ -74,6 +84,8 @@ type Output struct {
 	Formats  []string `toml:"formats" json:"formats"`
 	BudgetKB int      `toml:"budget_kb" json:"budget_kb,omitempty"`
 	Loop     string   `toml:"loop" json:"loop"`
+	// MaxIdleMS is the longest interior idle stretch a clip keeps (IdleCuts).
+	MaxIdleMS *int `toml:"max_idle_ms" json:"max_idle_ms"`
 }
 
 type Camera struct {
@@ -238,6 +250,9 @@ func (s *Script) validate() Problems {
 		add("output.budget_kb: must be > 0")
 	} else if s.Output.BudgetKB > 0 && !slices.Contains(formats, "mp4") {
 		add("output.budget_kb: applies to mp4, which formats does not list")
+	}
+	if v := s.Output.MaxIdleMS; v != nil && (*v < minIdleMS || *v > maxIdleMS) {
+		add("output.max_idle_ms: want %d-%d", minIdleMS, maxIdleMS)
 	}
 	if s.Output.Loop != "" && !slices.Contains(Loops, s.Output.Loop) {
 		add("output.loop: want %s", strings.Join(Loops, " or "))
@@ -440,6 +455,9 @@ func (s *Script) fillDefaults() {
 	}
 	if len(s.Output.Formats) == 0 {
 		s.Output.Formats = []string{"mp4"}
+	}
+	if s.Output.MaxIdleMS == nil {
+		s.Output.MaxIdleMS = ptr(500)
 	}
 	if s.Output.Loop == "" {
 		s.Output.Loop = Loops[0]
