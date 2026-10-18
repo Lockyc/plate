@@ -242,7 +242,7 @@ for i in 0 1 2; do cp "$RGB" "$(printf "$pat" $i)"; done`)
 	got := enginetest.Calls(t, log)[0]
 	want := []string{"-hide_banner", "-loglevel", "error", "-nostdin",
 		"-i", "clip.mp4",
-		"-vf", `select=eq(n\,0)+eq(n\,30)+eq(n\,59),scale=in_color_matrix=bt709:in_range=auto,format=rgb24`,
+		"-vf", `select=eq(n\,0)+eq(n\,30)+eq(n\,59),scale=in_color_matrix=bt709:in_range=auto:flags=accurate_rnd+full_chroma_int+bilinear,format=rgb24`,
 		"-fps_mode", "passthrough", "-start_number", "0", got[len(got)-1]}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("argv = %q\nwant   %q", got, want)
