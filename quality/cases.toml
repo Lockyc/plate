@@ -1381,7 +1381,7 @@ setup  = [
 ]
 run    = ["clip", "render", "--script", "{tmp:clip.toml}", "--master", "{tmp:master.mov}", "--events", "{tmp:events.jsonl}", "--out", "{tmp:out}"]
 metric = "json"
-params = { file = "{tmp:out/square.json}", field = "crossfade_frames" }
+params = { file = "{tmp:out/square.json}", field = "loop_tail_frames" }
 min    = 18
 max    = 18
 
@@ -1419,7 +1419,7 @@ setup  = [
 ]
 run    = ["clip", "render", "--script", "{tmp:clip.toml}", "--master", "{tmp:master.mov}", "--events", "{tmp:events.jsonl}", "--out", "{tmp:out}"]
 metric = "json"
-params = { file = "{tmp:out/square.json}", field = "crossfade_frames" }
+params = { file = "{tmp:out/square.json}", field = "loop_tail_frames" }
 max    = 0
 
 [case.files]

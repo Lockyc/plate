@@ -383,12 +383,13 @@ func TestFrameCode(t *testing.T) {
 
 func TestFrameCodeSidecar(t *testing.T) {
 	dir := t.TempDir()
-	// The last two frames are the loop crossfade's: their codes are blends.
+	// The first frame and the last two are the loop close's: their codes are
+	// blends.
 	side := filepath.Join(dir, "clip.json")
-	if err := os.WriteFile(side, []byte(`{"fps":60,"trim":{"start_ms":83.33333333333333,"end_ms":150},"crossfade_frames":2}`), 0o644); err != nil {
+	if err := os.WriteFile(side, []byte(`{"fps":60,"trim":{"start_ms":83.33333333333333,"end_ms":150},"loop_head_frames":1,"loop_tail_frames":2}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	p := Params{"frames": codeFrames(t, dir, "o", []int{5, 6, 7, 8, 0, 0}), "master": codeFrames(t, dir, "m", []int{5, 6, 7, 8, 9, 10}),
+	p := Params{"frames": codeFrames(t, dir, "o", []int{0, 6, 7, 8, 0, 0}), "master": codeFrames(t, dir, "m", []int{5, 6, 7, 8, 9, 10}),
 		"y": 0.25, "master_y": 0.25, "sidecar": side}
 	if v, err := Metrics["frame-code"](p); err != nil || v != 0 {
 		t.Fatalf("frame-code = %v, %v", v, err)

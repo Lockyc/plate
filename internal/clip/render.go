@@ -29,19 +29,21 @@ type FormatResult struct {
 // Measurement is the render's sidecar, <name>.json: the clip's shape, the
 // span of the master it shows, each output, and the measures its checks
 // hold. Sharpness is the least of the video encodes' (sharpFormats), and
-// 1 when the clip has none.
+// 1 when the clip has none. The loop frames are LoopClose's: the frames at
+// each end the loop close altered.
 type Measurement struct {
-	Name            string                  `json:"name"`
-	Width           int                     `json:"width"`
-	Height          int                     `json:"height"`
-	FPS             int                     `json:"fps"`
-	Frames          int                     `json:"frames"`
-	DurationMS      float64                 `json:"duration_ms"`
-	Trim            Window                  `json:"trim"`
-	Formats         map[string]FormatResult `json:"formats"`
-	Sharpness       float64                 `json:"sharpness"`
-	LoopSeam        float64                 `json:"loop_seam"`
-	CrossfadeFrames int                     `json:"crossfade_frames"`
+	Name           string                  `json:"name"`
+	Width          int                     `json:"width"`
+	Height         int                     `json:"height"`
+	FPS            int                     `json:"fps"`
+	Frames         int                     `json:"frames"`
+	DurationMS     float64                 `json:"duration_ms"`
+	Trim           Window                  `json:"trim"`
+	Formats        map[string]FormatResult `json:"formats"`
+	Sharpness      float64                 `json:"sharpness"`
+	LoopSeam       float64                 `json:"loop_seam"`
+	LoopHeadFrames int                     `json:"loop_head_frames"`
+	LoopTailFrames int                     `json:"loop_tail_frames"`
 }
 
 // RenderOptions are plate clip render's flags.
@@ -172,19 +174,24 @@ func Render(ctx context.Context, o RenderOptions, warn io.Writer) (Measurement, 
 	if err != nil {
 		return Measurement{}, err
 	}
-	refs, crossfade, err := Compose(ctx, frames, fps, l.Meta.Scale, lay, views, ops, sprites, refDir)
+	refs, lc, err := Compose(ctx, frames, fps, l.Meta.Scale, lay, views, ops, sprites, s.Output.Loop, refDir)
 	if err != nil {
 		return Measurement{}, err
 	}
 
 	meas := Measurement{Name: s.Name, Width: lay.W, Height: lay.H, FPS: fps, Frames: len(refs),
 		DurationMS: float64(len(refs)) * 1000 / float64(fps), Trim: w,
-		Formats: map[string]FormatResult{}, CrossfadeFrames: crossfade}
+		Formats: map[string]FormatResult{}, LoopHeadFrames: lc.Head, LoopTailFrames: lc.Tail}
 	var files []string
 	for _, f := range s.Output.Formats {
 		name := s.Name + "." + Ext(f)
 		p := filepath.Join(tmp, name)
-		if err := Encode(ctx, f, refDir, fps, lay.W, lay.H, p); err != nil {
+		if f == "poster" {
+			err = writePoster(refs, lc, p)
+		} else {
+			err = Encode(ctx, f, refDir, fps, lay.W, lay.H, p)
+		}
+		if err != nil {
 			return Measurement{}, fmt.Errorf("%s: %w", f, err)
 		}
 		st, err := os.Stat(p)

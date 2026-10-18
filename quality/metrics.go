@@ -555,7 +555,7 @@ func readCodes(glob string, bits int, y, x0, x1 float64) ([]int, error) {
 // is an expected code no output frame shows. The anchor is a time, never a
 // code read from the output. start_ms and fps come from params or, never
 // alongside them, from sidecar, a clip render's JSON (trim.start_ms, fps), which also excludes
-// its last crossfade_frames: the loop's crossfade blends them by design.
+// its loop_head_frames and loop_tail_frames: the loop close blends them by design.
 func frameCode(p Params) (float64, error) {
 	bitsF, err := p.Float("bits", 12)
 	if err != nil {
@@ -579,7 +579,7 @@ func frameCode(p Params) (float64, error) {
 	if err != nil {
 		return 0, err
 	}
-	tail := 0
+	head, tail := 0, 0
 	if _, ok := p["sidecar"]; ok {
 		side, err := p.Path("sidecar")
 		if err != nil {
@@ -599,12 +599,13 @@ func frameCode(p Params) (float64, error) {
 			Trim struct {
 				Start float64 `json:"start_ms"`
 			} `json:"trim"`
-			Crossfade int `json:"crossfade_frames"`
+			Head int `json:"loop_head_frames"`
+			Tail int `json:"loop_tail_frames"`
 		}
 		if err := json.Unmarshal(b, &m); err != nil {
 			return 0, fmt.Errorf("%s: %w", side, err)
 		}
-		start, fps, tail = m.Trim.Start, m.FPS, m.Crossfade
+		start, fps, head, tail = m.Trim.Start, m.FPS, m.Head, m.Tail
 	}
 	if math.IsNaN(start) || fps <= 0 || masterFPS <= 0 {
 		return 0, fmt.Errorf("frame-code: want start_ms or a sidecar, and fps > 0")
@@ -625,16 +626,16 @@ func frameCode(p Params) (float64, error) {
 	if err != nil {
 		return 0, err
 	}
-	if tail >= len(got) {
-		return 0, fmt.Errorf("frame-code: %d frames, %d of them crossfade", len(got), tail)
+	if head+tail >= len(got) {
+		return 0, fmt.Errorf("frame-code: %d frames, %d of them the loop close's", len(got), head+tail)
 	}
-	got = got[:len(got)-tail]
+	got = got[head : len(got)-tail]
 	slices.Sort(master)
 	want := make([]int, len(got))
 	for k := range want {
 		// The latest master frame at or before t, in master frames; the
 		// epsilon absorbs a time that lands on a frame in floating point.
-		t := (start + float64(k)*1000/fps) * masterFPS / 1000
+		t := (start + float64(k+head)*1000/fps) * masterFPS / 1000
 		i, _ := slices.BinarySearch(master, int(math.Floor(t+1e-6))+1)
 		want[k] = master[max(i-1, 0)]
 	}
