@@ -30,18 +30,9 @@ var ErrNoDetail = errors.New("b has no fine detail to recover")
 // chroma smear: 4:2:0 video keeps the luma of coloured text and blurs its
 // colour, which only a colour channel shows, hence DetailMin.
 func Detail(a, b *image.RGBA64, sigma float64, ch Channel) (float64, error) {
-	if a.Bounds().Size() != b.Bounds().Size() {
-		return 0, fmt.Errorf("a and b sizes differ")
-	}
-	if !(sigma > 0) {
-		return 0, fmt.Errorf("sigma: want a positive number")
-	}
-	ha, hb := highPass(a, sigma, ch), highPass(b, sigma, ch)
-	var miss, energy float64
-	for i := range hb {
-		d := ha[i] - hb[i]
-		miss += d * d
-		energy += hb[i] * hb[i]
+	miss, energy, err := detailParts(a, b, sigma, ch)
+	if err != nil {
+		return 0, err
 	}
 	if energy < 1e-12 {
 		return 0, ErrNoDetail
@@ -49,22 +40,51 @@ func Detail(a, b *image.RGBA64, sigma float64, ch Channel) (float64, error) {
 	return 1 - miss/energy, nil
 }
 
-// DetailMin is the least Detail of Red, Green and Blue, skipping a channel
-// in which b has no fine detail; ErrNoDetail when it has none in any.
+// detailParts is Detail's Σ(hf(a)-hf(b))² and Σhf(b)².
+func detailParts(a, b *image.RGBA64, sigma float64, ch Channel) (miss, energy float64, err error) {
+	if a.Bounds().Size() != b.Bounds().Size() {
+		return 0, 0, fmt.Errorf("a and b sizes differ")
+	}
+	if !(sigma > 0) {
+		return 0, 0, fmt.Errorf("sigma: want a positive number")
+	}
+	ha, hb := highPass(a, sigma, ch), highPass(b, sigma, ch)
+	for i := range hb {
+		d := ha[i] - hb[i]
+		miss += d * d
+		energy += hb[i] * hb[i]
+	}
+	return miss, energy, nil
+}
+
+// weakChannel is the share of the strongest channel's fine-detail energy
+// under which DetailMin leaves a channel out. Neon text on near black
+// barely moves one channel (#39ff14's blue holds 0.01% of its green's
+// energy), and that channel, normalised by its own tiny energy, scores
+// codec noise thousands below zero.
+const weakChannel = 0.05
+
+// DetailMin is the least Detail of Red, Green and Blue, leaving out a
+// channel in which b has under weakChannel of its strongest channel's fine
+// detail; ErrNoDetail when b has none in any.
 func DetailMin(a, b *image.RGBA64, sigma float64) (float64, error) {
-	least, found := math.Inf(1), false
-	for _, ch := range []Channel{Red, Green, Blue} {
-		v, err := Detail(a, b, sigma, ch)
-		if errors.Is(err, ErrNoDetail) {
-			continue
-		}
-		if err != nil {
+	var miss, energy [3]float64
+	strongest := 0.0
+	for i, ch := range []Channel{Red, Green, Blue} {
+		var err error
+		if miss[i], energy[i], err = detailParts(a, b, sigma, ch); err != nil {
 			return 0, err
 		}
-		least, found = math.Min(least, v), true
+		strongest = math.Max(strongest, energy[i])
 	}
-	if !found {
+	if strongest < 1e-12 {
 		return 0, ErrNoDetail
+	}
+	least := math.Inf(1)
+	for i := range energy {
+		if energy[i] >= weakChannel*strongest {
+			least = math.Min(least, 1-miss[i]/energy[i])
+		}
 	}
 	return least, nil
 }
