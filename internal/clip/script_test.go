@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -153,7 +154,7 @@ target = {label="A"}
 `)
 	if *s.FPS != 60 || s.Camera.Mode != "full" || *s.Camera.MaxZoom != 1.0 ||
 		!reflect.DeepEqual(s.Output.Formats, []string{"mp4"}) || s.Overlays != (Overlays{}) || s.Output.BudgetKB != 0 ||
-		s.Output.Loop != "crossfade" {
+		s.Output.Loop != "crossfade" || s.Output.MaxIdleMS == nil || *s.Output.MaxIdleMS != 500 {
 		t.Fatalf("script defaults: %+v", s)
 	}
 	for i, st := range s.Steps {
@@ -199,6 +200,9 @@ func TestLoadRefuses(t *testing.T) {
 		{"format dup", sub("width = 600", "width = 600\nformats=[\"mp4\",\"mp4\"]"), "listed twice"},
 		{"budget", sub("width = 600", "width = 600\nbudget_kb=600\nformats=[\"webm\"]"), "output.budget_kb: applies to mp4"},
 		{"loop unknown", sub("width = 600", "width = 600\nloop=\"fade\""), "output.loop: want crossfade or dip"},
+		{"idle 0", sub("width = 600", "width = 600\nmax_idle_ms=0"), "output.max_idle_ms: want 100-60000"},
+		{"idle 99", sub("width = 600", "width = 600\nmax_idle_ms=99"), "output.max_idle_ms: want 100-60000"},
+		{"idle cap", sub("width = 600", "width = 600\nmax_idle_ms=60001"), "output.max_idle_ms: want 100-60000"},
 		{"cursor mobile", sub("[output]", "[overlays]\ncursor=true\n[output]"), "overlays.cursor: refused for form mobile"},
 		{"keys mobile", sub("[output]", "[overlays]\nkeys=true\n[output]"), "overlays.keys: refused for form mobile"},
 		{"tap no target", steps("action = \"tap\""), "step[0].target: required for tap"},
@@ -256,6 +260,13 @@ func TestLoadRefuses(t *testing.T) {
 		_, err := Load(write(t, desktop(steps("action = \"key\"\nkey = \"tab\""))))
 		if err == nil || strings.Contains(err.Error(), "step[0].key") {
 			t.Fatalf("err = %v", err)
+		}
+	})
+	t.Run("idle bounds accepted", func(t *testing.T) {
+		for _, v := range []int{100, 60000} {
+			if s := load(t, sub("width = 600", fmt.Sprintf("width = 600\nmax_idle_ms=%d", v))); *s.Output.MaxIdleMS != v {
+				t.Errorf("max_idle_ms %d loaded as %d", v, *s.Output.MaxIdleMS)
+			}
 		}
 	})
 	t.Run("loops accepted", func(t *testing.T) {
@@ -316,7 +327,7 @@ func TestJSONIsNormalised(t *testing.T) {
 	if !reflect.DeepEqual(tg["outline"], map[string]any{"id": "outline"}) || !reflect.DeepEqual(tg["kb"], map[string]any{"system": "keyboard"}) {
 		t.Fatalf("targets %v", tg)
 	}
-	if out := m["output"].(map[string]any); !reflect.DeepEqual(out["formats"], []any{"mp4", "webm", "poster"}) || out["loop"] != "crossfade" {
+	if out := m["output"].(map[string]any); !reflect.DeepEqual(out["formats"], []any{"mp4", "webm", "poster"}) || out["loop"] != "crossfade" || out["max_idle_ms"] != 500.0 {
 		t.Fatalf("output %v", out)
 	}
 }
