@@ -304,3 +304,18 @@ func TestBytes(t *testing.T) {
 		t.Error("a missing file measured")
 	}
 }
+
+func TestJSONMetric(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "m.json")
+	if err := os.WriteFile(p, []byte(`{"a":{"b":3,"s":"x"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if v, err := Metrics["json"](Params{"file": p, "field": "a.b"}); err != nil || v != 3 {
+		t.Errorf("a.b = %v, %v", v, err)
+	}
+	for _, field := range []string{"a.c", "a.b.c", "a.s", "a", ""} {
+		if v, err := Metrics["json"](Params{"file": p, "field": field}); err == nil {
+			t.Errorf("field %q = %v, want an error", field, v)
+		}
+	}
+}
