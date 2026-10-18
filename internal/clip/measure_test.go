@@ -13,9 +13,10 @@ import (
 	"github.com/lockyc/plate/internal/raster"
 )
 
-// subsample420 is img through 4:2:0 video: converted to BT.709 YCbCr, Cb
-// and Cr averaged over each 2×2 block, Y kept, and converted back.
-func subsample420(img *image.RGBA64) *image.RGBA64 {
+// subsample is img through a chroma-subsampled video format: converted to
+// BT.709 YCbCr, Cb and Cr averaged over each n×n block, Y kept, and
+// converted back. n = 2 is 4:2:0; n = 4 smears colour twice as far.
+func subsample(img *image.RGBA64, n int) *image.RGBA64 {
 	b := img.Bounds()
 	w, h := b.Dx(), b.Dy()
 	y, cb, cr := make([]float64, w*h), make([]float64, w*h), make([]float64, w*h)
@@ -28,43 +29,51 @@ func subsample420(img *image.RGBA64) *image.RGBA64 {
 		}
 	}
 	out := image.NewRGBA64(image.Rect(0, 0, w, h))
-	for j := 0; j < h; j += 2 {
-		for i := 0; i < w; i += 2 {
-			k := []int{j*w + i, j*w + i + 1, (j+1)*w + i, (j+1)*w + i + 1}
-			var mb, mr float64
-			for _, n := range k {
-				mb += cb[n] / 4
-				mr += cr[n] / 4
+	for j := 0; j < h; j += n {
+		for i := 0; i < w; i += n {
+			var k []int
+			for dy := range n {
+				for dx := range n {
+					if i+dx < w && j+dy < h {
+						k = append(k, (j+dy)*w+i+dx)
+					}
+				}
 			}
-			for _, n := range k {
-				r := y[n] + 1.5748*mr
-				bl := y[n] + 1.8556*mb
-				g := (y[n] - 0.2126*r - 0.0722*bl) / 0.7152
-				out.SetRGBA64(n%w, n/w, color.RGBA64{clamp16(r * 65535), clamp16(g * 65535), clamp16(bl * 65535), 0xffff})
+			var mb, mr float64
+			for _, p := range k {
+				mb += cb[p] / float64(len(k))
+				mr += cr[p] / float64(len(k))
+			}
+			for _, p := range k {
+				r := y[p] + 1.5748*mr
+				bl := y[p] + 1.8556*mb
+				g := (y[p] - 0.2126*r - 0.0722*bl) / 0.7152
+				out.SetRGBA64(p%w, p/w, color.RGBA64{clamp16(r * 65535), clamp16(g * 65535), clamp16(bl * 65535), 0xffff})
 			}
 		}
 	}
 	return out
 }
 
-// TestSharpnessCatchesChromaSmear: 4:2:0 keeps a magenta line's luma and
-// smears its colour, so luma Detail passes it and Sharpness does not. The
-// ground is mid grey rather than black: chroma spread onto black decodes to
-// a negative green, whose clipping would change the luma too.
+// TestSharpnessCatchesChromaSmear: an encode that smears colour past what
+// 4:2:0 itself does keeps a magenta line's luma and loses its colour, so
+// luma Detail passes it and Sharpness, against the 4:2:0 reference, does
+// not. The ground is mid grey rather than black: chroma spread onto black
+// decodes to a negative green, whose clipping would change the luma too.
 func TestSharpnessCatchesChromaSmear(t *testing.T) {
 	ref := solid(32, 32, color.RGBA64{0x8000, 0x8000, 0x8000, 0xffff})
 	for y := 0; y < 32; y++ {
 		ref.SetRGBA64(9, y, color.RGBA64{0xffff, 0, 0xffff, 0xffff})
 	}
-	got := subsample420(ref)
-	luma, err := raster.Detail(got, ref, 1, raster.Luma)
+	ref420, got := subsample(ref, 2), subsample(ref, 4)
+	luma, err := raster.Detail(got, ref420, 1, raster.Luma)
 	if err != nil || luma <= 0.95 {
 		t.Fatalf("luma Detail = %v, %v; want > 0.95", luma, err)
 	}
-	if s, err := Sharpness([]*image.RGBA64{ref}, []*image.RGBA64{got}); err != nil || s >= MinSharpness {
+	if s, err := Sharpness([]*image.RGBA64{ref420}, []*image.RGBA64{got}); err != nil || s >= MinSharpness {
 		t.Fatalf("Sharpness = %v, %v; want < MinSharpness", s, err)
 	}
-	if s, err := Sharpness([]*image.RGBA64{ref, ref}, []*image.RGBA64{ref, got}); err != nil || s >= MinSharpness {
+	if s, err := Sharpness([]*image.RGBA64{ref420, ref420}, []*image.RGBA64{ref420, got}); err != nil || s >= MinSharpness {
 		t.Fatalf("Sharpness over two frames = %v, %v; want the worse frame's", s, err)
 	}
 }
@@ -135,6 +144,17 @@ func neonText(c color.RGBA64) *image.RGBA64 {
 	return img
 }
 
+// realMP4 skips t unless ffmpeg with libx264 is installed.
+func realMP4(t *testing.T) {
+	t.Helper()
+	if _, err := engine.Resolve("ffmpeg"); err != nil {
+		t.Skip("no ffmpeg")
+	}
+	if err := requireEncoders(context.Background(), []string{"mp4"}); err != nil {
+		t.Skip("no libx264")
+	}
+}
+
 // mp4Encoded is img through the mp4 encode and the decode Sharpness reads
 // it back with.
 func mp4Encoded(t *testing.T, img *image.RGBA64) *image.RGBA64 {
@@ -153,31 +173,93 @@ func mp4Encoded(t *testing.T, img *image.RGBA64) *image.RGBA64 {
 	return got[0]
 }
 
-// TestSharpnessPassesNeonText: neon text on near black keeps its detail
-// through 4:2:0, lossless and through the mp4 encode, above MinSharpness, though one of
-// its channels barely moves.
-func TestSharpnessPassesNeonText(t *testing.T) {
-	real := true
-	if _, err := engine.Resolve("ffmpeg"); err != nil {
-		real = false
-	} else if err := requireEncoders(context.Background(), []string{"mp4"}); err != nil {
-		real = false
+// lossless420 is img through Lossless420: the Sharpness reference.
+func lossless420(t *testing.T, img *image.RGBA64) *image.RGBA64 {
+	t.Helper()
+	dir := t.TempDir()
+	savePNG(filepath.Join(dir, "r00000.png"), img)
+	out, err := Lossless420(context.Background(), dir, []int{0}, dir)
+	if err != nil {
+		t.Fatal(err)
 	}
+	return out[0]
+}
+
+// TestLossless420IsALosslessEncode: the reference is pixel for pixel what
+// a lossless (qp 0) x264 encode through the mp4's own conversion decodes
+// to, read back the way ExtractEncoded reads the real encode.
+func TestLossless420IsALosslessEncode(t *testing.T) {
+	realMP4(t)
+	ref := neonText(color.RGBA64{0x0000, 0xe5e5, 0xffff, 0xffff})
+	dir := t.TempDir()
+	savePNG(filepath.Join(dir, "r00000.png"), ref)
+	mp4 := filepath.Join(dir, "qp0.mp4")
+	args := append([]string{"-hide_banner", "-loglevel", "error", "-nostdin", "-framerate", "60", "-i", filepath.Join(dir, "r%05d.png"),
+		"-vf", toYUV, "-c:v", "libx264", "-qp", "0", "-pix_fmt", "yuv420p"}, bt709...)
+	if _, err := engine.Run(context.Background(), engine.Cmd{Engine: "ffmpeg", Args: append(args, mp4)}); err != nil {
+		t.Fatal(err)
+	}
+	enc, err := ExtractEncoded(context.Background(), mp4, []int{0}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := lossless420(t, ref); !reflect.DeepEqual(got.Pix, enc[0].Pix) {
+		t.Fatal("Lossless420 differs from a qp 0 encode's decode")
+	}
+}
+
+// TestSharpnessPassesNeonText: neon text on near black keeps its detail
+// through the mp4 encode, though one of its channels barely moves.
+func TestSharpnessPassesNeonText(t *testing.T) {
+	realMP4(t)
 	for _, hex := range []uint32{0x00e5ff, 0xff2bd6, 0x39ff14, 0xffd400} {
 		c := color.RGBA64{uint16(hex>>16) * 0x101, uint16(hex>>8&0xff) * 0x101, uint16(hex&0xff) * 0x101, 0xffff}
 		ref := neonText(c)
-		encodes := map[string]*image.RGBA64{"lossless 4:2:0": subsample420(ref)}
-		if real {
-			encodes["mp4"] = mp4Encoded(t, ref)
-		}
-		for name, got := range encodes {
-			s, err := Sharpness([]*image.RGBA64{ref}, []*image.RGBA64{got})
-			if err != nil || s < MinSharpness {
-				t.Errorf("#%06x %s: Sharpness = %.3f, %v; want ≥ %v", hex, name, s, err, MinSharpness)
-			}
+		s, err := Sharpness([]*image.RGBA64{lossless420(t, ref)}, []*image.RGBA64{mp4Encoded(t, ref)})
+		if err != nil || s < MinSharpness {
+			t.Errorf("#%06x: Sharpness = %.3f, %v; want ≥ %v", hex, s, err, MinSharpness)
 		}
 	}
-	if !real {
-		t.Log("no ffmpeg with libx264: the mp4 encode unchecked")
+}
+
+// neutralBesideCyan is a white block in a black strip above a cyan box on
+// #0a0a12, as the clip-follow-sharp-600 case frames them: neutral detail
+// gives the red channel its energy while 4:2:0 adds red at the cyan edge.
+func neutralBesideCyan() *image.RGBA64 {
+	img := solid(600, 400, color.RGBA64{0x0a0a, 0x0a0a, 0x1212, 0xffff})
+	for x := range 600 {
+		v := uint16(0)
+		if x >= 150 && x < 350 {
+			v = 0xffff
+		}
+		for y := range 40 {
+			img.SetRGBA64(x, y, color.RGBA64{v, v, v, 0xffff})
+		}
+	}
+	for y := 151; y < 305; y++ {
+		for x := 101; x < 255; x++ {
+			img.SetRGBA64(x, y, color.RGBA64{0, 0xe5e5, 0xffff, 0xffff})
+		}
+	}
+	return img
+}
+
+// TestSharpnessScoresTheEncoderNotTheFormat: neutral detail beside a
+// saturated edge loses red to 4:2:0 itself, so a lossless 4:2:0 copy scored
+// against the composed frame falls below MinSharpness. Scored against the
+// 4:2:0 reference, the mp4 keeps its detail.
+func TestSharpnessScoresTheEncoderNotTheFormat(t *testing.T) {
+	realMP4(t)
+	ref := neutralBesideCyan()
+	ref420 := lossless420(t, ref)
+	if s, err := Sharpness([]*image.RGBA64{ref}, []*image.RGBA64{ref420}); err != nil || s >= MinSharpness {
+		t.Fatalf("lossless 4:2:0 against the composed frame = %.3f, %v; want < MinSharpness", s, err)
+	} else {
+		t.Logf("lossless 4:2:0 against the composed frame = %.3f", s)
+	}
+	if s, err := Sharpness([]*image.RGBA64{ref420}, []*image.RGBA64{mp4Encoded(t, ref)}); err != nil || s < MinSharpness {
+		t.Fatalf("mp4 against the 4:2:0 reference = %.3f, %v; want ≥ MinSharpness", s, err)
+	} else {
+		t.Logf("mp4 against the 4:2:0 reference = %.3f", s)
 	}
 }

@@ -148,12 +148,28 @@ func ExtractFrames(ctx context.Context, master string, c Colour, w Window, fps i
 // RGB as a viewer sees them (toViewerRGB), e%05d.png in dir, in the order
 // given.
 func ExtractEncoded(ctx context.Context, file string, indices []int, dir string) ([]*image.RGBA64, error) {
+	return extractSelected(ctx, file, "", indices, "e", dir)
+}
+
+// Lossless420 is frames indices (ascending) of the composed frames, the
+// r%05d.png sequence in refDir, through the encodes' own 4:2:0 conversion
+// (toYUV) and back as ExtractEncoded reads an encode, l%05d.png in dir:
+// pixel for pixel what a lossless encode decodes to. It is Sharpness's
+// reference, so Sharpness scores what the encoder loses and not what 4:2:0,
+// the format the clip must ship in, loses before any encoder runs.
+func Lossless420(ctx context.Context, refDir string, indices []int, dir string) ([]*image.RGBA64, error) {
+	return extractSelected(ctx, filepath.Join(refDir, "r%05d.png"), toYUV+",", indices, "l", dir)
+}
+
+// extractSelected decodes frames indices of src through pre and then
+// toViewerRGB, prefix%05d.png in dir.
+func extractSelected(ctx context.Context, src, pre string, indices []int, prefix, dir string) ([]*image.RGBA64, error) {
 	terms := make([]string, len(indices))
 	for i, k := range indices {
 		terms[i] = fmt.Sprintf(`eq(n\,%d)`, k)
 	}
-	vf := "select=" + strings.Join(terms, "+") + "," + toViewerRGB
-	paths, err := decode(ctx, file, vf, []string{"-fps_mode", "passthrough"}, len(indices), file, "e", dir)
+	vf := "select=" + strings.Join(terms, "+") + "," + pre + toViewerRGB
+	paths, err := decode(ctx, src, vf, []string{"-fps_mode", "passthrough"}, len(indices), src, prefix, dir)
 	if err != nil {
 		return nil, err
 	}
