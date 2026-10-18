@@ -15,7 +15,8 @@ import (
 // content no longer is. For each pair of adjacent rects samples in which a
 // system target goes from null to a rect or back, TimeKeyboard finds,
 // between them, the first and last master frames with Activity above
-// idleShare inside the keyboard's rect (the keyboard sliding in or out is
+// idleShare across the keyboard's slide, its rect down to the screen's foot
+// (the keyboard sliding in or out is
 // a large change there; a caret blink is not), and returns a copy of l
 // with the earlier sample repeated where that motion starts and the later
 // one where it ends. The Track then holds every rect before the motion,
@@ -39,7 +40,9 @@ func TimeKeyboard(s *Script, l *Log, frames []*image.Gray, fps int) (*Log, []str
 		if !ok {
 			continue
 		}
-		i0, i1 := moved(frames, kb, l.Meta.Screen, a.T, b.T, fr)
+		// The keyboard slides in from the screen's foot, below its rect.
+		slide := Rect{kb.X, kb.Y, kb.W, l.Meta.Screen[1] - kb.Y}
+		i0, i1 := moved(frames, slide, l.Meta.Screen, a.T, b.T, fr)
 		if i0 < 0 {
 			warns = append(warns, fmt.Sprintf("keyboard %.0f-%.0f ms: no motion found in the master inside the keyboard's rect; easing over the whole gap", a.T, b.T))
 			continue
