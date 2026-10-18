@@ -48,19 +48,31 @@ func TestCheckMaster(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := l.CheckMaster(Master{W: 1206, H: 2622, Duration: 8300}); err != nil {
-		t.Fatal(err)
+	for _, m := range []Master{{W: 1206, H: 2622, Duration: 8300}, {W: 1205, H: 2623, Duration: 8300},
+		// simctl writes no frame while the screen is still, so a master
+		// whose last change came early probes short of the log's end.
+		{W: 1206, H: 2622, Duration: 6500}} {
+		if warn, err := l.CheckMaster(m); err != nil || warn != "" {
+			t.Fatalf("%+v: warning %q, err %v", m, warn, err)
+		}
 	}
-	if err := l.CheckMaster(Master{W: 1205, H: 2623, Duration: 8300}); err != nil {
-		t.Fatalf("within 1 px: %v", err)
-	}
-	err = l.CheckMaster(Master{W: 1170, H: 2532, Duration: 8300})
+	_, err = l.CheckMaster(Master{W: 1170, H: 2532, Duration: 8300})
 	if err == nil || !strings.Contains(err.Error(), "master is 1170x2532, events say 1206x2622") {
 		t.Fatalf("err = %v", err)
 	}
-	// simctl writes no frame while the screen is still, so a master whose
-	// last change came early probes short of the log's end.
-	if err := l.CheckMaster(Master{W: 1206, H: 2622, Duration: 100}); err != nil {
-		t.Fatalf("a static tail: %v", err)
+}
+
+func TestCheckMasterRefusesTruncated(t *testing.T) {
+	l, err := parse(t, load(t, contractExample), contractLog...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = l.CheckMaster(Master{W: 1206, H: 2622, FirstPTS: 20, Duration: 1200})
+	if err == nil || err.Error() != "the master's last frame is at 1180 ms, before the first action at 1520 ms: it is cut short or not this log's recording" {
+		t.Fatalf("err = %v", err)
+	}
+	warn, err := l.CheckMaster(Master{W: 1206, H: 2622, Duration: 3000})
+	if err != nil || warn != "the master's last frame is at 3000 ms, before the last action at 6400 ms; the screen holds still from there" {
+		t.Fatalf("warning %q, err %v", warn, err)
 	}
 }

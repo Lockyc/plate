@@ -47,18 +47,22 @@ func SampleFrames(n int) []int {
 // Sharpness is how much of the reference frames' fine detail the encoded
 // frames keep: the least raster.DetailMin(got[i], refs[i], 1) over the
 // SampleFrames pairs given. A pair with no fine detail is skipped, so 1
-// means none had any to lose; a pair that differs in size scores 0.
-func Sharpness(refs, got []*image.RGBA64) float64 {
+// means none had any to lose. Pairs that differ in size or count are an
+// error: a bad decode, not a soft encode.
+func Sharpness(refs, got []*image.RGBA64) (float64, error) {
+	if len(refs) != len(got) {
+		return 0, fmt.Errorf("sharpness: %d reference frames, %d encoded", len(refs), len(got))
+	}
 	least := 1.0
-	for i := range min(len(refs), len(got)) {
+	for i := range refs {
 		v, err := raster.DetailMin(got[i], refs[i], 1)
 		if errors.Is(err, raster.ErrNoDetail) {
 			continue
 		}
 		if err != nil {
-			return 0
+			return 0, fmt.Errorf("sharpness: frame pair %d: %w", i, err)
 		}
 		least = math.Min(least, v)
 	}
-	return least
+	return least, nil
 }

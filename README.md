@@ -148,8 +148,11 @@ Display P3, as the iOS simulator writes, is converted to BT.709 first.
 `--caption-css` loads after plate's caption style.
 
 `clip render` refuses before decoding anything when the event log's sync
-error exceeds one frame or the recording disagrees with it, and refuses a
-camera that would upsample the recording. After encoding it fails when the
+error exceeds one frame, when the recording's screen size differs from the
+log's, or when the recording ends before the log's first action; it warns
+when the recording ends before the last action. A recording that stops
+early because its screen stood still is fine: its last frame is held to the
+log's end. It also refuses a camera that would upsample the recording. After encoding it fails when the
 MP4 is over the script's `budget_kb`, when the encode loses too much of the
 frames' fine detail (sharpness, measured per colour channel, so smeared
 coloured text counts), or when the loop's last frame visibly differs from
