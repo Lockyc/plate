@@ -99,9 +99,28 @@ func TestSharpnessRefusesMismatchedFrames(t *testing.T) {
 
 func TestSampleFrames(t *testing.T) {
 	for n, want := range map[int][]int{1: {0}, 2: {0, 1}, 30: {0, 29}, 31: {0, 30}, 61: {0, 30, 60}, 75: {0, 30, 60, 74}} {
-		if got := SampleFrames(n); !reflect.DeepEqual(got, want) {
+		if got := SampleFrames(n, LoopClose{}); !reflect.DeepEqual(got, want) {
 			t.Errorf("SampleFrames(%d) = %v, want %v", n, got, want)
 		}
+	}
+}
+
+func TestSampleFramesSkipTheLoopClose(t *testing.T) {
+	// The adding-nodes render with a dip and idle cuts: 512 frames, the
+	// dip on 9 at each end. Frame 510, every 30th from 0, is 99.5% ground,
+	// its detail faded by design, and scored the mp4 -0.012. Sharpness
+	// samples only the frames the loop close left as composed.
+	got := SampleFrames(512, LoopClose{Head: 9, Tail: 9})
+	if got[0] != 9 || got[len(got)-1] != 502 {
+		t.Fatalf("SampleFrames = %v, want 9 to 502", got)
+	}
+	for _, k := range got {
+		if k < 9 || k > 502 {
+			t.Fatalf("SampleFrames = %v samples loop-close frame %d", got, k)
+		}
+	}
+	if got := SampleFrames(512, LoopClose{Tail: 18}); got[len(got)-1] != 493 {
+		t.Fatalf("crossfade: SampleFrames = %v, want it to end at 493", got)
 	}
 }
 
