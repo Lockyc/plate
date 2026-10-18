@@ -291,7 +291,7 @@ func mixInto(path string, w float64, to func(j int) uint16) error {
 
 // ground is img's dominant colour, the one a UI's background gives most of
 // its pixels: the mean of the fullest bin when each channel is cut to its
-// top 5 bits, which a lossy master's jitter stays within. It is a colour
+// top 5 bits, wide enough to hold a lossy master's jitter. It is a colour
 // the frame shows, where a per-channel median of a frame half covered by a
 // pale card is a grey it shows nowhere.
 func ground(img *image.RGBA64) color.RGBA64 {
