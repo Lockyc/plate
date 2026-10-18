@@ -159,9 +159,9 @@ colours, or renders what it is given.
   HTML pages rendered once each through `render.PNGAlpha`. `clip.Render`
   refuses before decoding what the log and probe can show, holds the encode
   to its checks, and publishes the set only whole (`clip.publish`). The
-  encode constants (`mp4CRF`, `webmCRF`) and check limits
-  (`clip.MinSharpness`, `clip.MaxSeam`) are provisional until each has a
-  `quality/` case that measures it.
+  encode settings, the resampling kernel and `clip.MinSharpness` are
+  measured by the `clip-text-*` and `clip-caption-sharp` quality cases;
+  `clip.MaxSeam` is provisional until a case measures it.
 - **inpaint, fonts, qr, pdf, impose, doc, slides** — as the README table and each package's
   doc comment describe.
 

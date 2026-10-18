@@ -135,9 +135,9 @@ func neonText(c color.RGBA64) *image.RGBA64 {
 	return img
 }
 
-// crf18 is img through the mp4 encode and the decode Sharpness reads it
-// back with.
-func crf18(t *testing.T, img *image.RGBA64) *image.RGBA64 {
+// mp4Encoded is img through the mp4 encode and the decode Sharpness reads
+// it back with.
+func mp4Encoded(t *testing.T, img *image.RGBA64) *image.RGBA64 {
 	t.Helper()
 	dir := t.TempDir()
 	savePNG(filepath.Join(dir, "r00000.png"), img)
@@ -154,7 +154,7 @@ func crf18(t *testing.T, img *image.RGBA64) *image.RGBA64 {
 }
 
 // TestSharpnessPassesNeonText: neon text on near black keeps its detail
-// through 4:2:0, lossless and at crf 18, above MinSharpness, though one of
+// through 4:2:0, lossless and through the mp4 encode, above MinSharpness, though one of
 // its channels barely moves.
 func TestSharpnessPassesNeonText(t *testing.T) {
 	real := true
@@ -168,7 +168,7 @@ func TestSharpnessPassesNeonText(t *testing.T) {
 		ref := neonText(c)
 		encodes := map[string]*image.RGBA64{"lossless 4:2:0": subsample420(ref)}
 		if real {
-			encodes["crf 18"] = crf18(t, ref)
+			encodes["mp4"] = mp4Encoded(t, ref)
 		}
 		for name, got := range encodes {
 			s, err := Sharpness([]*image.RGBA64{ref}, []*image.RGBA64{got})
@@ -178,6 +178,6 @@ func TestSharpnessPassesNeonText(t *testing.T) {
 		}
 	}
 	if !real {
-		t.Log("no ffmpeg with libx264: crf 18 unchecked")
+		t.Log("no ffmpeg with libx264: the mp4 encode unchecked")
 	}
 }

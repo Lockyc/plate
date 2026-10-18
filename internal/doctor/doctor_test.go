@@ -60,14 +60,14 @@ esac`)
 		Install: map[string]string{runtime.GOOS: "get ffmpeg"}, UsedBy: []string{"clip"},
 		Capabilities: []pins.Capability{
 			{Args: []string{"-hide_banner", "-encoders"}, Token: "libx264", For: "clip mp4"},
-			{Args: []string{"-hide_banner", "-encoders"}, Token: "libvpx-vp9", For: "clip webm"},
+			{Args: []string{"-hide_banner", "-encoders"}, Token: "libsvtav1", For: "clip webm"},
 		},
 	}
 	var out bytes.Buffer
 	if code := run(ctx, []pins.Engine{e}, false, nil, &out); code != 1 {
 		t.Fatalf("code %d, want 1:\n%s", code, out.String())
 	}
-	for _, want := range []string{"missing libvpx-vp9 (clip webm)", "will not run until the rows above are fixed: clip"} {
+	for _, want := range []string{"missing libsvtav1 (clip webm)", "will not run until the rows above are fixed: clip"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("report lacks %q:\n%s", want, out.String())
 		}
