@@ -336,6 +336,8 @@ func (s *Script) validateRef(path string, t *Target, ctx refCtx) Problems {
 		add("no [targets] entry %s", t.Name)
 	case entry.System != "" && ctx != ctxPin:
 		add("%s is a system target, usable only as a camera pin", t.Name)
+	case entry.XY != nil && ctx != ctxStep:
+		add("%s is an xy target: a point has no rect to sample", t.Name)
 	}
 	return p
 }
