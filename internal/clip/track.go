@@ -40,18 +40,27 @@ type Track struct {
 	// system target's eased curve there, as the layout riding the keyboard
 	// does, so a touchbar and the keyboard under it stay flush.
 	eased map[int]bool
+	// motions are the eased gaps the master was measured over (Log.Motions),
+	// by the ordinal of the sample opening them: they move on the measured
+	// progress instead of the cubic.
+	motions map[int]Motion
 }
 
 // NewTrack indexes every rects sample in the log by name. A name absent from
 // a sample keeps its previous value, so only the samples naming it are kept.
 func NewTrack(l *Log) *Track {
-	tr := &Track{series: map[string][]sample{}, first: math.Inf(1), eased: map[int]bool{}}
+	tr := &Track{series: map[string][]sample{}, first: math.Inf(1), eased: map[int]bool{}, motions: map[int]Motion{}}
 	n := -1
 	for _, e := range l.Events {
 		if e.Type != "rects" {
 			continue
 		}
 		n++
+		for _, m := range l.Motions {
+			if m.T[0] == e.T {
+				tr.motions[n] = m
+			}
+		}
 		tr.first = math.Min(tr.first, e.T)
 		for name, r := range e.Rects {
 			tr.series[name] = append(tr.series[name], sample{e.T, n, r})
@@ -76,9 +85,18 @@ func lerp(a, b Rect, f float64) Rect {
 func (tr *Track) between(a, b sample, t float64) Rect {
 	x := (t - a.t) / (b.t - a.t)
 	if tr.eased[a.idx] {
-		x = easeInOutCubic(x)
+		x = tr.ease(a, b, t)
 	}
 	return lerp(*a.r, *b.r, x)
+}
+
+// ease is the progress at t through the eased gap a-b: as measured from the
+// master where TimeKeyboard measured it, else the cubic over the gap.
+func (tr *Track) ease(a, b sample, t float64) float64 {
+	if m, ok := tr.motions[a.idx]; ok {
+		return m.at(t)
+	}
+	return easeInOutCubic((t - a.t) / (b.t - a.t))
 }
 
 // RectAt is the rect of name at t, interpolated between two consecutive
@@ -116,7 +134,7 @@ func (tr *Track) RectAt(name string, t float64) (Rect, bool) {
 }
 
 // PinAt is the rect of a pinned target and how visible it is: 1 while up, 0
-// while down, eased over the whole gap between a down sample and an up one.
+// while down, eased (ease) over the gap between a down sample and an up one.
 func (tr *Track) PinAt(name string, t float64) (r Rect, shown float64) {
 	ss := tr.series[name]
 	if len(ss) == 0 {
@@ -143,14 +161,13 @@ func (tr *Track) PinAt(name string, t float64) (r Rect, shown float64) {
 		}
 		return tr.lastUp(ss, i), 0
 	}
-	x := (t - a.t) / (b.t - a.t)
 	switch {
 	case a.r != nil && b.r != nil:
 		return tr.between(a, b, t), 1
 	case a.r != nil:
-		return *a.r, 1 - easeInOutCubic(x)
+		return *a.r, 1 - tr.ease(a, b, t)
 	case b.r != nil:
-		return *b.r, easeInOutCubic(x)
+		return *b.r, tr.ease(a, b, t)
 	}
 	return tr.lastUp(ss, i), 0
 }

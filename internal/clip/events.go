@@ -64,11 +64,32 @@ type Event struct {
 	Rects    map[string]*Rect
 }
 
-// Log is a parsed event log; Events are stably sorted by T.
+// Log is a parsed event log; Events are stably sorted by T. Motions are
+// keyboard transitions measured from the master (TimeKeyboard), never read
+// from the log file.
 type Log struct {
-	Meta   Meta
-	Events []Event
-	End    float64
+	Meta    Meta
+	Events  []Event
+	End     float64
+	Motions []Motion
+}
+
+// Motion is a keyboard transition's progress as the master shows it: X,
+// 0 to 1, at master times T, both ascending; T spans exactly the gap
+// between two adjacent rects samples.
+type Motion struct{ T, X []float64 }
+
+// at is m's progress at t, linear between its measured frames.
+func (m Motion) at(t float64) float64 {
+	i := sort.SearchFloat64s(m.T, t)
+	switch {
+	case i == 0:
+		return m.X[0]
+	case i == len(m.T):
+		return m.X[len(m.X)-1]
+	}
+	f := (t - m.T[i-1]) / (m.T[i] - m.T[i-1])
+	return m.X[i-1] + (m.X[i]-m.X[i-1])*f
 }
 
 // wire is every field any line may carry. Pointers tell an absent key from
