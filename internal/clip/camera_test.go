@@ -540,3 +540,77 @@ func TestConstantStripsCentreTheRegion(t *testing.T) {
 		t.Errorf("mid-move centre %g, want %g", cy(mid), want)
 	}
 }
+
+// lagRise is a keyboard rising at 1000-1300 ms and dropping at 3000-3300
+// under a filter bar and a touchbar riding it, with a real capture's
+// geometry: the keyboard's rect stops at 816 pt, above the home indicator,
+// while the bars rest at the screen's foot, so a bar travels 275 pt to the
+// keyboard's 233. Flush only at the samples, the bars lag the keyboard's
+// eased share between them and overlap its top rows by up to 24 pt.
+func lagRise() (*Script, *Log) {
+	filterT := Target{Name: "filter", Label: "Filter"}
+	s := camScript(1080, "follow", &regionT, filterT, touchbarT, kbT)
+	r0, kb := Rect{0, 151, 402, 560}, Rect{0, 583, 402, 233}
+	f0, b0 := Rect{0, 760, 402, 44}, Rect{0, 804, 402, 36}
+	f1, b1 := Rect{0, 485, 402, 44}, Rect{0, 529, 402, 37}
+	return s, camLog(
+		rs(0, map[string]*Rect{"region": &r0, "filter": &f0, "touchbar": &b0, "kb": nil}),
+		rs(1000, map[string]*Rect{"region": &r0, "filter": &f0, "touchbar": &b0, "kb": nil}),
+		rs(1300, map[string]*Rect{"region": &r0, "filter": &f1, "touchbar": &b1, "kb": &kb}),
+		rs(3000, map[string]*Rect{"region": &r0, "filter": &f1, "touchbar": &b1, "kb": &kb}),
+		rs(3300, map[string]*Rect{"region": &r0, "filter": &f0, "touchbar": &b0, "kb": nil}),
+	)
+}
+
+// noSharedRows fails if any two of a view's region and strips show the same
+// master rows, or a strip is scaled unlike its width.
+func noSharedRows(t *testing.T, k int, v View, w float64) {
+	t.Helper()
+	srcs := []Rect{v.Region}
+	names := []string{"region"}
+	for _, p := range v.Pins {
+		if !near(p.H, w*p.Src.H/p.Src.W, 1e-6) {
+			t.Fatalf("frame %d: %s shows %g pt in %g px: not at its width's scale", k, p.Name, p.Src.H, p.H)
+		}
+		srcs = append(srcs, p.Src)
+		names = append(names, p.Name)
+	}
+	for i := range srcs {
+		for j := i + 1; j < len(srcs); j++ {
+			if overlaps(srcs[i], srcs[j]) {
+				t.Fatalf("frame %d: %s %+v and %s %+v show the same master rows", k, names[i], srcs[i], names[j], srcs[j])
+			}
+		}
+	}
+}
+
+func TestStripsNeverShareRowsWhileBarsLag(t *testing.T) {
+	// Mid-rise the touchbar would overlap the keyboard: the keyboard keeps
+	// the contested rows, the touchbar loses them off its bottom.
+	s, l := lagRise()
+	_, vs := path(t, s, l, Window{0, 1600})
+	cropped := false
+	for _, v := range vs {
+		for _, p := range v.Pins {
+			if p.Name == "touchbar" && p.Src.H < 36-1e-6 {
+				cropped = true
+			}
+		}
+	}
+	if !cropped {
+		t.Fatal("the touchbar was never cropped: the fixture no longer overlaps")
+	}
+}
+
+func TestPathNeverSharesRows(t *testing.T) {
+	// The invariant over every frame of a whole Path, following and fixed,
+	// through the rise and the drop.
+	for _, mode := range []string{"follow", "fixed"} {
+		s, l := lagRise()
+		s.Camera.Mode = mode
+		_, vs := path(t, s, l, Window{0, 4000})
+		for k, v := range vs {
+			noSharedRows(t, k, v, 1080)
+		}
+	}
+}
