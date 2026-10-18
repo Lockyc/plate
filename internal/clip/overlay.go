@@ -46,6 +46,10 @@ type Op struct {
 	X, Y, Scale, Opacity float64
 }
 
+// pointKinds are the point sprites, each keyed by its kind; every other
+// sprite is full-frame.
+var pointKinds = []string{"tap", "click", "cursor"}
+
 func clamp01(x float64) float64 { return math.Max(0, math.Min(1, x)) }
 
 // toOutput maps p through the pin strip or the region it falls in, and
@@ -332,7 +336,7 @@ func lerpPt(a, b Point, f float64) Point { return Point{a.X + (b.X-a.X)*f, a.Y +
 // largest px per pt it is drawn at, and sizes its spec to the largest
 // on-screen Op.Scale.
 func (tl *timeline) normalise() {
-	for _, kind := range []string{"tap", "click", "cursor"} {
+	for _, kind := range pointKinds {
 		camMax := 0.0
 		for _, p := range tl.pts {
 			if p.kind == kind {
