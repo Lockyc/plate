@@ -2,6 +2,7 @@ package clip
 
 import (
 	"math"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -611,6 +612,44 @@ func TestPathNeverSharesRows(t *testing.T) {
 		_, vs := path(t, s, l, Window{0, 4000})
 		for k, v := range vs {
 			noSharedRows(t, k, v, 1080)
+		}
+	}
+}
+
+func TestPathFillsEveryOutputRow(t *testing.T) {
+	// Every output row, at every frame of a whole Path, keyboard down,
+	// rising, up and dropping, is drawn from the master: the region's slot
+	// and the strips tile the frame's height with no gap, and each source
+	// rect lies on the screen.
+	screen := Rect{0, 0, 402, 874}
+	for _, mode := range []string{"follow", "fixed"} {
+		s, l := lagRise()
+		s.Camera.Mode = mode
+		lay, vs := path(t, s, l, Window{0, 4000})
+		for k, v := range vs {
+			type seg struct{ y, h float64 }
+			segs := []seg{{v.RegionY, v.RegionH}}
+			srcs := []Rect{v.Region}
+			for _, p := range v.Pins {
+				segs = append(segs, seg{p.Y, p.H})
+				srcs = append(srcs, p.Src)
+			}
+			sort.Slice(segs, func(i, j int) bool { return segs[i].y < segs[j].y })
+			y := 0.0
+			for _, sg := range segs {
+				if !near(sg.y, y, 1e-6) || sg.h <= 0 {
+					t.Fatalf("%s frame %d: rows %.2f-%.2f drawn from nothing (slots %+v)", mode, k, y, sg.y, segs)
+				}
+				y += sg.h
+			}
+			if !near(y, float64(lay.H), 1e-6) {
+				t.Fatalf("%s frame %d: rows %.2f-%d drawn from nothing", mode, k, y, lay.H)
+			}
+			for _, r := range srcs {
+				if !inside(screen, r) {
+					t.Fatalf("%s frame %d: source %+v reaches off the screen", mode, k, r)
+				}
+			}
 		}
 	}
 }
