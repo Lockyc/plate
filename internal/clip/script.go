@@ -55,6 +55,12 @@ var (
 	Formats  = []string{"mp4", "webm", "poster", "webp", "gif"}
 )
 
+// Loops are the ways a render may close a clip's loop (closeLoop), the
+// first the default: crossfade blends the end into the start; dip eases
+// both toward the ground and back, for a clip whose end state differs from
+// its start, where a blend shows both at once.
+var Loops = []string{"crossfade", "dip"}
+
 // Ext is the file extension a format is written with.
 func Ext(format string) string {
 	if format == "poster" {
@@ -67,6 +73,7 @@ type Output struct {
 	Width    int      `toml:"width" json:"width"`
 	Formats  []string `toml:"formats" json:"formats"`
 	BudgetKB int      `toml:"budget_kb" json:"budget_kb,omitempty"`
+	Loop     string   `toml:"loop" json:"loop"`
 }
 
 type Camera struct {
@@ -231,6 +238,9 @@ func (s *Script) validate() Problems {
 		add("output.budget_kb: must be > 0")
 	} else if s.Output.BudgetKB > 0 && !slices.Contains(formats, "mp4") {
 		add("output.budget_kb: applies to mp4, which formats does not list")
+	}
+	if s.Output.Loop != "" && !slices.Contains(Loops, s.Output.Loop) {
+		add("output.loop: want %s", strings.Join(Loops, " or "))
 	}
 
 	mode := s.Camera.Mode
@@ -430,6 +440,9 @@ func (s *Script) fillDefaults() {
 	}
 	if len(s.Output.Formats) == 0 {
 		s.Output.Formats = []string{"mp4"}
+	}
+	if s.Output.Loop == "" {
+		s.Output.Loop = Loops[0]
 	}
 	for i := range s.Steps {
 		st := &s.Steps[i]
