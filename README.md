@@ -41,6 +41,7 @@ the exceptions listed under [Platforms](#platforms). What comes next is in
 | `shrink` | Resizes down to a small, sharp web asset: PNG at maximum lossless compression, or WebP, alpha kept, never enlarging | `plate shrink (--width PX \| --height PX \| --width PX --height PX \| --fit PX) [--quality Q] <in> <out.png\|out.webp>...` |
 | `diff` | Compares two images after lining them up, so a small shift doesn't fail everything | `plate diff [--tolerance N] [--max-shift PX] [--step PX] [--threshold PCT] [--out diff.png] <a> <b>` |
 | `clip check` | Validates a demo-clip script and prints it normalised, the form a runner reads | `plate clip check [--json] <clip.toml>` |
+| `clip render` | Turns a screen recording and its event log into a short looping clip: trimmed, framed by a fixed or following camera, with captions and touch, click, key or cursor overlays; MP4, WebM, poster, WebP or GIF, with a JSON of its measurements | `plate clip render --script clip.toml --master raw.mov --events events.jsonl --out DIR [--caption-css FILE]` |
 | `fonts` | Embeds web fonts, from files or from Google Fonts by family name, into a CSS file so a page renders from the filesystem, optionally cut to the characters a language uses | `plate fonts [--display block] [--subset latin] [--google FAMILY:WEIGHT:STYLE]... -o fonts.css [FILE:FAMILY:WEIGHT:STYLE]...` |
 | `qr` | Makes a QR code SVG that any phone camera decodes | `plate qr [--ec L\|M\|Q\|H] [--fg RRGGBB] [--bg RRGGBB] -o out.svg <text>` |
 | `doctor` | Checks every engine against its pin, installs the ones plate manages, and prints the install command for the rest | `plate doctor [--install]` |
@@ -135,6 +136,26 @@ output unless given `--force`.
 `--fit` so its longest side is that size. Each output's extension picks its
 format; `o.png o.webp` writes both, so you can keep the smaller. WebP is lossy at `--quality` (default 90) with
 lossless alpha.
+
+`clip render` writes `<name>.<ext>` into `--out` for each format the script
+lists (`mp4`, `webm`, `poster.png` for `poster`, `webp`, `gif`), plus
+`<name>.json`: the clip's size, frame rate, frame count and duration, the
+span of the recording it shows, each file's size, and its sharpness and
+loop-seam scores. It prints `wrote <path> (<bytes> bytes)` for each file.
+The MP4 is H.264 4:2:0 tagged BT.709, muted, constant frame rate and
+faststart, so a web view or Electron autoplays it inline; a recording tagged
+Display P3, as the iOS simulator writes, is converted to BT.709 first.
+`--caption-css` loads after plate's caption style.
+
+`clip render` refuses before decoding anything when the event log's sync
+error exceeds one frame or the recording disagrees with it, and refuses a
+camera that would upsample the recording. After encoding it fails when the
+MP4 is over the script's `budget_kb`, when the encode loses too much of the
+frames' fine detail (sharpness, measured per colour channel, so smeared
+coloured text counts), or when the loop's last frame visibly differs from
+its first. Each failure names the measured value, and leaves no output: an
+earlier run's files for that name are removed first, and the new ones are
+moved in only once every check has passed.
 
 `render` runs the page outside Chrome's sandbox with open network access. A
 local page, and any script it runs, including one loaded from the network,
