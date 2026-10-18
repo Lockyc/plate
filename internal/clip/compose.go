@@ -257,7 +257,8 @@ func closeLoop(refs []string, fps int, loop string) (LoopClose, error) {
 		g := ground(first)
 		at := [4]uint16{g.R, g.G, g.B, g.A}
 		to := func(j int) uint16 { return at[j/2%4] }
-		n = max(2, min(n, len(refs)))
+		// One frame short of the clip, so frame Head, the poster, is as composed.
+		n = max(2, min(n, len(refs)-1))
 		lc := LoopClose{Head: n - n/2, Tail: n / 2}
 		for i := 1; i <= lc.Tail; i++ {
 			if err := mixInto(refs[len(refs)-lc.Tail-1+i], easeInOutCubic(float64(i)/float64(lc.Tail)), to); err != nil {
@@ -289,31 +290,73 @@ func mixInto(path string, w float64, to func(j int) uint16) error {
 	return savePNG(path, img)
 }
 
+// groundReach is how far, in 8-bit levels per channel, a pixel may sit from
+// ground's first estimate and still count toward the ground.
+const groundReach = 8
+
 // ground is img's dominant colour, the one a UI's background gives most of
-// its pixels: the mean of the fullest bin when each channel is cut to its
-// top 5 bits, wide enough to hold a lossy master's jitter. It is a colour
-// the frame shows, where a per-channel median of a frame half covered by a
-// pale card is a grey it shows nowhere.
+// its pixels. Each channel is cut to 8-level bins; the peak is the bin
+// whose 3×3×3 neighbourhood holds the most pixels (then its own count), so
+// a ground split across a bin edge still counts whole. The colour is the
+// mean of the pixels within groundReach of that bin's mean, so a card in a
+// neighbouring bin but further off is not averaged in. Unlike a per-channel
+// median, it is a colour the frame shows.
 func ground(img *image.RGBA64) color.RGBA64 {
 	bin := func(j int) int {
 		return int(img.Pix[j])>>3<<10 | int(img.Pix[j+2])>>3<<5 | int(img.Pix[j+4])>>3
 	}
 	var count [1 << 15]int
-	top := 0
+	var used []int
 	for j := 0; j < len(img.Pix); j += 8 {
 		b := bin(j)
-		if count[b]++; count[b] > count[top] {
-			top = b
+		if count[b] == 0 {
+			used = append(used, b)
 		}
+		count[b]++
 	}
-	var sum [3]float64
-	for j := 0; j < len(img.Pix); j += 8 {
-		if bin(j) == top {
-			for c := range 3 {
-				sum[c] += float64(uint16(img.Pix[j+2*c])<<8 | uint16(img.Pix[j+2*c+1]))
+	near := func(b int) int {
+		r, g, bl := b>>10, b>>5&31, b&31
+		n := 0
+		for dr := -1; dr <= 1; dr++ {
+			for dg := -1; dg <= 1; dg++ {
+				for db := -1; db <= 1; db++ {
+					x, y, z := r+dr, g+dg, bl+db
+					if x >= 0 && x < 32 && y >= 0 && y < 32 && z >= 0 && z < 32 {
+						n += count[x<<10|y<<5|z]
+					}
+				}
 			}
 		}
+		return n
 	}
-	n := float64(count[top])
-	return color.RGBA64{clamp16(sum[0] / n), clamp16(sum[1] / n), clamp16(sum[2] / n), 0xffff}
+	top, topNear := -1, -1
+	for _, b := range used {
+		if n := near(b); n > topNear || n == topNear && count[b] > count[top] {
+			top, topNear = b, n
+		}
+	}
+	sample := func(j, c int) float64 { return float64(uint16(img.Pix[j+2*c])<<8 | uint16(img.Pix[j+2*c+1])) }
+	mean := func(keep func(j int) bool) [3]float64 {
+		var sum [3]float64
+		n := 0.0
+		for j := 0; j < len(img.Pix); j += 8 {
+			if keep(j) {
+				for c := range 3 {
+					sum[c] += sample(j, c)
+				}
+				n++
+			}
+		}
+		return [3]float64{sum[0] / n, sum[1] / n, sum[2] / n}
+	}
+	est := mean(func(j int) bool { return bin(j) == top })
+	g := mean(func(j int) bool {
+		for c := range 3 {
+			if math.Abs(sample(j, c)-est[c]) > groundReach*257 {
+				return false
+			}
+		}
+		return true
+	})
+	return color.RGBA64{clamp16(g[0]), clamp16(g[1]), clamp16(g[2]), 0xffff}
 }
