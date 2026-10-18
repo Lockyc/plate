@@ -151,6 +151,17 @@ colours, or renders what it is given.
 - **upscale** — DAT ×4 over the normalised frame in overlapping tiles
   (internal/ml/scripts/upscale.py); alpha, which the model does not take, is
   enlarged separately.
+- **clip** — ffmpeg only decodes and encodes (`clip.ExtractActivity`,
+  `clip.ExtractFrames`, `clip.Encode`); everything between is Go: the trim
+  (`clip.TrimWindow`), the camera (`clip.NewLayout`, `clip.Path`), the
+  overlay timeline (`clip.Timeline`) and the composite (`clip.Compose`,
+  through `clip.Resample`), which also closes the loop. Overlay sprites are
+  HTML pages rendered once each through `render.PNGAlpha`. `clip.Render`
+  refuses before decoding what the log and probe can show, holds the encode
+  to its checks, and publishes the set only whole (`clip.publish`). The
+  encode constants (`mp4CRF`, `webmCRF`) and check limits
+  (`clip.MinSharpness`, `clip.MaxSeam`) are provisional until each has a
+  `quality/` case that measures it.
 - **inpaint, fonts, qr, pdf, impose, doc, slides** — as the README table and each package's
   doc comment describe.
 
