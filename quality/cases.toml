@@ -1448,6 +1448,56 @@ target = { xy = [200, 450] }
 {"type":"end","t":2990}
 '''
 
+# clip-loop-dip: the pale square rests on the left, slides right from 1 to
+# 2 s and rests there: an end state that differs from the start, as a row
+# moved by an added node does. a and b are the square's start and end
+# places, inset, in the 600x1304 frame; double-exposure is how strongly
+# any frame shows both. A blend of end and start shows each at its weight,
+# 0.43 mid-crossfade against the square's full 0.87. The bound is 1/40 of
+# that full contrast, rounded down: a ghost that faint is lost in the
+# ground.
+
+[[case]]
+name   = "clip-loop-dip"
+why    = "a dipped loop must never show the end and the start in one frame: overlaid, a moved row reads as two"
+setup  = [
+  ["ffmpeg", "-f", "lavfi", "-i", "color=c=0x0a0a12:s=1206x2622:r=60:d=3", "-f", "lavfi", "-i", "color=c=0xe8e8f0:s=300x300:r=60:d=3", "-filter_complex", "[0][1]overlay=x='100+600*clip(t-1,0,1)':y=1200:format=rgb", "-c:v", "png", "{tmp:master.mov}"],
+]
+run    = ["clip", "render", "--script", "{tmp:clip.toml}", "--master", "{tmp:master.mov}", "--events", "{tmp:events.jsonl}", "--out", "{tmp:out}"]
+post   = [
+  ["ffmpeg", "-i", "{tmp:out/square.mp4}", "-vf", "scale=in_color_matrix=bt709:in_range=auto:flags=accurate_rnd+full_chroma_int+bilinear,format=rgb24", "-fps_mode", "passthrough", "{tmp:f%05d.png}"],
+]
+metric = "double-exposure"
+params = { frames = "{tmp:f*.png}", a = "0.12,0.48,0.17,0.07", b = "0.62,0.48,0.17,0.07", ground = "#0a0a12" }
+max    = 0.02
+
+[case.files]
+"clip.toml" = '''
+version  = 1
+name     = "square"
+platform = "ios"
+form     = "mobile"
+app      = "com.example.square"
+device   = "iPhone 17 Pro"
+state    = "square"
+fps      = 60
+
+[output]
+width   = 600
+formats = ["mp4"]
+loop    = "dip"
+
+[[step]]
+action = "tap"
+target = { xy = [200, 450] }
+'''
+"events.jsonl" = '''
+{"type":"meta","version":1,"platform":"ios","scale":3,"screen":[402,874],"fps":60,"sync":"simctl-start","sync_error_ms":4}
+{"type":"rects","t":0,"rects":{}}
+{"type":"tap","t":1500,"step":0,"at":[200,450],"target":[150,400,100,100]}
+{"type":"end","t":2990}
+'''
+
 # clip-trim-idle: still for 2 s, a square moving from 2.0 to 3.0 s, still
 # to 6 s; the trim keeps 500 ms either side of the action and the motion,
 # 1500 to 3500 ms.

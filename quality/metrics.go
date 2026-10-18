@@ -656,3 +656,67 @@ func frameCode(p Params) (float64, error) {
 	}
 	return float64(n), nil
 }
+
+func init() {
+	Metrics["double-exposure"] = doubleExposure
+}
+
+// doubleExposure is how strongly any one of the PNGs frames matches shows
+// two contents at once: per frame, the lesser of region a's and region b's
+// presence, where a region's presence is its pixels' mean RMS channel
+// distance, 0..1, from ground; the measure is the most over the frames. A
+// loop that blends its end into its start shows both mid-blend.
+func doubleExposure(p Params) (float64, error) {
+	glob, err := p.Path("frames")
+	if err != nil {
+		return 0, err
+	}
+	var boxes [2]raster.Frac
+	for i, k := range []string{"a", "b"} {
+		f, ok, err := p.Frac(k)
+		if err != nil {
+			return 0, err
+		}
+		if !ok {
+			return 0, fmt.Errorf("double-exposure: want %s = \"x,y,w,h\"", k)
+		}
+		boxes[i] = f
+	}
+	g, err := hexColour(p.String("ground", ""))
+	if err != nil {
+		return 0, fmt.Errorf("double-exposure: ground: %w", err)
+	}
+	paths, err := filepath.Glob(glob)
+	if err != nil {
+		return 0, err
+	}
+	if len(paths) == 0 {
+		return 0, fmt.Errorf("double-exposure: no file matches %s", glob)
+	}
+	most := 0.0
+	for _, path := range paths {
+		img, err := raster.Load(path)
+		if err != nil {
+			return 0, err
+		}
+		both := math.Inf(1)
+		for _, f := range boxes {
+			r := f.In(img.Bounds())
+			var sum float64
+			for y := r.Min.Y; y < r.Max.Y; y++ {
+				for x := r.Min.X; x < r.Max.X; x++ {
+					c := img.RGBA64At(x, y)
+					var d2 float64
+					for i, v := range []uint16{c.R, c.G, c.B} {
+						d := float64(v)/0xffff - g[i]
+						d2 += d * d
+					}
+					sum += math.Sqrt(d2 / 3)
+				}
+			}
+			both = math.Min(both, sum/float64(max(r.Dx()*r.Dy(), 1)))
+		}
+		most = math.Max(most, both)
+	}
+	return most, nil
+}
