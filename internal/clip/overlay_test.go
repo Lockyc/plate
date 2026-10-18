@@ -293,3 +293,35 @@ func TestKeyGlyphs(t *testing.T) {
 		t.Errorf("keyGlyphs keys differ from the contract's")
 	}
 }
+
+func TestTapStaysWhereItLanded(t *testing.T) {
+	// A tap at y 700, in the region, as the keyboard eases in over it: the
+	// keyboard's source rect comes to hold the tap's point, but the disc
+	// stays with the region's content, and ends when the region no longer
+	// shows that point, never drawn over keys nobody pressed.
+	at := Point{200, 700}
+	s, l := kbRise(tap(1100, at, &Rect{150, 680, 100, 40}))
+	s.Form = "mobile"
+	s.Overlays = Overlays{Taps: true}
+	_, vs, ops, _, _ := ovRun(t, s, l, Window{0, 2000})
+	drawn := 0
+	for k, v := range vs {
+		o, has := opFor(ops[k], "tap")
+		if !has {
+			continue
+		}
+		drawn++
+		r := v.Region
+		if !(at.Y >= r.Y && at.Y < r.Y+r.H) {
+			t.Fatalf("frame %d: tap drawn at %.1f,%.1f while the region %+v no longer shows its point", k, o.X, o.Y, r)
+		}
+		for _, p := range v.Pins {
+			if p.Shown > 0 && o.Y >= p.Y && o.Y < p.Y+p.H {
+				t.Fatalf("frame %d: tap drawn at y %.1f inside the %s strip (%.1f+%.1f)", k, o.Y, p.Name, p.Y, p.H)
+			}
+		}
+	}
+	if drawn == 0 {
+		t.Fatal("the tap was never drawn")
+	}
+}

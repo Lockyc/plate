@@ -55,18 +55,73 @@ func clamp01(x float64) float64 { return math.Max(0, math.Min(1, x)) }
 // toOutput maps p through the pin strip or the region it falls in, and
 // gives the px per pt there. ok is false outside both.
 func toOutput(p Point, v View, lay Layout) (x, y, k float64, ok bool) {
-	in := func(r Rect) bool { return p.X >= r.X && p.X < r.X+r.W && p.Y >= r.Y && p.Y < r.Y+r.H }
+	src, ok := sourceAt(p, v)
+	if !ok {
+		return 0, 0, 0, false
+	}
+	return toOutputVia(p, v, lay, src)
+}
+
+func contains(r Rect, p Point) bool {
+	return p.X >= r.X && p.X < r.X+r.W && p.Y >= r.Y && p.Y < r.Y+r.H
+}
+
+// sourceAt is what shows p in v: a shown pin strip, by name, or the
+// region, "".
+func sourceAt(p Point, v View) (string, bool) {
 	for _, pv := range v.Pins {
-		if pv.Shown > 0 && in(pv.Src) {
+		if pv.Shown > 0 && contains(pv.Src, p) {
+			return pv.Name, true
+		}
+	}
+	return "", contains(v.Region, p)
+}
+
+// toOutputVia maps p through src alone, the pin strip of that name or the
+// region for "": ok is false while src does not show p. An action's
+// overlay maps through the source it landed in (landing), so it never
+// moves onto content that slid in over the same screen point, such as a
+// keyboard rising over a tapped row.
+func toOutputVia(p Point, v View, lay Layout, src string) (x, y, k float64, ok bool) {
+	if src == "" {
+		r := v.Region
+		if !contains(r, p) {
+			return 0, 0, 0, false
+		}
+		k = float64(lay.W) / r.W
+		return (p.X - r.X) * k, v.RegionY + (p.Y-r.Y)*k, k, true
+	}
+	for _, pv := range v.Pins {
+		if pv.Name == src && pv.Shown > 0 && contains(pv.Src, p) {
 			k = float64(lay.W) / pv.Src.W
 			return (p.X - pv.Src.X) * k, pv.Y + (p.Y-pv.Src.Y)*k, k, true
 		}
 	}
-	if r := v.Region; in(r) {
-		k = float64(lay.W) / r.W
-		return (p.X - r.X) * k, v.RegionY + (p.Y-r.Y)*k, k, true
-	}
 	return 0, 0, 0, false
+}
+
+// landing tracks an action overlay's source: the first frame that shows
+// its point fixes the strip or the region, and once that source stops
+// showing it the overlay is over.
+type landing struct {
+	src           string
+	landed, ended bool
+}
+
+// at is p on v through the landed source; ok is false before the point is
+// shown anywhere and after the overlay has ended.
+func (ln *landing) at(p Point, v View, lay Layout) (x, y, k float64, ok bool) {
+	if ln.ended {
+		return 0, 0, 0, false
+	}
+	if !ln.landed {
+		if ln.src, ln.landed = sourceAt(p, v); !ln.landed {
+			return 0, 0, 0, false
+		}
+	}
+	x, y, k, ok = toOutputVia(p, v, lay, ln.src)
+	ln.ended = !ok
+	return x, y, k, ok
 }
 
 // pointOp is a point-sprite op before its scale is normalised: the sprite
@@ -254,6 +309,7 @@ func overlayEnd(e Event, form string) float64 {
 func (tl *timeline) touch(e Event, g touch) {
 	total := g.life()
 	warned := false
+	var ln landing
 	for k := range tl.views {
 		u := tl.at(k) - e.T
 		if u < 0 || u > total {
@@ -264,9 +320,9 @@ func (tl *timeline) touch(e Event, g touch) {
 			f := clamp01(u / g.dur)
 			p = Point{g.from.X + (g.to.X-g.from.X)*f, g.from.Y + (g.to.Y-g.from.Y)*f}
 		}
-		x, y, cam, ok := toOutput(p, tl.views[k], tl.lay)
+		x, y, cam, ok := ln.at(p, tl.views[k], tl.lay)
 		if !ok {
-			if !warned {
+			if !ln.landed && !warned {
 				tl.warnOutside(e, p)
 				warned = true
 			}
@@ -288,14 +344,15 @@ func (tl *timeline) touch(e Event, g touch) {
 
 func (tl *timeline) click(e Event) {
 	warned := false
+	var ln landing
 	for k := range tl.views {
 		u := tl.at(k) - e.T
 		if u < 0 || u > clickMS {
 			continue
 		}
-		x, y, cam, ok := toOutput(*e.At, tl.views[k], tl.lay)
+		x, y, cam, ok := ln.at(*e.At, tl.views[k], tl.lay)
 		if !ok {
-			if !warned {
+			if !ln.landed && !warned {
 				tl.warnOutside(e, *e.At)
 				warned = true
 			}
