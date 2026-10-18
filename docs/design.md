@@ -155,7 +155,8 @@ colours, or renders what it is given.
   `clip.ExtractFrames`, `clip.Encode`); everything between is Go: the trim
   (`clip.TrimWindow`), the camera (`clip.NewLayout`, `clip.Path`), the
   overlay timeline (`clip.Timeline`) and the composite (`clip.Compose`,
-  through `clip.Resample`), which also closes the loop. Overlay sprites are
+  through `clip.Resample`), which also closes the loop (`clip.closeLoop`,
+  one of `clip.Loops`; a dip eases to `clip.ground`). Overlay sprites are
   HTML pages rendered once each through `render.PNGAlpha`. `clip.Render`
   refuses before decoding what the log and probe can show, holds the encode
   to its checks, and publishes the set only whole (`clip.publish`). The
@@ -163,7 +164,7 @@ colours, or renders what it is given.
   included, by the `clip-text-*` and `clip-caption-sharp` quality cases;
   the render's own sharpness check scores the encoder alone, against a
   lossless 4:2:0 copy (`clip.Lossless420`). `clip.MaxSeam` is measured by
-  `clip-loop-crossfade`. The codec settings are documented at `mp4CRF`, the colour tagging at
+  `clip-loop-crossfade`, and the dip held by `clip-loop-dip`. The codec settings are documented at `mp4CRF`, the colour tagging at
   `bt709` (both internal/clip/encode.go), the hold of a static tail at
   `clip.ExtractFrames`, and the target refusals at `validateRef`.
 - **inpaint, fonts, qr, pdf, impose, doc, slides** — as the README table and each package's

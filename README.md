@@ -140,8 +140,16 @@ lossy at `--quality` (default 90) with lossless alpha.
 `clip render` writes `<name>.<ext>` into `--out` for each format the script
 lists (`mp4`, `webm`, `poster.png` for `poster`, `webp`, `gif`), plus
 `<name>.json`: the clip's size, frame rate, frame count and duration, the
-span of the recording it shows, each file's size, and its sharpness and
-loop-seam scores. It prints `wrote <path> (<bytes> bytes)` for each file.
+span of the recording it shows, each file's size, its sharpness and
+loop-seam scores, and how many frames at each end closing the loop changed.
+It prints `wrote <path> (<bytes> bytes)` for each file.
+A clip whose last frame visibly differs from its first has its loop closed
+over its final and opening frames. The script's `[output] loop` picks how:
+`crossfade` (the default) blends the end into the start, and `dip` eases
+both ends to the opening frame's dominant colour and back, so no frame
+shows the end and the start at once. Use `dip` when the clip ends in a
+different state from the one it starts in, such as a row added. The poster
+is the first frame the loop leaves unchanged.
 The MP4 is muted, constant frame rate and faststart, so a web view or Electron
 autoplays it inline, and it draws a colour as the page beside it does in Safari.
 The WebM is AV1, which Safari plays only on hardware with an AV1 decoder,
