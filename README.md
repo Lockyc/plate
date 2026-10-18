@@ -40,6 +40,7 @@ the exceptions listed under [Platforms](#platforms). What comes next is in
 | `slides` | Previews a Google Slides deck that Drive will not export, from its Slides API JSON: one PNG per slide, in the fonts the deck names | `plate slides [--pages LIST] [--out DIR] [--scale S] <deck.json\|->` |
 | `shrink` | Resizes down to a small, sharp web asset: PNG at maximum lossless compression, or WebP, alpha kept, never enlarging | `plate shrink (--width PX \| --height PX \| --width PX --height PX \| --fit PX) [--quality Q] <in> <out.png\|out.webp>...` |
 | `diff` | Compares two images after lining them up, so a small shift doesn't fail everything | `plate diff [--tolerance N] [--max-shift PX] [--step PX] [--threshold PCT] [--out diff.png] <a> <b>` |
+| `clip check` | Validates a demo-clip script and prints it normalised, the form a runner reads | `plate clip check [--json] <clip.toml>` |
 | `fonts` | Embeds web fonts, from files or from Google Fonts by family name, into a CSS file so a page renders from the filesystem, optionally cut to the characters a language uses | `plate fonts [--display block] [--subset latin] [--google FAMILY:WEIGHT:STYLE]... -o fonts.css [FILE:FAMILY:WEIGHT:STYLE]...` |
 | `qr` | Makes a QR code SVG that any phone camera decodes | `plate qr [--ec L\|M\|Q\|H] [--fg RRGGBB] [--bg RRGGBB] -o out.svg <text>` |
 | `doctor` | Checks every engine against its pin, installs the ones plate manages, and prints the install command for the rest | `plate doctor [--install]` |

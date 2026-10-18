@@ -24,7 +24,7 @@ wrapping it would add nothing; a resize down for the web goes through
 main.go              dispatch
 internal/<op>/       one package per command (cutout, inpaint, infill, upscale,
                      grade, render, build, press, pdf, impose, doc, slides,
-                     shrink, diff, fonts, qr, doctor)
+                     shrink, diff, clip, fonts, qr, doctor)
 internal/cli/        flag, exit-code and error conventions every command shares
 internal/engine/     the one way an external tool is run
 internal/atomicfile/ a file written whole or not at all: a temp file beside it, renamed
