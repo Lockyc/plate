@@ -15,16 +15,24 @@ import (
 // the least Sharpness the mp4's settings score on the neon text of
 // TestSharpnessPassesNeonText (cyan, 0.857) rounded down; an encode that
 // smears colour past 4:2:0 (chroma-qp-offset +12, or 4:1:0) scores under
-// 0.68 on three of its four colours. MaxSeam is 1.5
-// times the median Seam between consecutive frames of the
-// clip-loop-crossfade quality case's body, a square sliding 300 px/s: a
-// loop's cut may jump no more than a frame and a half of steady motion.
+// 0.68 on three of its four colours. MaxSeam is 1.5 times the median Seam
+// (0.1339) between consecutive frames of the clip-loop-crossfade quality
+// case's body, a square sliding 300 px/s, crossfade excluded, rounded up:
+// a loop's cut may jump no more than a frame and a half of steady motion.
+// It is also where closeLoop starts to crossfade, so a loop is either clean
+// enough to pass or crossfaded.
 const (
 	MinSharpness = 0.85
 	MaxSeam      = 0.201
 )
 
-// sharpSigma is the detail scale Sharpness scores, px.
+// sharpSigma is the detail scale Sharpness scores, px. Of 1, 2 and 3 on the
+// neon text, 3 scores the real mp4 and webm encodes highest (least 0.857,
+// against 0.826 at 1 and 0.850 at 2) and sets them furthest above the
+// smears it catches (0.185 over the worst of them, against 0.072 and
+// 0.147). At none does a magenta smear (4:1:0 0.864, chroma-qp-offset +12
+// 0.899) fall below every real encode: magenta keeps its strokes through
+// either smear.
 const sharpSigma = 3
 
 // Seam is the percent of pixels that differ between a and b, plate diff's

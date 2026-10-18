@@ -342,7 +342,9 @@ func codeFrames(t *testing.T, dir, prefix string, codes []int) string {
 				img.Set(x, y, color.RGBA{v, v, v, 255})
 			}
 		}
-		raster.SavePNG(filepath.Join(dir, fmt.Sprintf("%s%05d.png", prefix, i)), img)
+		if err := raster.SavePNG(filepath.Join(dir, fmt.Sprintf("%s%05d.png", prefix, i)), img); err != nil {
+			t.Fatal(err)
+		}
 	}
 	return filepath.Join(dir, prefix+"*.png")
 }
@@ -383,13 +385,35 @@ func TestFrameCodeSidecar(t *testing.T) {
 	dir := t.TempDir()
 	// The last two frames are the loop crossfade's: their codes are blends.
 	side := filepath.Join(dir, "clip.json")
-	os.WriteFile(side, []byte(`{"fps":60,"trim":{"start_ms":83.33333333333333,"end_ms":150},"crossfade_frames":2}`), 0o644)
+	if err := os.WriteFile(side, []byte(`{"fps":60,"trim":{"start_ms":83.33333333333333,"end_ms":150},"crossfade_frames":2}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	p := Params{"frames": codeFrames(t, dir, "o", []int{5, 6, 7, 8, 0, 0}), "master": codeFrames(t, dir, "m", []int{5, 6, 7, 8, 9, 10}),
 		"y": 0.25, "master_y": 0.25, "sidecar": side}
 	if v, err := Metrics["frame-code"](p); err != nil || v != 0 {
 		t.Fatalf("frame-code = %v, %v", v, err)
 	}
-	if _, err := Metrics["frame-code"](Params{"frames": p["frames"], "master": p["master"], "y": 0.25, "master_y": 0.25}); err == nil {
-		t.Fatal("no start_ms or sidecar accepted")
+	with := func(k string, v any) Params {
+		q := Params{}
+		for kk, vv := range p {
+			q[kk] = vv
+		}
+		if v == nil {
+			delete(q, k)
+		} else {
+			q[k] = v
+		}
+		return q
+	}
+	for name, q := range map[string]Params{
+		"no start_ms or sidecar": with("sidecar", nil),
+		"sidecar not a path":     with("sidecar", 3.0),
+		"empty sidecar":          with("sidecar", ""),
+		"sidecar and start_ms":   with("start_ms", 83.3),
+		"sidecar and fps":        with("fps", 60.0),
+	} {
+		if _, err := Metrics["frame-code"](q); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
 	}
 }
