@@ -112,3 +112,11 @@ recipe  = "plate render --size 560x792 --pdf two-a5.pdf two-a5.html (Chrome's A5
 author  = "plate"
 licence = "CC0"
 sha256  = "3bd415cdd8bdb04e5b170b44673042f9c02c595b34accf7c57c967b8545c998e"
+
+[[asset]]
+file    = "clip-text.html"
+source  = "synthetic"
+recipe  = "written for plate: a 402 pt phone screen of thin UI text on the dark ground #0a0a12, from 100 pt down: 200 pt blocks, each with 1-px hairlines and rows of words at 11, 13, 15 and 17 CSS px, weights 400 and 300, in #00e5ff, #ff2bd6, #39ff14, #ffd400 and white"
+author  = "plate"
+licence = "CC0"
+sha256  = "12c8a071886105eea26fd235571a9912c4c3afeefd16478735fd6a7de1a9ea9a"

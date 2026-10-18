@@ -12,20 +12,30 @@ import (
 	"github.com/lockyc/plate/internal/pins"
 )
 
-// The lossy encoders' quality, provisional until the quality cases measure
-// text sharpness after encode.
+// The lossy encoders' quality, measured by the clip-text-sharp-mp4 and
+// clip-text-sharp-webm quality cases: thin neon text on the app's dark
+// ground. mp4CRF, with mp4Params' chroma QP offset, writes about the bytes
+// a plain crf 18 did, on a still page and on a scrolling one, and keeps
+// more of the text's colour at them. The webm is AV1: at webmCRF it writes
+// the bytes VP9 did at crf 32 on the scrolling page and keeps more detail
+// (0.912 against 0.908 rgb-min), and on the still page it keeps more at
+// half VP9's bytes.
 const (
-	mp4CRF  = 18
-	webmCRF = 32
+	mp4CRF    = 24
+	mp4Params = "chroma-qp-offset=-6"
+	webmCRF   = 32
 )
 
 // bt709 tags an encode BT.709 in limited range, and toYUV writes the
-// composed RGB frames as 4:2:0 under that matrix and range. toYUV tags the
-// frames too: an encoder takes the filtered frames' tags over its own
-// options, and frames from RGB PNGs carry no primaries or transfer.
+// composed RGB frames as 4:2:0 under that matrix and range, its chroma
+// downsampled by Lanczos, which of swscale's filters keeps the most of a
+// coloured stroke as Chromium upsamples it (clip-text-sharp-mp4: 0.910
+// rgb-min against bicubic's 0.907 and area's 0.905). toYUV tags the frames
+// too: an encoder takes the filtered frames' tags over its own options, and
+// frames from RGB PNGs carry no primaries or transfer.
 var (
 	bt709 = []string{"-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709", "-color_range", "tv"}
-	toYUV = "scale=out_color_matrix=bt709:out_range=tv,format=yuv420p," +
+	toYUV = "scale=out_color_matrix=bt709:out_range=tv:flags=accurate_rnd+full_chroma_int+lanczos,format=yuv420p," +
 		"setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv"
 )
 
@@ -64,11 +74,11 @@ func Encode(ctx context.Context, format, refsDir string, fps, w, h int, out stri
 	switch format {
 	case "mp4":
 		enc = append([]string{"-vf", toYUV, "-c:v", "libx264", "-preset", "slow", "-crf", strconv.Itoa(mp4CRF),
-			"-profile:v", "high", "-pix_fmt", "yuv420p"}, bt709...)
+			"-x264-params", mp4Params, "-profile:v", "high", "-pix_fmt", "yuv420p"}, bt709...)
 		enc = append(enc, "-movflags", "+faststart", "-an", "-fps_mode", "cfr", "-r", r)
 	case "webm":
-		enc = append([]string{"-vf", toYUV, "-c:v", "libvpx-vp9", "-crf", strconv.Itoa(webmCRF), "-b:v", "0",
-			"-row-mt", "1", "-deadline", "good", "-cpu-used", "1", "-pix_fmt", "yuv420p"}, bt709...)
+		enc = append([]string{"-vf", toYUV, "-c:v", "libsvtav1", "-preset", "4", "-crf", strconv.Itoa(webmCRF),
+			"-pix_fmt", "yuv420p"}, bt709...)
 		enc = append(enc, "-an")
 	case "gif":
 		enc = []string{"-vf", "fps=50,split[a][b];[a]palettegen=stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=4",

@@ -6,7 +6,10 @@ import (
 )
 
 // Kernel names the filter Resample applies, so a measurement can name the
-// one it compares against.
+// one it compares against. The clip-text-zoomed cases measure it against a
+// native render at zoom 0.5 and 0.75: Mitchell and linear-light Catmull-Rom
+// each win at 0.5 and fall behind at 0.75, Lanczos-3 trails at 0.5, and
+// Mitchell, which does not interpolate, also softens a zoom-1 clip.
 const Kernel = "catrom"
 
 // catrom is the Catmull-Rom cubic (B = 0, C = 0.5): exact at integer

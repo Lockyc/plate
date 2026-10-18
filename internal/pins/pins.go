@@ -142,7 +142,7 @@ var Engines = []Engine{
 		UsedBy:  []string{"cutout"},
 	},
 	ffmpegTool("ffmpeg", Capability{Args: []string{"-hide_banner", "-encoders"}, Token: "libx264", For: "clip mp4"},
-		Capability{Args: []string{"-hide_banner", "-encoders"}, Token: "libvpx-vp9", For: "clip webm"}),
+		Capability{Args: []string{"-hide_banner", "-encoders"}, Token: "libsvtav1", For: "clip webm"}),
 	ffmpegTool("ffprobe"),
 	{
 		Name: "chrome-headless-shell", Kind: Managed,

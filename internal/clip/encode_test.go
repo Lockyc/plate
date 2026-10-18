@@ -54,15 +54,18 @@ func TestEncodeArgs(t *testing.T) {
 		t.Fatalf("mp4 argv %q\nlacks the floor, in order: %q", mp4, floor)
 	}
 	if !inOrder(mp4, []string{"-framerate", "60", "-i", filepath.Join(refs, "r%05d.png"), "-vf"}) ||
-		!slices.Contains(mp4, toYUV) || !strings.HasPrefix(toYUV, "scale=out_color_matrix=bt709:out_range=tv,") {
+		!slices.Contains(mp4, toYUV) || !strings.HasPrefix(toYUV, "scale=out_color_matrix=bt709:out_range=tv:flags=accurate_rnd+full_chroma_int+lanczos,") {
 		t.Fatalf("mp4 input or scale: %q", mp4)
+	}
+	if !inOrder(mp4, []string{"-crf", "24", "-x264-params", "chroma-qp-offset=-6"}) {
+		t.Fatalf("mp4 quality: %q", mp4)
 	}
 
 	if err := Encode(ctx, "webm", refs, 60, 4, 2, filepath.Join(out, "c.webm")); err != nil {
 		t.Fatal(err)
 	}
 	webm := enginetest.Calls(t, ffmpeg)[1]
-	if !inOrder(webm, []string{"-c:v", "libvpx-vp9", "-b:v", "0", "-an"}) || !inOrder(webm, []string{"-color_trc", "bt709"}) {
+	if !inOrder(webm, []string{"-vf", toYUV, "-c:v", "libsvtav1", "-preset", "4", "-crf", "32", "-pix_fmt", "yuv420p", "-color_trc", "bt709", "-an"}) {
 		t.Fatalf("webm argv %q", webm)
 	}
 
@@ -107,7 +110,7 @@ func TestRequireEncoders(t *testing.T) {
 	enginetest.Stub(t, "ffmpeg", `echo " V....D libx264              libx264 H.264"`)
 	ctx := context.Background()
 	err := requireEncoders(ctx, []string{"mp4", "webm"})
-	if err == nil || err.Error() != "ffmpeg lacks encoder libvpx-vp9 (clip webm)" {
+	if err == nil || err.Error() != "ffmpeg lacks encoder libsvtav1 (clip webm)" {
 		t.Fatalf("err = %v", err)
 	}
 	if err := requireEncoders(ctx, []string{"mp4"}); err != nil {

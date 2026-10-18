@@ -537,3 +537,401 @@ run    = ["impose", "-o", "{tmp:sheet.pdf}", "{tmp:src.pdf}"]
 metric = "bytes"
 params = { image = "{tmp:sheet.pdf}" }
 max    = 230000
+
+# clip: a page of thin neon UI text, 11-17 CSS px in the app's four accent
+# colours and white with 1-px hairlines, on its dark ground (clip-text.html),
+# captured at 3x and held still for 3 s as a lossless RGB master. A tap at
+# 1 s gives the trim its action; the clip is the 60 frames about it, and
+# frame 30 is decoded the way Chromium draws it (bilinear chroma). At width
+# 600 the 200 pt region is framed at zoom 1, so the truth is the capture's
+# own pixels.
+
+[[case]]
+name   = "clip-text-sharp-mp4"
+why    = "thin coloured text must keep its strokes through the mp4's 4:2:0 encode, which halves the colour of every 1-px stroke"
+setup  = [
+  ["plate", "render", "--png", "{tmp:text.png}", "--size", "402x874", "--scale", "3", "{asset:clip-text.html}"],
+  ["ffmpeg", "-loop", "1", "-framerate", "60", "-t", "3", "-i", "{tmp:text.png}", "-c:v", "png", "{tmp:master.mov}"],
+]
+run    = ["clip", "render", "--script", "{tmp:clip.toml}", "--master", "{tmp:master.mov}", "--events", "{tmp:events.jsonl}", "--out", "{tmp:out}"]
+post   = [
+  ["ffmpeg", "-i", "{tmp:out/text.mp4}", "-vf", 'select=eq(n\,30),scale=flags=accurate_rnd+full_chroma_int+bilinear', "-frames:v", "1", "{tmp:f.png}"],
+  ["magick", "{tmp:text.png}", "-crop", "600x600+0+300", "+repage", "{tmp:truth.png}"],
+]
+metric = "detail"
+params = { a = "{tmp:f.png}", b = "{tmp:truth.png}", channel = "rgb-min", sigma = 3.0 }
+min    = 0.909
+
+[case.files]
+"clip.toml" = '''
+version  = 1
+name     = "text"
+platform = "ios"
+form     = "mobile"
+app      = "com.example.text"
+device   = "iPhone 17 Pro"
+state    = "text"
+fps      = 60
+
+[output]
+width   = 600
+formats = ["mp4", "webm"]
+
+[camera]
+mode   = "fixed"
+region = { target = "text" }
+
+[overlays]
+captions = false
+taps     = false
+
+[targets]
+text = { id = "text" }
+
+[[step]]
+action = "tap"
+target = { xy = [100, 200] }
+'''
+"events.jsonl" = '''
+{"type":"meta","version":1,"platform":"ios","scale":3,"screen":[402,874],"fps":60,"sync":"simctl-start","sync_error_ms":4}
+{"type":"rects","t":0,"rects":{"text":[0,100,200,200]}}
+{"type":"tap","t":1000,"step":0,"at":[100,200],"target":[0,100,200,200]}
+{"type":"end","t":2800}
+'''
+
+[[case]]
+name   = "clip-text-sharp-webm"
+why    = "the webm must keep thin coloured text as the mp4 does"
+setup  = [
+  ["plate", "render", "--png", "{tmp:text.png}", "--size", "402x874", "--scale", "3", "{asset:clip-text.html}"],
+  ["ffmpeg", "-loop", "1", "-framerate", "60", "-t", "3", "-i", "{tmp:text.png}", "-c:v", "png", "{tmp:master.mov}"],
+]
+run    = ["clip", "render", "--script", "{tmp:clip.toml}", "--master", "{tmp:master.mov}", "--events", "{tmp:events.jsonl}", "--out", "{tmp:out}"]
+post   = [
+  ["ffmpeg", "-i", "{tmp:out/text.webm}", "-vf", 'select=eq(n\,30),scale=flags=accurate_rnd+full_chroma_int+bilinear', "-frames:v", "1", "{tmp:f.png}"],
+  ["magick", "{tmp:text.png}", "-crop", "600x600+0+300", "+repage", "{tmp:truth.png}"],
+]
+metric = "detail"
+params = { a = "{tmp:f.png}", b = "{tmp:truth.png}", channel = "rgb-min", sigma = 3.0 }
+min    = 0.913
+
+[case.files]
+"clip.toml" = '''
+version  = 1
+name     = "text"
+platform = "ios"
+form     = "mobile"
+app      = "com.example.text"
+device   = "iPhone 17 Pro"
+state    = "text"
+fps      = 60
+
+[output]
+width   = 600
+formats = ["mp4", "webm"]
+
+[camera]
+mode   = "fixed"
+region = { target = "text" }
+
+[overlays]
+captions = false
+taps     = false
+
+[targets]
+text = { id = "text" }
+
+[[step]]
+action = "tap"
+target = { xy = [100, 200] }
+'''
+"events.jsonl" = '''
+{"type":"meta","version":1,"platform":"ios","scale":3,"screen":[402,874],"fps":60,"sync":"simctl-start","sync_error_ms":4}
+{"type":"rects","t":0,"rects":{"text":[0,100,200,200]}}
+{"type":"tap","t":1000,"step":0,"at":[100,200],"target":[0,100,200,200]}
+{"type":"end","t":2800}
+'''
+
+[[case]]
+name   = "clip-text-colour"
+why    = "the mp4 must keep the text's colours: the conversion to BT.709 4:2:0 and back must not shift or wash them out"
+setup  = [
+  ["plate", "render", "--png", "{tmp:text.png}", "--size", "402x874", "--scale", "3", "{asset:clip-text.html}"],
+  ["ffmpeg", "-loop", "1", "-framerate", "60", "-t", "3", "-i", "{tmp:text.png}", "-c:v", "png", "{tmp:master.mov}"],
+]
+run    = ["clip", "render", "--script", "{tmp:clip.toml}", "--master", "{tmp:master.mov}", "--events", "{tmp:events.jsonl}", "--out", "{tmp:out}"]
+post   = [
+  ["ffmpeg", "-i", "{tmp:out/text.mp4}", "-vf", 'select=eq(n\,30),scale=flags=accurate_rnd+full_chroma_int+bilinear', "-frames:v", "1", "{tmp:f.png}"],
+  ["magick", "{tmp:text.png}", "-crop", "600x600+0+300", "+repage", "{tmp:truth.png}"],
+]
+metric = "rmse"
+params = { a = "{tmp:f.png}", b = "{tmp:truth.png}" }
+max    = 0.0469
+
+[case.files]
+"clip.toml" = '''
+version  = 1
+name     = "text"
+platform = "ios"
+form     = "mobile"
+app      = "com.example.text"
+device   = "iPhone 17 Pro"
+state    = "text"
+fps      = 60
+
+[output]
+width   = 600
+formats = ["mp4", "webm"]
+
+[camera]
+mode   = "fixed"
+region = { target = "text" }
+
+[overlays]
+captions = false
+taps     = false
+
+[targets]
+text = { id = "text" }
+
+[[step]]
+action = "tap"
+target = { xy = [100, 200] }
+'''
+"events.jsonl" = '''
+{"type":"meta","version":1,"platform":"ios","scale":3,"screen":[402,874],"fps":60,"sync":"simctl-start","sync_error_ms":4}
+{"type":"rects","t":0,"rects":{"text":[0,100,200,200]}}
+{"type":"tap","t":1000,"step":0,"at":[100,200],"target":[0,100,200,200]}
+{"type":"end","t":2800}
+'''
+
+[[case]]
+name   = "clip-text-sidecar-sharpness"
+why    = "the sharpness clip render reports, and holds a render to MinSharpness by, must score the encode it writes"
+setup  = [
+  ["plate", "render", "--png", "{tmp:text.png}", "--size", "402x874", "--scale", "3", "{asset:clip-text.html}"],
+  ["ffmpeg", "-loop", "1", "-framerate", "60", "-t", "3", "-i", "{tmp:text.png}", "-c:v", "png", "{tmp:master.mov}"],
+]
+run    = ["clip", "render", "--script", "{tmp:clip.toml}", "--master", "{tmp:master.mov}", "--events", "{tmp:events.jsonl}", "--out", "{tmp:out}"]
+metric = "json"
+params = { file = "{tmp:out/text.json}", field = "sharpness" }
+min    = 0.909
+
+[case.files]
+"clip.toml" = '''
+version  = 1
+name     = "text"
+platform = "ios"
+form     = "mobile"
+app      = "com.example.text"
+device   = "iPhone 17 Pro"
+state    = "text"
+fps      = 60
+
+[output]
+width   = 600
+formats = ["mp4", "webm"]
+
+[camera]
+mode   = "fixed"
+region = { target = "text" }
+
+[overlays]
+captions = false
+taps     = false
+
+[targets]
+text = { id = "text" }
+
+[[step]]
+action = "tap"
+target = { xy = [100, 200] }
+'''
+"events.jsonl" = '''
+{"type":"meta","version":1,"platform":"ios","scale":3,"screen":[402,874],"fps":60,"sync":"simctl-start","sync_error_ms":4}
+{"type":"rects","t":0,"rects":{"text":[0,100,200,200]}}
+{"type":"tap","t":1000,"step":0,"at":[100,200],"target":[0,100,200,200]}
+{"type":"end","t":2800}
+'''
+
+[[case]]
+name   = "clip-text-zoomed"
+why    = "a region framed at zoom 0.5 must look as if the screen had been captured at the output size; a soft kernel blurs the strokes, a sharp one rings"
+setup  = [
+  ["plate", "render", "--png", "{tmp:text.png}", "--size", "402x874", "--scale", "3", "{asset:clip-text.html}"],
+  ["ffmpeg", "-loop", "1", "-framerate", "60", "-t", "3", "-i", "{tmp:text.png}", "-c:v", "png", "{tmp:master.mov}"],
+  ["plate", "render", "--png", "{tmp:native.png}", "--size", "402x874", "--scale", "1.5", "{asset:clip-text.html}"],
+  ["magick", "{tmp:native.png}", "-crop", "600x600+0+150", "+repage", "{tmp:truth.png}"],
+]
+run    = ["clip", "render", "--script", "{tmp:clip.toml}", "--master", "{tmp:master.mov}", "--events", "{tmp:events.jsonl}", "--out", "{tmp:out}"]
+post   = [
+  ["ffmpeg", "-i", "{tmp:out/text.mp4}", "-vf", 'select=eq(n\,30),scale=flags=accurate_rnd+full_chroma_int+bilinear', "-frames:v", "1", "{tmp:f.png}"],
+]
+metric = "detail"
+params = { a = "{tmp:f.png}", b = "{tmp:truth.png}", channel = "rgb-min", sigma = 3.0 }
+min    = 0.620
+
+[case.files]
+"clip.toml" = '''
+version  = 1
+name     = "text"
+platform = "ios"
+form     = "mobile"
+app      = "com.example.text"
+device   = "iPhone 17 Pro"
+state    = "text"
+fps      = 60
+
+[output]
+width   = 600
+formats = ["mp4", "webm"]
+
+[camera]
+mode   = "fixed"
+region = { target = "text" }
+
+[overlays]
+captions = false
+taps     = false
+
+[targets]
+text = { id = "text" }
+
+[[step]]
+action = "tap"
+target = { xy = [100, 200] }
+'''
+"events.jsonl" = '''
+{"type":"meta","version":1,"platform":"ios","scale":3,"screen":[402,874],"fps":60,"sync":"simctl-start","sync_error_ms":4}
+{"type":"rects","t":0,"rects":{"text":[0,100,400,400]}}
+{"type":"tap","t":1000,"step":0,"at":[100,200],"target":[0,100,200,200]}
+{"type":"end","t":2800}
+'''
+
+[[case]]
+name   = "clip-text-zoomed-0.75"
+why    = "the kernel must hold at another zoom, not only at 0.5: Mitchell and linear-light Catmull-Rom win there and fall behind here"
+setup  = [
+  ["plate", "render", "--png", "{tmp:text.png}", "--size", "402x874", "--scale", "3", "{asset:clip-text.html}"],
+  ["ffmpeg", "-loop", "1", "-framerate", "60", "-t", "3", "-i", "{tmp:text.png}", "-c:v", "png", "{tmp:master.mov}"],
+  ["plate", "render", "--png", "{tmp:native.png}", "--size", "402x874", "--scale", "2.25", "{asset:clip-text.html}"],
+  ["magick", "{tmp:native.png}", "-crop", "600x600+0+225", "+repage", "{tmp:truth.png}"],
+]
+run    = ["clip", "render", "--script", "{tmp:clip.toml}", "--master", "{tmp:master.mov}", "--events", "{tmp:events.jsonl}", "--out", "{tmp:out}"]
+post   = [
+  ["ffmpeg", "-i", "{tmp:out/text.mp4}", "-vf", 'select=eq(n\,30),scale=flags=accurate_rnd+full_chroma_int+bilinear', "-frames:v", "1", "{tmp:f.png}"],
+]
+metric = "detail"
+params = { a = "{tmp:f.png}", b = "{tmp:truth.png}", channel = "rgb-min", sigma = 3.0 }
+min    = 0.798
+
+[case.files]
+"clip.toml" = '''
+version  = 1
+name     = "text"
+platform = "ios"
+form     = "mobile"
+app      = "com.example.text"
+device   = "iPhone 17 Pro"
+state    = "text"
+fps      = 60
+
+[output]
+width   = 600
+formats = ["mp4", "webm"]
+
+[camera]
+mode   = "fixed"
+region = { target = "text" }
+
+[overlays]
+captions = false
+taps     = false
+
+[targets]
+text = { id = "text" }
+
+[[step]]
+action = "tap"
+target = { xy = [100, 200] }
+'''
+"events.jsonl" = '''
+{"type":"meta","version":1,"platform":"ios","scale":3,"screen":[402,874],"fps":60,"sync":"simctl-start","sync_error_ms":4}
+{"type":"rects","t":0,"rects":{"text":[0,100,266.66666666666667,266.66666666666667]}}
+{"type":"tap","t":1000,"step":0,"at":[100,200],"target":[0,100,200,200]}
+{"type":"end","t":2800}
+'''
+
+# clip-caption-sharp: the caption reference is plate's caption page over the
+# truth, rendered at 4x and shrunk to the output size; the measure is the
+# caption's box, 282x65 at 159,511.
+
+[[case]]
+name   = "clip-caption-sharp"
+why    = "a caption must reach the viewer as sharp as Chrome sets it, over the text it covers"
+setup  = [
+  ["plate", "render", "--png", "{tmp:text.png}", "--size", "402x874", "--scale", "3", "{asset:clip-text.html}"],
+  ["ffmpeg", "-loop", "1", "-framerate", "60", "-t", "3", "-i", "{tmp:text.png}", "-c:v", "png", "{tmp:master.mov}"],
+  ["magick", "{tmp:text.png}", "-crop", "600x600+0+300", "+repage", "{tmp:truth.png}"],
+  ["plate", "render", "--png", "{tmp:ref4.png}", "--size", "600x600", "--scale", "4", "{tmp:caption.html}"],
+  ["plate", "shrink", "--fit", "600", "{tmp:ref4.png}", "{tmp:ref.png}"],
+  ["magick", "{tmp:ref.png}", "-crop", "282x65+159+511", "+repage", "{tmp:ref-box.png}"],
+]
+run    = ["clip", "render", "--script", "{tmp:clip.toml}", "--master", "{tmp:master.mov}", "--events", "{tmp:events.jsonl}", "--out", "{tmp:out}"]
+post   = [
+  ["ffmpeg", "-i", "{tmp:out/text.mp4}", "-vf", 'select=eq(n\,30),scale=flags=accurate_rnd+full_chroma_int+bilinear', "-frames:v", "1", "{tmp:f.png}"],
+  ["magick", "{tmp:f.png}", "-crop", "282x65+159+511", "+repage", "{tmp:f-box.png}"],
+]
+metric = "detail"
+params = { a = "{tmp:f-box.png}", b = "{tmp:ref-box.png}", channel = "rgb-min", sigma = 3.0 }
+min    = 0.852
+
+[case.files]
+"clip.toml" = '''
+version  = 1
+name     = "text"
+platform = "ios"
+form     = "mobile"
+app      = "com.example.text"
+device   = "iPhone 17 Pro"
+state    = "text"
+fps      = 60
+
+[output]
+width   = 600
+formats = ["mp4", "webm"]
+
+[camera]
+mode   = "fixed"
+region = { target = "text" }
+
+[overlays]
+captions = true
+taps     = false
+
+[targets]
+text = { id = "text" }
+
+[[step]]
+action = "tap"
+target = { xy = [100, 200] }
+'''
+"events.jsonl" = '''
+{"type":"meta","version":1,"platform":"ios","scale":3,"screen":[402,874],"fps":60,"sync":"simctl-start","sync_error_ms":4}
+{"type":"rects","t":0,"rects":{"text":[0,100,200,200]}}
+{"type":"caption","t":0,"text":"Tap to add a node"}
+{"type":"tap","t":1000,"step":0,"at":[100,200],"target":[0,100,200,200]}
+{"type":"end","t":2800}
+'''
+"caption.html" = '''
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>
+:root { --region-bottom: 600px; }
+html, body { margin: 0; width: 100%; height: 100%; background: transparent; overflow: hidden; }
+.clip-caption { position: absolute; left: 0; right: 0; bottom: calc(100vh - var(--region-bottom) + 24px); text-align: center; }
+.clip-caption-text { display: inline-block; max-width: calc(100% - 48px); font: 600 30px/1.25 system-ui,-apple-system,sans-serif; color: #fff; background: rgba(10,10,14,0.72); border-radius: 16px; padding: 14px 22px; }
+body { background: url(truth.png) 0 0 / 600px 600px; image-rendering: pixelated; }
+</style>
+</head><body><div class="clip-caption"><span class="clip-caption-text">Tap to add a node</span></div></body></html>
+'''

@@ -145,6 +145,8 @@ loop-seam scores. It prints `wrote <path> (<bytes> bytes)` for each file.
 The MP4 is H.264 4:2:0 tagged BT.709, muted, constant frame rate and
 faststart, so a web view or Electron autoplays it inline; a recording tagged
 Display P3, as the iOS simulator writes, is converted to BT.709 first.
+The WebM is AV1, which Safari plays only on hardware with an AV1 decoder,
+so a page lists the MP4 as its fallback source.
 `--caption-css` loads after plate's caption style.
 
 `clip render` refuses before decoding anything when the event log's sync
