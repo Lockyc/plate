@@ -140,9 +140,16 @@ lossy at `--quality` (default 90) with lossless alpha.
 `clip render` writes `<name>.<ext>` into `--out` for each format the script
 lists (`mp4`, `webm`, `poster.png` for `poster`, `webp`, `gif`), plus
 `<name>.json`: the clip's size, frame rate, frame count and duration, the
-span of the recording it shows, each file's size, its sharpness and
-loop-seam scores, and how many frames at each end closing the loop changed.
+span of the recording it shows and how much idle time was cut from it, each
+file's size, its sharpness and loop-seam scores, and how many frames at each
+end closing the loop changed.
 It prints `wrote <path> (<bytes> bytes)` for each file.
+Any still stretch between steps longer than the script's `[output]
+max_idle_ms` (default 500, 100 to 60000) is cut to that length from its
+middle, so the time a driver spends between steps never shows; captions,
+touches and the camera stay with the picture. A blinking caret counts as
+still. An action, its `hold_ms` and its touch or key overlay, a caption's
+fade, and a `pause` step are never cut.
 A clip whose last frame visibly differs from its first has its loop closed
 over its final and opening frames. The script's `[output] loop` picks how:
 `crossfade` (the default) blends the end into the start, and `dip` eases
