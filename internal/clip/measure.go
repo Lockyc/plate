@@ -19,8 +19,9 @@ import (
 // (0.1339) between consecutive frames of the clip-loop-crossfade quality
 // case's body, a square sliding 300 px/s, crossfade excluded, rounded up:
 // a loop's cut may jump no more than a frame and a half of steady motion.
-// It is also where closeLoop starts to crossfade, so a loop is either clean
-// enough to pass or crossfaded.
+// It is also where closeLoop starts to close the loop, so a loop is either
+// clean enough to pass or closed: a crossfade leaves a smaller cut, and a
+// dip none, its two seam frames both the ground.
 const (
 	MinSharpness = 0.85
 	MaxSeam      = 0.201

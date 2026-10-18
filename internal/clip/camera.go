@@ -15,9 +15,9 @@ const (
 	lead      = 250.0 // a move arrives this long before its action
 	move      = 700.0 // a move's full length
 	minMove   = 300.0 // the shortest move; closer goals merge
-	// crossfadeMS is the loop crossfade's length; the return move to R0
+	// loopMS is the loop close's length (closeLoop); the return move to R0
 	// lands as it starts.
-	crossfadeMS = 300.0
+	loopMS = 300.0
 )
 
 // FollowHead is the trim head a follow clip needs: a full move and its
@@ -439,8 +439,8 @@ func (c *camera) onPin(box Rect, t float64) bool {
 
 // follow appends a move per action whose padded target the camera does not
 // already frame, arriving lead before it; goals too close to fit a minMove
-// move merge, and a return to the opening state lands as the loop
-// crossfade starts.
+// move merge, and a return to the opening state lands as the loop close
+// starts.
 func (c *camera) follow(l *Log, w Window, keys []key) []key {
 	for _, e := range l.Events {
 		if _, ok := actionOf[e.Type]; !ok {
@@ -472,7 +472,7 @@ func (c *camera) follow(l *Log, w Window, keys []key) []key {
 		}
 	}
 	if last := keys[len(keys)-1]; len(keys) > 1 {
-		arrive := w.End - crossfadeMS
+		arrive := w.End - loopMS
 		if arrive-last.arrive >= minMove+400 {
 			// Home is where the clip opens, so the loop seam matches.
 			keys = append(keys, key{math.Max(last.arrive, arrive-move), arrive, keys[0].g})

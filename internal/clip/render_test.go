@@ -142,7 +142,7 @@ func TestPublishFailureLeavesNothing(t *testing.T) {
 func TestMeasurementJSONShape(t *testing.T) {
 	b, err := json.Marshal(Measurement{Name: "n", Width: 2, Height: 4, FPS: 60, Frames: 1, DurationMS: 16.7,
 		Trim: Window{Start: 1, End: 2}, Formats: map[string]FormatResult{"mp4": {File: "n.mp4", Bytes: 3}},
-		Sharpness: 0.9, LoopSeam: 0.1, CrossfadeFrames: 18})
+		Sharpness: 0.9, LoopSeam: 0.1, LoopHeadFrames: 9, LoopTailFrames: 9})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +155,7 @@ func TestMeasurementJSONShape(t *testing.T) {
 		keys = append(keys, k)
 	}
 	slices.Sort(keys)
-	want := []string{"crossfade_frames", "duration_ms", "formats", "fps", "frames", "height", "loop_seam", "name", "sharpness", "trim", "width"}
+	want := []string{"duration_ms", "formats", "fps", "frames", "height", "loop_head_frames", "loop_seam", "loop_tail_frames", "name", "sharpness", "trim", "width"}
 	if !reflect.DeepEqual(keys, want) {
 		t.Fatalf("keys = %q, want %q", keys, want)
 	}

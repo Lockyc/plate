@@ -83,7 +83,7 @@ func TestComposePlacesPins(t *testing.T) {
 	down := View{Region: Rect{0, 0, 250, 500}, RegionY: 0, RegionH: 300,
 		Pins: []PinView{{Name: "kb", Src: band, Y: 0, H: 50, Shown: 0}}}
 	// Ending as it starts keeps the loop crossfade out of the frames under test.
-	refs, _, err := Compose(context.Background(), sources(t, src, src, src), 60, 1, lay, []View{up, down, up}, make([][]Op, 3), nil, t.TempDir())
+	refs, _, err := Compose(context.Background(), sources(t, src, src, src), 60, 1, lay, []View{up, down, up}, make([][]Op, 3), nil, "crossfade", t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +101,7 @@ func TestComposeScalesFromPoints(t *testing.T) {
 	fill(src, image.Rect(20, 0, 40, 40), grey(1))
 	lay := Layout{W: 20, H: 20, RegionH: 20}
 	views := []View{{Region: Rect{10, 0, 10, 10}, RegionH: 20}}
-	refs, _, err := Compose(context.Background(), sources(t, src), 60, 2, lay, views, make([][]Op, 1), nil, t.TempDir())
+	refs, _, err := Compose(context.Background(), sources(t, src), 60, 2, lay, views, make([][]Op, 1), nil, "crossfade", t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +114,7 @@ func TestComposeOverlayOpacity(t *testing.T) {
 	views := []View{{Region: Rect{0, 0, 8, 8}, RegionH: 8}}
 	ops := [][]Op{{{Key: "caption-0", Scale: 1, Opacity: 0.5}}}
 	sprites := map[string]*image.RGBA64{"caption-0": solid(8, 8, grey(1))}
-	refs, _, err := Compose(context.Background(), sources(t, solid(8, 8, grey(0))), 60, 1, lay, views, ops, sprites, t.TempDir())
+	refs, _, err := Compose(context.Background(), sources(t, solid(8, 8, grey(0))), 60, 1, lay, views, ops, sprites, "crossfade", t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +128,7 @@ func TestComposeFullFrameSpriteLandsOnWholePixels(t *testing.T) {
 	fill(caption, image.Rect(2, 3, 6, 5), grey(1))
 	ops := [][]Op{{{Key: "caption-0", Y: -1.5, Scale: 1, Opacity: 1}}}
 	refs, _, err := Compose(context.Background(), sources(t, solid(8, 12, grey(0))), 60, 1, lay, views, ops,
-		map[string]*image.RGBA64{"caption-0": caption}, t.TempDir())
+		map[string]*image.RGBA64{"caption-0": caption}, "crossfade", t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +156,7 @@ func TestComposePointSpriteCentredAndScaled(t *testing.T) {
 	ops := [][]Op{full, {{Key: "tap", X: 20, Y: 20, Scale: 1, Opacity: 1}}, full}
 	sprites := map[string]*image.RGBA64{"tap": solid(10, 10, grey(1))}
 	black := solid(40, 40, grey(0))
-	refs, _, err := Compose(context.Background(), sources(t, black, black, black), 60, 1, lay, []View{v, v, v}, ops, sprites, t.TempDir())
+	refs, _, err := Compose(context.Background(), sources(t, black, black, black), 60, 1, lay, []View{v, v, v}, ops, sprites, "crossfade", t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -192,12 +192,12 @@ func loopFixture(t *testing.T, first, last *image.RGBA64, n int) (frames []strin
 func TestComposeCrossfadesWhenSeamDirty(t *testing.T) {
 	black, white := solid(8, 8, grey(0)), solid(8, 8, grey(1))
 	frames, lay, views := loopFixture(t, black, white, 60)
-	refs, n, err := Compose(context.Background(), frames, 60, 1, lay, views, make([][]Op, 60), nil, t.TempDir())
+	refs, n, err := Compose(context.Background(), frames, 60, 1, lay, views, make([][]Op, 60), nil, "crossfade", t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n != 18 {
-		t.Fatalf("crossfade = %d, want 18", n)
+	if n != (LoopClose{Tail: 18}) {
+		t.Fatalf("loop close = %+v, want an 18-frame tail", n)
 	}
 	first, last := readRGBA64(t, refs[0]), readRGBA64(t, refs[59])
 	if v, want := level(last, 3, 3), 1.0/19; math.Abs(v-want) > 1.0/255 {
@@ -229,26 +229,91 @@ func TestComposeCleanLoopUntouched(t *testing.T) {
 	b := solid(8, 8, grey(153.0/255))
 	frames, lay, views := loopFixture(t, a, a, 30)
 	frames[10] = sources(t, b)[0]
-	refs, n, err := Compose(context.Background(), frames, 60, 1, lay, views, make([][]Op, 30), nil, t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if n != 0 {
-		t.Fatalf("crossfade = %d, want 0", n)
-	}
-	for i, r := range refs {
-		want := readRGBA64(t, frames[i])
-		got := readRGBA64(t, r)
-		for j := range got.Pix {
-			if got.Pix[j] != want.Pix[j] {
-				t.Fatalf("frame %d changed", i)
+	for _, loop := range Loops {
+		refs, n, err := Compose(context.Background(), frames, 60, 1, lay, views, make([][]Op, 30), nil, loop, t.TempDir())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n != (LoopClose{}) {
+			t.Fatalf("%s: loop close = %+v, want none", loop, n)
+		}
+		for i, r := range refs {
+			want := readRGBA64(t, frames[i])
+			got := readRGBA64(t, r)
+			for j := range got.Pix {
+				if got.Pix[j] != want.Pix[j] {
+					t.Fatalf("%s: frame %d changed", loop, i)
+				}
 			}
 		}
 	}
 }
 
+func TestComposeDipsWhenSeamDirty(t *testing.T) {
+	// The start shows a pale block on the left, the end the block on the
+	// right: a row that moved. 8-bit levels, so the output can match exactly.
+	g, pale := grey(26.0/255), grey(230.0/255)
+	left, right := image.Rect(0, 0, 3, 8), image.Rect(5, 0, 8, 8)
+	start, end := solid(8, 8, g), solid(8, 8, g)
+	fill(start, left, pale)
+	fill(end, right, pale)
+	frames, lay, views := loopFixture(t, start, end, 60)
+	for k := 30; k < 60; k++ {
+		frames[k] = frames[59]
+	}
+	refs, lc, err := Compose(context.Background(), frames, 60, 1, lay, views, make([][]Op, 60), nil, "dip", t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lc != (LoopClose{Head: 9, Tail: 9}) {
+		t.Fatalf("loop close = %+v, want 9 head and 9 tail frames: 300 ms at 60 fps", lc)
+	}
+	for _, k := range []int{0, 59} {
+		img := readRGBA64(t, refs[k])
+		for y := range 8 {
+			for x := range 8 {
+				if c := img.RGBA64At(x, y); !nearRGB(c, g, 0) {
+					t.Fatalf("seam frame %d (%d,%d) = %v, want the ground %v", k, x, y, c, g)
+				}
+			}
+		}
+	}
+	full := (230.0 - 26) / 255
+	shows := func(img *image.RGBA64, r image.Rectangle) float64 { return level(img, r.Min.X+1, 3) - 26.0/255 }
+	for k, r := range refs {
+		img := readRGBA64(t, r)
+		if a, b := shows(img, left), shows(img, right); a > 1.0/255 && b > 1.0/255 {
+			t.Fatalf("frame %d shows the start's block (%.3f) and the end's (%.3f) at once", k, a, b)
+		}
+	}
+	// Eased: the dip leaves the content slowly, not at a linear 1/9 a frame.
+	if v := shows(readRGBA64(t, refs[51]), right); v < full*(1-1.0/18) {
+		t.Errorf("frame 51, the dip's first, keeps %.3f of %.3f: a linear ramp, not eased", v, full)
+	}
+	if v := shows(readRGBA64(t, refs[9]), left); math.Abs(v-full) > 0.5/255 {
+		t.Errorf("frame 9, after the dip, = %.3f, want the start untouched", v)
+	}
+	if v := shows(readRGBA64(t, refs[50]), right); math.Abs(v-full) > 0.5/255 {
+		t.Errorf("frame 50, before the dip, = %.3f, want the end untouched", v)
+	}
+}
+
+func TestGroundIsTheDominantColour(t *testing.T) {
+	// 45% ground, jittered as a lossy master's is, under two paler greys: a
+	// per-channel median lands on the 200 grey, not the ground.
+	img := solid(20, 20, grey(250.0/255))
+	fill(img, image.Rect(0, 0, 20, 9), grey(10.0/255))
+	for x := 0; x < 20; x += 2 {
+		img.SetRGBA64(x, 0, grey(11.0/255))
+	}
+	fill(img, image.Rect(0, 9, 20, 15), grey(200.0/255))
+	if c := ground(img); !nearRGB(c, grey(10.0/255), 1) {
+		t.Fatalf("ground = %v, want the 10 grey", c)
+	}
+}
+
 func TestComposeRefusesMismatchedInputs(t *testing.T) {
-	_, _, err := Compose(context.Background(), sources(t, solid(8, 8, grey(0))), 60, 1, Layout{W: 8, H: 8, RegionH: 8}, nil, nil, nil, t.TempDir())
+	_, _, err := Compose(context.Background(), sources(t, solid(8, 8, grey(0))), 60, 1, Layout{W: 8, H: 8, RegionH: 8}, nil, nil, nil, "crossfade", t.TempDir())
 	if err == nil {
 		t.Fatal("no error for 1 frame and 0 views")
 	}

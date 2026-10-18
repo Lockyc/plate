@@ -87,23 +87,37 @@ func TestEncodeArgs(t *testing.T) {
 		t.Fatalf("webp argv %q", webp)
 	}
 
-	if err := Encode(ctx, "poster", refs, 60, 4, 2, filepath.Join(out, "c.poster.png")); err != nil {
-		t.Fatal(err)
-	}
-	if n := len(enginetest.Calls(t, ffmpeg)) + len(enginetest.Calls(t, magick)); n != 4 {
-		t.Fatalf("poster ran an engine: %d calls", n)
-	}
-	a, _ := os.ReadFile(filepath.Join(refs, "r00000.png"))
-	b, _ := os.ReadFile(filepath.Join(out, "c.poster.png"))
-	if !bytes.Equal(a, b) {
-		t.Fatal("the poster is not the first frame's bytes")
-	}
-
-	if err := Encode(ctx, "tiff", refs, 60, 4, 2, filepath.Join(out, "c.tiff")); err == nil {
-		t.Fatal("an unknown format encoded")
+	for _, f := range []string{"tiff", "poster"} {
+		if err := Encode(ctx, f, refs, 60, 4, 2, filepath.Join(out, "c."+f)); err == nil {
+			t.Fatalf("%s encoded: the poster is written, never encoded", f)
+		}
 	}
 	if err := Encode(ctx, "mp4", refs, 60, 5, 2, filepath.Join(out, "odd.mp4")); err == nil || !strings.Contains(err.Error(), "even") {
 		t.Fatalf("odd width: err = %v", err)
+	}
+}
+
+func TestPosterIsTheFirstFrameTheLoopLeft(t *testing.T) {
+	dir := t.TempDir()
+	var refs []string
+	for k := range 3 {
+		p := filepath.Join(dir, fmt.Sprintf("r%05d.png", k))
+		writePNG(t, p, solid(4, 2, grey(float64(k)/2)))
+		refs = append(refs, p)
+	}
+	for _, c := range []struct {
+		lc   LoopClose
+		want int
+	}{{LoopClose{}, 0}, {LoopClose{Tail: 2}, 0}, {LoopClose{Head: 1, Tail: 1}, 1}} {
+		out := filepath.Join(t.TempDir(), "c.poster.png")
+		if err := writePoster(refs, c.lc, out); err != nil {
+			t.Fatal(err)
+		}
+		a, _ := os.ReadFile(refs[c.want])
+		b, _ := os.ReadFile(out)
+		if !bytes.Equal(a, b) {
+			t.Errorf("%+v: the poster is not frame %d's bytes", c.lc, c.want)
+		}
 	}
 }
 

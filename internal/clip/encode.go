@@ -45,20 +45,12 @@ var (
 // format to out. mp4 is the compatibility floor every web view and
 // Electron autoplays muted and inline: H.264 4:2:0, BT.709, faststart, no
 // audio, constant fps, even sides. GIF is written at 50 fps because its
-// delays are centiseconds. The poster is the first frame's bytes, so it
-// equals the video's start.
+// delays are centiseconds. The poster is not an encode: writePoster.
 func Encode(ctx context.Context, format, refsDir string, fps, w, h int, out string) error {
 	if (format == "mp4" || format == "webm") && (w%2 != 0 || h%2 != 0) {
 		return fmt.Errorf("%s needs even sides, not %dx%d", format, w, h)
 	}
 	first := filepath.Join(refsDir, "r00000.png")
-	if format == "poster" {
-		b, err := os.ReadFile(first)
-		if err != nil {
-			return err
-		}
-		return atomicfile.WriteFile(out, b, 0o644)
-	}
 	if format == "webp" {
 		frames, err := filepath.Glob(filepath.Join(refsDir, "r*.png"))
 		if err != nil {
@@ -91,6 +83,17 @@ func Encode(ctx context.Context, format, refsDir string, fps, w, h int, out stri
 	args := append(append(in, enc...), out)
 	_, err := engine.Run(ctx, engine.Cmd{Engine: "ffmpeg", Args: args, Inputs: []string{first}, Outputs: []string{out}})
 	return err
+}
+
+// writePoster writes the bytes of the first composed frame the loop close
+// left as it was, so the poster is the clip's opening screen as the video
+// shows it once a dip has eased in from the ground, never the ground.
+func writePoster(refs []string, lc LoopClose, out string) error {
+	b, err := os.ReadFile(refs[min(lc.Head, len(refs)-1)])
+	if err != nil {
+		return err
+	}
+	return atomicfile.WriteFile(out, b, 0o644)
 }
 
 // requireEncoders refuses, before any decoding, a render whose formats need
