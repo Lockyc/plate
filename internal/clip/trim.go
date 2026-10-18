@@ -17,7 +17,8 @@ func (w Window) Frames(fps int) int {
 }
 
 // TrimWindow is the stretch of the master that holds the interaction: from
-// head before the first action or movement to Settle after the last.
+// head before the first action or movement to Settle after the last. With no action and no motion it is the empty
+// Window{}.
 func TrimWindow(l *Log, activity []float64, fps int, head float64) Window {
 	first, lastAct := math.Inf(1), math.Inf(-1)
 	for _, e := range l.Events {
@@ -41,6 +42,9 @@ func TrimWindow(l *Log, activity []float64, fps int, head float64) Window {
 			actFirst = math.Min(actFirst, ft)
 			actLast = math.Max(actLast, ft)
 		}
+	}
+	if math.IsInf(first, 1) && math.IsInf(actFirst, 1) {
+		return Window{} // nothing happened: an empty window, never Inf
 	}
 	return Window{
 		Start: math.Max(0, math.Min(first, actFirst)-head),

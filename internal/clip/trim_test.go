@@ -35,3 +35,10 @@ func TestTrimWindowActionEnds(t *testing.T) {
 		t.Errorf("window = %+v", w)
 	}
 }
+
+func TestTrimWindowNothingHappened(t *testing.T) {
+	w := TrimWindow(&Log{End: 3000}, make([]float64, 30), 60, Settle)
+	if w != (Window{}) || w.Frames(60) != 0 {
+		t.Errorf("window = %+v", w)
+	}
+}
