@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"image"
 	"io"
 	"io/fs"
 	"os"
@@ -237,19 +236,17 @@ func loopSeam(refs []string) (float64, error) {
 	return Seam(first, last)
 }
 
-// sharpness is Sharpness of the encoded file against the composed frames
-// at SampleFrames.
+// sharpness is Sharpness of the encoded file against the composed frames'
+// lossless 4:2:0 copy (Lossless420) at SampleFrames.
 func sharpness(ctx context.Context, file string, refs []string, dir string) (float64, error) {
 	idx := SampleFrames(len(refs))
 	got, err := ExtractEncoded(ctx, file, idx, dir)
 	if err != nil {
 		return 0, err
 	}
-	want := make([]*image.RGBA64, len(idx))
-	for i, k := range idx {
-		if want[i], err = loadRGBA64(refs[k]); err != nil {
-			return 0, err
-		}
+	want, err := Lossless420(ctx, filepath.Dir(refs[0]), idx, dir)
+	if err != nil {
+		return 0, err
 	}
 	return Sharpness(want, got)
 }

@@ -11,19 +11,20 @@ import (
 )
 
 // The render's checks: the least Sharpness an encode may score, and the
-// most LoopSeam, percent, a clip may show where it loops. MaxSeam is 1.5
+// most LoopSeam, percent, a clip may show where it loops. MinSharpness is
+// the least Sharpness the mp4's settings score on the neon text of
+// TestSharpnessPassesNeonText (cyan, 0.857) rounded down; an encode that
+// smears colour past 4:2:0 (chroma-qp-offset +12, or 4:1:0) scores under
+// 0.68 on three of its four colours. MaxSeam is 1.5
 // times the median Seam between consecutive frames of the
 // clip-loop-crossfade quality case's body, a square sliding 300 px/s: a
 // loop's cut may jump no more than a frame and a half of steady motion.
 const (
-	MinSharpness = 0.80
+	MinSharpness = 0.85
 	MaxSeam      = 0.201
 )
 
-// sharpSigma is the detail scale Sharpness scores, px: at 3, 4:2:0's loss
-// of a stroke's 1-px colour fringe weighs less than at 1, where lossless
-// 4:2:0 alone scored magenta text 0.48, while a 1-px coloured line's smear
-// still scores far below MinSharpness.
+// sharpSigma is the detail scale Sharpness scores, px.
 const sharpSigma = 3
 
 // Seam is the percent of pixels that differ between a and b, plate diff's
@@ -55,7 +56,10 @@ func SampleFrames(n int) []int {
 
 // Sharpness is how much of the reference frames' fine detail the encoded
 // frames keep: the least raster.DetailMin(got[i], refs[i], sharpSigma) over
-// the SampleFrames pairs given. A pair with no fine detail is skipped, so 1
+// the SampleFrames pairs given. The render's reference is Lossless420 of
+// its composed frames, so the score is the encoder's loss alone, never
+// what 4:2:0, the format the clip must ship in, loses before it (red beside
+// a saturated cyan edge, say). A pair with no fine detail is skipped, so 1
 // means none had any to lose. Pairs that differ in size or count are an
 // error: a bad decode, not a soft encode.
 func Sharpness(refs, got []*image.RGBA64) (float64, error) {

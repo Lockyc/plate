@@ -159,9 +159,11 @@ colours, or renders what it is given.
   HTML pages rendered once each through `render.PNGAlpha`. `clip.Render`
   refuses before decoding what the log and probe can show, holds the encode
   to its checks, and publishes the set only whole (`clip.publish`). The
-  encode settings, the resampling kernel and `clip.MinSharpness` are
-  measured by the `clip-text-*` and `clip-caption-sharp` quality cases,
-  `clip.MaxSeam` by `clip-loop-crossfade`.
+  encode settings and the resampling kernel are measured end to end, 4:2:0
+  included, by the `clip-text-*` and `clip-caption-sharp` quality cases;
+  the render's own sharpness check scores the encoder alone, against a
+  lossless 4:2:0 copy (`clip.Lossless420`). `clip.MaxSeam` is measured by
+  `clip-loop-crossfade`.
 - **inpaint, fonts, qr, pdf, impose, doc, slides** — as the README table and each package's
   doc comment describe.
 
