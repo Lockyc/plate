@@ -195,3 +195,30 @@ func TestRenderWarnsMasterEndsBeforeLastAction(t *testing.T) {
 		t.Fatalf("stderr %q lacks %q", stderr.String(), want)
 	}
 }
+
+func TestSharpnessScoresEveryVideoEncode(t *testing.T) {
+	meas := Measurement{Formats: map[string]FormatResult{
+		"mp4": {File: "n.mp4"}, "webm": {File: "n.webm"}, "gif": {File: "n.gif"}}}
+	var scored []string
+	err := scoreSharpness(&meas, func(file string) (float64, error) {
+		scored = append(scored, file)
+		return map[string]float64{"n.mp4": 0.9, "n.webm": 0.5}[file], nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(scored, []string{"n.mp4", "n.webm"}) {
+		t.Fatalf("scored %q, want both video encodes", scored)
+	}
+	if meas.Sharpness != 0.5 || meas.Formats["mp4"].Sharpness != 0.9 || meas.Formats["webm"].Sharpness != 0.5 {
+		t.Fatalf("measurement %+v", meas)
+	}
+	want := "webm sharpness 0.500 is below 0.85: the encode loses the frames' fine detail"
+	if err := checkSharpness(meas); err == nil || err.Error() != want {
+		t.Fatalf("checkSharpness = %v, want %q", err, want)
+	}
+	none := Measurement{Formats: map[string]FormatResult{"gif": {File: "n.gif"}}}
+	if err := scoreSharpness(&none, nil); err != nil || none.Sharpness != 1 || checkSharpness(none) != nil {
+		t.Fatalf("no video encode: %+v, %v", none, err)
+	}
+}
