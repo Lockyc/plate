@@ -14,6 +14,7 @@ import (
 
 	"github.com/lockyc/plate/internal/build"
 	"github.com/lockyc/plate/internal/cli"
+	"github.com/lockyc/plate/internal/clip"
 	"github.com/lockyc/plate/internal/cutout"
 	"github.com/lockyc/plate/internal/diff"
 	"github.com/lockyc/plate/internal/doc"
@@ -55,6 +56,7 @@ var commands = []command{
 	{"slides", "preview a Google Slides deck from its Slides API JSON, one PNG per slide", slides.Main, false},
 	{"shrink", "resize down to a small, sharp PNG or WebP for the web", shrink.Main, false},
 	{"diff", "compare two images after lining them up vertically", diff.Main, false},
+	{"clip", "check a demo-clip script; render a recording into a looping clip", clip.Main, false},
 	{"fonts", "embed web fonts into a CSS file as data: URIs", fonts.Main, false},
 	{"qr", "a QR code SVG, dark on light, quiet zone included", qr.Main, false},
 	{"grade", "grade fit: fit a colour grade from a reference; apply it", grade.Main, false},
