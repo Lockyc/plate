@@ -11,8 +11,8 @@ import (
 // screen at 60 fps for 4 s: a bar rests at 804 pt and, from 2000 to
 // 2300 ms on easeInOutCubic, rides a keyboard up from the screen's foot
 // until the bar sits at 529 and the keyboard's top at 583; with moving
-// false nothing moves at all.
-func kbMaster(moving bool) []*image.Gray {
+// false nothing moves at all, and with bar false there is no bar.
+func kbMaster(moving bool, bar ...bool) []*image.Gray {
 	const w, h = 200, 434
 	frames := make([]*image.Gray, 240)
 	for i := range frames {
@@ -27,7 +27,7 @@ func kbMaster(moving bool) []*image.Gray {
 			switch {
 			case y >= row(874-291*e):
 				v = 200 // the keyboard
-			case y >= row(804-275*e) && y < row(840-275*e):
+			case (len(bar) == 0 || bar[0]) && y >= row(804-275*e) && y < row(840-275*e):
 				v = 120 // the bar
 			}
 			for x := range w {
@@ -130,6 +130,21 @@ func TestTimeKeyboardTimesADrop(t *testing.T) {
 				t.Fatalf("%.0f ms: touchbar Src %+v, the master's bar is at %.2f", ts, p.Src, 804-275*e)
 			}
 		}
+	}
+}
+
+func TestTimeKeyboardSeesTheSlideBelowTheRect(t *testing.T) {
+	// The keyboard's rect ends at 816 pt, but it slides in from the screen's
+	// foot: its first fifth of the rise (and a drop's last) happens below
+	// the rect. The motion is the whole slide, 2000-2300 ms.
+	s, l := kbLog()
+	got, _ := TimeKeyboard(s, l, kbMaster(true, false), 60)
+	if len(got.Motions) != 1 {
+		t.Fatalf("motions = %+v", got.Motions)
+	}
+	m := got.Motions[0]
+	if t0, t1 := m.T[0], m.T[len(m.T)-1]; math.Abs(t0-2000) > 1000.0/60+1e-6 || math.Abs(t1-2300) > 1000.0/60+1e-6 {
+		t.Fatalf("motion %.1f-%.1f ms, want 2000-2300 to a frame", t0, t1)
 	}
 }
 
