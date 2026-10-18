@@ -48,16 +48,17 @@ func TestEncodeArgs(t *testing.T) {
 	}
 	mp4 := enginetest.Calls(t, ffmpeg)[0]
 	floor := []string{"-c:v", "libx264", "-pix_fmt", "yuv420p",
-		"-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709", "-color_range", "tv",
+		"-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "iec61966-2-1", "-color_range", "tv",
 		"-movflags", "+faststart", "-an", "-fps_mode", "cfr", "-r", "60", filepath.Join(out, "c.mp4")}
 	if !inOrder(mp4, floor) {
 		t.Fatalf("mp4 argv %q\nlacks the floor, in order: %q", mp4, floor)
 	}
 	if !inOrder(mp4, []string{"-framerate", "60", "-i", filepath.Join(refs, "r%05d.png"), "-vf"}) ||
-		!slices.Contains(mp4, toYUV) || !strings.HasPrefix(toYUV, "scale=out_color_matrix=bt709:out_range=tv:flags=accurate_rnd+full_chroma_int+lanczos,") {
+		!slices.Contains(mp4, toYUV) || !strings.HasPrefix(toYUV, "scale=out_color_matrix=bt709:out_range=tv:flags=accurate_rnd+full_chroma_int+lanczos,") ||
+		!strings.Contains(toYUV, "color_trc=iec61966-2-1") {
 		t.Fatalf("mp4 input or scale: %q", mp4)
 	}
-	if !inOrder(mp4, []string{"-crf", "24", "-x264-params", "chroma-qp-offset=-6"}) {
+	if !inOrder(mp4, []string{"-crf", "22", "-x264-params", "chroma-qp-offset=-6"}) {
 		t.Fatalf("mp4 quality: %q", mp4)
 	}
 
@@ -65,7 +66,7 @@ func TestEncodeArgs(t *testing.T) {
 		t.Fatal(err)
 	}
 	webm := enginetest.Calls(t, ffmpeg)[1]
-	if !inOrder(webm, []string{"-vf", toYUV, "-c:v", "libsvtav1", "-preset", "4", "-crf", "32", "-pix_fmt", "yuv420p", "-color_trc", "bt709", "-an"}) {
+	if !inOrder(webm, []string{"-vf", toYUV, "-c:v", "libsvtav1", "-preset", "4", "-crf", "32", "-pix_fmt", "yuv420p", "-color_trc", "iec61966-2-1", "-an"}) {
 		t.Fatalf("webm argv %q", webm)
 	}
 
@@ -119,7 +120,7 @@ func TestRequireEncoders(t *testing.T) {
 }
 
 // TestEncodeMP4MeetsFloor encodes with the real ffmpeg and reads the mp4
-// back: checkMP4's floor, and the BT.709 tags, which an encoder option
+// back: checkMP4's floor, and the colour tags, which an encoder option
 // alone leaves unknown when the filtered frames carry none.
 func TestEncodeMP4MeetsFloor(t *testing.T) {
 	if _, err := engine.Resolve("ffmpeg"); err != nil {
@@ -145,7 +146,7 @@ func TestEncodeMP4MeetsFloor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.TrimSpace(string(res.Stdout)); got != "tv,bt709,bt709,bt709" {
+	if got := strings.TrimSpace(string(res.Stdout)); got != "tv,bt709,iec61966-2-1,bt709" {
 		t.Fatalf("range, space, transfer, primaries = %s", got)
 	}
 }

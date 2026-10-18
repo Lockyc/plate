@@ -538,8 +538,8 @@ metric = "bytes"
 params = { image = "{tmp:sheet.pdf}" }
 max    = 230000
 
-# clip: a page of thin neon UI text, 11-17 CSS px in the app's four accent
-# colours and white with 1-px hairlines, on its dark ground (clip-text.html),
+# clip: a page of thin UI text, 11-17 CSS px in four saturated accent
+# colours and white with 1-px hairlines, on a dark UI ground (clip-text.html),
 # captured at 3x and held still for 3 s as a lossless RGB master. A tap at
 # 1 s gives the trim its action; the clip is the 60 frames about it, and
 # frame 30 is decoded the way Chromium draws it (bilinear chroma). At width
@@ -560,7 +560,7 @@ post   = [
 ]
 metric = "detail"
 params = { a = "{tmp:f.png}", b = "{tmp:truth.png}", channel = "rgb-min", sigma = 3.0 }
-min    = 0.909
+min    = 0.912
 
 [case.files]
 "clip.toml" = '''
@@ -666,7 +666,7 @@ post   = [
 ]
 metric = "rmse"
 params = { a = "{tmp:f.png}", b = "{tmp:truth.png}" }
-max    = 0.0469
+max    = 0.0463
 
 [case.files]
 "clip.toml" = '''
@@ -715,7 +715,7 @@ setup  = [
 run    = ["clip", "render", "--script", "{tmp:clip.toml}", "--master", "{tmp:master.mov}", "--events", "{tmp:events.jsonl}", "--out", "{tmp:out}"]
 metric = "json"
 params = { file = "{tmp:out/text.json}", field = "sharpness" }
-min    = 0.909
+min    = 0.910
 
 [case.files]
 "clip.toml" = '''
@@ -769,7 +769,7 @@ post   = [
 ]
 metric = "detail"
 params = { a = "{tmp:f.png}", b = "{tmp:truth.png}", channel = "rgb-min", sigma = 3.0 }
-min    = 0.620
+min    = 0.626
 
 [case.files]
 "clip.toml" = '''
@@ -823,7 +823,7 @@ post   = [
 ]
 metric = "detail"
 params = { a = "{tmp:f.png}", b = "{tmp:truth.png}", channel = "rgb-min", sigma = 3.0 }
-min    = 0.798
+min    = 0.802
 
 [case.files]
 "clip.toml" = '''
@@ -862,6 +862,215 @@ target = { xy = [100, 200] }
 {"type":"end","t":2800}
 '''
 
+# clip-text-scroll-*: the same capture scrolling 5.2 px a frame for 3 s, so
+# every frame is new to the encoder. The trim starts at 0 and the camera
+# frames the region at zoom 1, so output frame 60 is master frame 60's
+# region, before the loop's crossfade.
+
+[[case]]
+name   = "clip-text-scroll-mp4-bytes"
+why    = "the mp4's settings must hold the bytes a plain crf 18 wrote on moving text, so a clip under its budget stays under it"
+setup  = [
+  ["plate", "render", "--png", "{tmp:text.png}", "--size", "402x874", "--scale", "3", "{asset:clip-text.html}"],
+  ["ffmpeg", "-loop", "1", "-framerate", "60", "-t", "3", "-i", "{tmp:text.png}", "-vf", "scroll=v=0.002", "-c:v", "png", "{tmp:master.mov}"],
+]
+run    = ["clip", "render", "--script", "{tmp:clip.toml}", "--master", "{tmp:master.mov}", "--events", "{tmp:events.jsonl}", "--out", "{tmp:out}"]
+metric = "json"
+params = { file = "{tmp:out/text.json}", field = "formats.mp4.bytes" }
+max    = 857000
+
+[case.files]
+"clip.toml" = '''
+version  = 1
+name     = "text"
+platform = "ios"
+form     = "mobile"
+app      = "com.example.text"
+device   = "iPhone 17 Pro"
+state    = "text"
+fps      = 60
+
+[output]
+width   = 600
+formats = ["mp4", "webm"]
+
+[camera]
+mode   = "fixed"
+region = { target = "text" }
+
+[overlays]
+captions = false
+taps     = false
+
+[targets]
+text = { id = "text" }
+
+[[step]]
+action = "tap"
+target = { xy = [100, 200] }
+'''
+"events.jsonl" = '''
+{"type":"meta","version":1,"platform":"ios","scale":3,"screen":[402,874],"fps":60,"sync":"simctl-start","sync_error_ms":4}
+{"type":"rects","t":0,"rects":{"text":[0,100,200,200]}}
+{"type":"tap","t":1000,"step":0,"at":[100,200],"target":[0,100,200,200]}
+{"type":"end","t":2800}
+'''
+
+[[case]]
+name   = "clip-text-scroll-sharp-mp4"
+why    = "moving coloured text must keep its strokes through the mp4 at the bytes clip-text-scroll-mp4-bytes holds"
+setup  = [
+  ["plate", "render", "--png", "{tmp:text.png}", "--size", "402x874", "--scale", "3", "{asset:clip-text.html}"],
+  ["ffmpeg", "-loop", "1", "-framerate", "60", "-t", "3", "-i", "{tmp:text.png}", "-vf", "scroll=v=0.002", "-c:v", "png", "{tmp:master.mov}"],
+  ["ffmpeg", "-i", "{tmp:master.mov}", "-vf", 'select=eq(n\,60),crop=600:600:0:300', "-frames:v", "1", "{tmp:truth.png}"],
+]
+run    = ["clip", "render", "--script", "{tmp:clip.toml}", "--master", "{tmp:master.mov}", "--events", "{tmp:events.jsonl}", "--out", "{tmp:out}"]
+post   = [
+  ["ffmpeg", "-i", "{tmp:out/text.mp4}", "-vf", 'select=eq(n\,60),scale=flags=accurate_rnd+full_chroma_int+bilinear', "-frames:v", "1", "{tmp:f.png}"],
+]
+metric = "detail"
+params = { a = "{tmp:f.png}", b = "{tmp:truth.png}", channel = "rgb-min", sigma = 3.0 }
+min    = 0.906
+
+[case.files]
+"clip.toml" = '''
+version  = 1
+name     = "text"
+platform = "ios"
+form     = "mobile"
+app      = "com.example.text"
+device   = "iPhone 17 Pro"
+state    = "text"
+fps      = 60
+
+[output]
+width   = 600
+formats = ["mp4", "webm"]
+
+[camera]
+mode   = "fixed"
+region = { target = "text" }
+
+[overlays]
+captions = false
+taps     = false
+
+[targets]
+text = { id = "text" }
+
+[[step]]
+action = "tap"
+target = { xy = [100, 200] }
+'''
+"events.jsonl" = '''
+{"type":"meta","version":1,"platform":"ios","scale":3,"screen":[402,874],"fps":60,"sync":"simctl-start","sync_error_ms":4}
+{"type":"rects","t":0,"rects":{"text":[0,100,200,200]}}
+{"type":"tap","t":1000,"step":0,"at":[100,200],"target":[0,100,200,200]}
+{"type":"end","t":2800}
+'''
+
+[[case]]
+name   = "clip-text-scroll-webm-bytes"
+why    = "the webm must stay at the bytes it was measured at on moving text: under half what VP9 at crf 32 wrote"
+setup  = [
+  ["plate", "render", "--png", "{tmp:text.png}", "--size", "402x874", "--scale", "3", "{asset:clip-text.html}"],
+  ["ffmpeg", "-loop", "1", "-framerate", "60", "-t", "3", "-i", "{tmp:text.png}", "-vf", "scroll=v=0.002", "-c:v", "png", "{tmp:master.mov}"],
+]
+run    = ["clip", "render", "--script", "{tmp:clip.toml}", "--master", "{tmp:master.mov}", "--events", "{tmp:events.jsonl}", "--out", "{tmp:out}"]
+metric = "json"
+params = { file = "{tmp:out/text.json}", field = "formats.webm.bytes" }
+max    = 354000
+
+[case.files]
+"clip.toml" = '''
+version  = 1
+name     = "text"
+platform = "ios"
+form     = "mobile"
+app      = "com.example.text"
+device   = "iPhone 17 Pro"
+state    = "text"
+fps      = 60
+
+[output]
+width   = 600
+formats = ["mp4", "webm"]
+
+[camera]
+mode   = "fixed"
+region = { target = "text" }
+
+[overlays]
+captions = false
+taps     = false
+
+[targets]
+text = { id = "text" }
+
+[[step]]
+action = "tap"
+target = { xy = [100, 200] }
+'''
+"events.jsonl" = '''
+{"type":"meta","version":1,"platform":"ios","scale":3,"screen":[402,874],"fps":60,"sync":"simctl-start","sync_error_ms":4}
+{"type":"rects","t":0,"rects":{"text":[0,100,200,200]}}
+{"type":"tap","t":1000,"step":0,"at":[100,200],"target":[0,100,200,200]}
+{"type":"end","t":2800}
+'''
+
+[[case]]
+name   = "clip-text-scroll-sharp-webm"
+why    = "moving coloured text must keep its strokes through the webm"
+setup  = [
+  ["plate", "render", "--png", "{tmp:text.png}", "--size", "402x874", "--scale", "3", "{asset:clip-text.html}"],
+  ["ffmpeg", "-loop", "1", "-framerate", "60", "-t", "3", "-i", "{tmp:text.png}", "-vf", "scroll=v=0.002", "-c:v", "png", "{tmp:master.mov}"],
+  ["ffmpeg", "-i", "{tmp:master.mov}", "-vf", 'select=eq(n\,60),crop=600:600:0:300', "-frames:v", "1", "{tmp:truth.png}"],
+]
+run    = ["clip", "render", "--script", "{tmp:clip.toml}", "--master", "{tmp:master.mov}", "--events", "{tmp:events.jsonl}", "--out", "{tmp:out}"]
+post   = [
+  ["ffmpeg", "-i", "{tmp:out/text.webm}", "-vf", 'select=eq(n\,60),scale=flags=accurate_rnd+full_chroma_int+bilinear', "-frames:v", "1", "{tmp:f.png}"],
+]
+metric = "detail"
+params = { a = "{tmp:f.png}", b = "{tmp:truth.png}", channel = "rgb-min", sigma = 3.0 }
+min    = 0.909
+
+[case.files]
+"clip.toml" = '''
+version  = 1
+name     = "text"
+platform = "ios"
+form     = "mobile"
+app      = "com.example.text"
+device   = "iPhone 17 Pro"
+state    = "text"
+fps      = 60
+
+[output]
+width   = 600
+formats = ["mp4", "webm"]
+
+[camera]
+mode   = "fixed"
+region = { target = "text" }
+
+[overlays]
+captions = false
+taps     = false
+
+[targets]
+text = { id = "text" }
+
+[[step]]
+action = "tap"
+target = { xy = [100, 200] }
+'''
+"events.jsonl" = '''
+{"type":"meta","version":1,"platform":"ios","scale":3,"screen":[402,874],"fps":60,"sync":"simctl-start","sync_error_ms":4}
+{"type":"rects","t":0,"rects":{"text":[0,100,200,200]}}
+{"type":"tap","t":1000,"step":0,"at":[100,200],"target":[0,100,200,200]}
+{"type":"end","t":2800}
+'''
+
 # clip-caption-sharp: the caption reference is plate's caption page over the
 # truth, rendered at 4x and shrunk to the output size; the measure is the
 # caption's box, 282x65 at 159,511.
@@ -884,7 +1093,7 @@ post   = [
 ]
 metric = "detail"
 params = { a = "{tmp:f-box.png}", b = "{tmp:ref-box.png}", channel = "rgb-min", sigma = 3.0 }
-min    = 0.852
+min    = 0.854
 
 [case.files]
 "clip.toml" = '''
