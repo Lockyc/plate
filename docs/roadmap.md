@@ -19,6 +19,7 @@ Phases in build order. Each ships when its acceptance gate passes.
 | 4 | Shipped | `v0.1.0` release | release gate green; README curated |
 | 5 | Not started | Regression check against the pipelines plate replaces, then each project's cutover | no measured regression; each cutover approved by its owner |
 | 6 | Shipped | Documents and PDFs: a PDF inspect command (metadata with a text-layer check, text, page renders, embedded images) and markdown to PDF with a neutral default document stylesheet, pandoc pinned | unit tests with stub engines; a rendered document checked page by page |
+| 7 | Shipped | Demo clips: `clip check` (the clip-script schema a runner reads) and `clip render` (trim, camera, overlays, loop, MP4/WebM/poster/WebP/GIF, measured checks), ffmpeg pinned | unit tests; `clip-*` quality cases at their recorded thresholds |
 
 **Phase 5 changes nothing in a consuming project until its owner approves
 that project's cutover.** The check runs plate beside the existing pipeline,
@@ -27,7 +28,7 @@ reading the project's assets without writing to its tree.
 ## Sequencing
 
 Phases run in order, except where one needs nothing from the phase before
-it: phase 6 adds commands and cuts no project over, so it runs
+it: phases 6 and 7 add commands and cut no project over, so they run
 independently of phase 5. Within a phase, order is open.
 
 ## Deferred
@@ -124,3 +125,36 @@ independently of phase 5. Within a phase, order is open.
   the one caller prints A5 flyers. Unlock: a caller with another size, then
   the sheet and grid as flags and as build options beside `2up`, each
   layout with its own `impose-halves` quality case.
+- **clip check accepts `ios` only.** `clip.Adapters` lists the platforms a
+  runner adapter exists for; the iOS one lives in a separate tool, not
+  plate. Unlock: a runner adapter for macos or android, then the platform
+  added to `clip.Adapters`.
+- **The desktop cursor travels on an eased path between action points.**
+  The event log carries actions, not pointer moves, so the drawn path is
+  not the real one. Unlock: an event-log version carrying pointer `move`
+  events, read by `clip.Timeline`.
+- **GIF goes through ffmpeg's palette pipeline.** Deferred because no case
+  shows it losing to gifski. Unlock: a `quality/` case where it measurably
+  does, then gifski pinned.
+- **Animated WebP frame times round to whole ms at 60 fps.** Deferred
+  because no caller needs exact WebP timing. Unlock: such a caller.
+- **Sharpness misses a magenta chroma smear.** Magenta keeps its strokes
+  through either smear `clip.MinSharpness` catches on the other colours
+  (see `sharpSigma` in internal/clip/measure.go), so a chroma-smearing
+  encode of magenta text passes. Deferred because the mp4 settings are
+  measured end to end and no colour but magenta slips through. Unlock: a
+  per-channel score that separates the magenta smear from a real encode,
+  measured on the `clip-text-*` cases.
+- **WebKit decodes the clip with a residual gap of about 0.037.** Deferred
+  because it sits under the colour tolerance the quality cases pin and no
+  caller sees it. Unlock: a measurement of the gap's source (decoder or
+  tagging), then the encode tagged or converted to close it.
+- **frame-code can miss an early frame.** The `frame-code` quality metric
+  reads a frame's code from a pixel strip, and a frame before the strip is
+  drawn reads as no code. Deferred because the cases that use it start
+  after the strip is up. Unlock: a case that needs the first frame, then
+  the metric reading the sidecar's start.
+- **Repeated quality fixtures are repeated.** The `clip-*` cases in
+  `quality/cases.toml` restate shared inputs. Deferred because only the
+  clip cases repeat them. Unlock: a case-include feature in the quality
+  runner once a second op needs it.
