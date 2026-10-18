@@ -1,6 +1,7 @@
 package quality
 
 import (
+	"encoding/json"
 	"fmt"
 	"image"
 	"math"
@@ -459,4 +460,44 @@ func diffPercent(p Params) (float64, error) {
 	}
 	res, _, _, err := diff.Compare(imgs[0], imgs[1], uint8(tol), int(shift), 1)
 	return res.Percent, err
+}
+
+func init() {
+	Metrics["json"] = jsonField
+}
+
+// jsonField is the number at field, a dotted path such as
+// formats.mp4.bytes, in the JSON document file: a measure a command writes
+// into its sidecar.
+func jsonField(p Params) (float64, error) {
+	path, err := p.Path("file")
+	if err != nil {
+		return 0, err
+	}
+	field := p.String("field", "")
+	if field == "" {
+		return 0, fmt.Errorf("json: want a field")
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return 0, err
+	}
+	var v any
+	if err := json.Unmarshal(b, &v); err != nil {
+		return 0, fmt.Errorf("%s: %w", path, err)
+	}
+	for _, k := range strings.Split(field, ".") {
+		m, ok := v.(map[string]any)
+		if !ok {
+			return 0, fmt.Errorf("json: %s: no field %q", path, field)
+		}
+		if v, ok = m[k]; !ok {
+			return 0, fmt.Errorf("json: %s: no field %q", path, field)
+		}
+	}
+	n, ok := v.(float64)
+	if !ok {
+		return 0, fmt.Errorf("json: %s: field %q is not a number", path, field)
+	}
+	return n, nil
 }
