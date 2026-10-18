@@ -104,7 +104,11 @@ type Script struct {
 type Problems []string
 
 func (p Problems) Error() string {
-	return fmt.Sprintf("%d problems:\n  %s", len(p), strings.Join(p, "\n  "))
+	noun := "problems"
+	if len(p) == 1 {
+		noun = "problem"
+	}
+	return fmt.Sprintf("%d %s:\n  %s", len(p), noun, strings.Join(p, "\n  "))
 }
 
 // stepFields is the fields each action takes, beyond the caption and
