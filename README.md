@@ -142,11 +142,8 @@ lists (`mp4`, `webm`, `poster.png` for `poster`, `webp`, `gif`), plus
 `<name>.json`: the clip's size, frame rate, frame count and duration, the
 span of the recording it shows, each file's size, and its sharpness and
 loop-seam scores. It prints `wrote <path> (<bytes> bytes)` for each file.
-The MP4 is H.264 4:2:0 tagged BT.709 primaries and matrix with the sRGB
-transfer, so Safari draws a colour as the page beside it does; it is muted,
-constant frame rate and faststart, so a web view or Electron autoplays it
-inline. A recording tagged Display P3, as the iOS simulator writes, is
-converted to BT.709 first.
+The MP4 is muted, constant frame rate and faststart, so a web view or Electron
+autoplays it inline, and it draws a colour as the page beside it does in Safari.
 The WebM is AV1, which Safari plays only on hardware with an AV1 decoder,
 so a page lists the MP4 as its fallback source.
 `--caption-css` loads after plate's caption style.

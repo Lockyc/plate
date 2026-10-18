@@ -163,12 +163,9 @@ colours, or renders what it is given.
   included, by the `clip-text-*` and `clip-caption-sharp` quality cases;
   the render's own sharpness check scores the encoder alone, against a
   lossless 4:2:0 copy (`clip.Lossless420`). `clip.MaxSeam` is measured by
-  `clip-loop-crossfade`. The MP4 is H.264 at `mp4CRF` with chroma QP
-  offset, tagged BT.709 with the sRGB transfer; a Display P3 master is
-  converted by the `colorspace` filter. WebM is AV1 and the MP4 its Safari
-  fallback. A static tail is held (`tpad`) and the log's `end` is
-  authoritative. An `xy` target is refused as a camera region or pin: a
-  point has no rect to sample.
+  `clip-loop-crossfade`. Codec, colour tagging, the hold of a static
+  tail and the refusals each live in the docblock of `clip.Encode`'s
+  `bt709`, `clip.ExtractFrames` and `validateRef`.
 - **inpaint, fonts, qr, pdf, impose, doc, slides** — as the README table and each package's
   doc comment describe.
 
