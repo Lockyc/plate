@@ -153,7 +153,9 @@ colours, or renders what it is given.
   enlarged separately.
 - **clip** — ffmpeg only decodes and encodes (`clip.ExtractActivity`,
   `clip.ExtractFrames`, `clip.Encode`); everything between is Go: the trim
-  (`clip.TrimWindow`), the camera (`clip.NewLayout`, `clip.Path`), the
+  (`clip.TrimWindow`) and its idle cuts (`clip.IdleCuts`, applied to the
+  frames by `clip.ApplyCuts` and to the log by `clip.CompressLog` before
+  anything reads its times), the camera (`clip.NewLayout`, `clip.Path`), the
   overlay timeline (`clip.Timeline`) and the composite (`clip.Compose`,
   through `clip.Resample`), which also closes the loop (`clip.closeLoop`,
   one of `clip.Loops`; a dip eases to `clip.ground`). Overlay sprites are

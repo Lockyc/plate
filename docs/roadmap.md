@@ -19,7 +19,7 @@ Phases in build order. Each ships when its acceptance gate passes.
 | 4 | Shipped | `v0.1.0` release | release gate green; README curated |
 | 5 | Not started | Regression check against the pipelines plate replaces, then each project's cutover | no measured regression; each cutover approved by its owner |
 | 6 | Shipped | Documents and PDFs: a PDF inspect command (metadata with a text-layer check, text, page renders, embedded images) and markdown to PDF with a neutral default document stylesheet, pandoc pinned | unit tests with stub engines; a rendered document checked page by page |
-| 7 | Shipped | Demo clips: `clip check` (the clip-script schema a runner reads) and `clip render` (trim, camera, overlays, a crossfaded or dipped loop, MP4/WebM/poster/WebP/GIF, measured checks), ffmpeg pinned | unit tests; `clip-*` quality cases at their recorded thresholds |
+| 7 | Shipped | Demo clips: `clip check` (the clip-script schema a runner reads) and `clip render` (trim, idle compression, camera, overlays, a crossfaded or dipped loop, MP4/WebM/poster/WebP/GIF, measured checks), ffmpeg pinned | unit tests; `clip-*` quality cases at their recorded thresholds |
 
 **Phase 5 changes nothing in a consuming project until its owner approves
 that project's cutover.** The check runs plate beside the existing pipeline,
