@@ -1,6 +1,7 @@
 package quality
 
 import (
+	"fmt"
 	"image"
 	"image/color"
 	"math"
@@ -317,5 +318,78 @@ func TestJSONMetric(t *testing.T) {
 		if v, err := Metrics["json"](Params{"file": p, "field": field}); err == nil {
 			t.Errorf("field %q = %v, want an error", field, v)
 		}
+	}
+}
+
+// codeFrames writes one PNG per code into dir, prefix%05d.png: a 12-cell
+// code strip (bit 0 leftmost, white for a 1) in the top half over grey.
+func codeFrames(t *testing.T, dir, prefix string, codes []int) string {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for i, c := range codes {
+		img := image.NewRGBA(image.Rect(0, 0, 120, 20))
+		for y := range 20 {
+			for x := range 120 {
+				v := uint8(128)
+				if y < 10 {
+					v = 16
+					if c>>(x/10)&1 == 1 {
+						v = 235
+					}
+				}
+				img.Set(x, y, color.RGBA{v, v, v, 255})
+			}
+		}
+		raster.SavePNG(filepath.Join(dir, fmt.Sprintf("%s%05d.png", prefix, i)), img)
+	}
+	return filepath.Join(dir, prefix+"*.png")
+}
+
+func TestFrameCode(t *testing.T) {
+	seq := func(a, b int) []int {
+		var s []int
+		for i := a; i <= b; i++ {
+			s = append(s, i)
+		}
+		return s
+	}
+	ms := func(frames float64) float64 { return frames * 1000 / 60 }
+	rows := []struct {
+		name        string
+		out, master []int
+		start, want float64
+	}{
+		{"steady", []int{5, 6, 7, 8}, seq(5, 8), ms(5), 0},
+		{"dup and drop", []int{5, 6, 6, 8}, seq(5, 8), ms(5), 2},
+		{"vfr hold", []int{5, 5, 5, 8}, []int{5, 8}, ms(5), 0},
+		{"anchored on time", []int{3, 3, 7, 8, 9}, append(seq(0, 3), seq(7, 10)...), ms(5), 0},
+	}
+	for _, r := range rows {
+		t.Run(r.name, func(t *testing.T) {
+			dir := t.TempDir()
+			p := Params{"frames": codeFrames(t, dir, "o", r.out), "master": codeFrames(t, dir, "m", r.master),
+				"y": 0.25, "master_y": 0.25, "start_ms": r.start}
+			v, err := Metrics["frame-code"](p)
+			if err != nil || v != r.want {
+				t.Fatalf("frame-code = %v, %v; want %v", v, err, r.want)
+			}
+		})
+	}
+}
+
+func TestFrameCodeSidecar(t *testing.T) {
+	dir := t.TempDir()
+	// The last two frames are the loop crossfade's: their codes are blends.
+	side := filepath.Join(dir, "clip.json")
+	os.WriteFile(side, []byte(`{"fps":60,"trim":{"start_ms":83.33333333333333,"end_ms":150},"crossfade_frames":2}`), 0o644)
+	p := Params{"frames": codeFrames(t, dir, "o", []int{5, 6, 7, 8, 0, 0}), "master": codeFrames(t, dir, "m", []int{5, 6, 7, 8, 9, 10}),
+		"y": 0.25, "master_y": 0.25, "sidecar": side}
+	if v, err := Metrics["frame-code"](p); err != nil || v != 0 {
+		t.Fatalf("frame-code = %v, %v", v, err)
+	}
+	if _, err := Metrics["frame-code"](Params{"frames": p["frames"], "master": p["master"], "y": 0.25, "master_y": 0.25}); err == nil {
+		t.Fatal("no start_ms or sidecar accepted")
 	}
 }

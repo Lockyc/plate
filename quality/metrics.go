@@ -6,6 +6,8 @@ import (
 	"image"
 	"math"
 	"os"
+	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -500,4 +502,147 @@ func jsonField(p Params) (float64, error) {
 		return 0, fmt.Errorf("json: %s: field %q is not a number", path, field)
 	}
 	return n, nil
+}
+
+func init() {
+	Metrics["frame-code"] = frameCode
+}
+
+// readCode reads a bits-cell binary code across row y (a fraction of the
+// height) from x0 to x1 (fractions of the width): cell i, bit i, is a 1
+// when the luma at its centre is above 0.5.
+func readCode(img *image.RGBA64, bits int, y, x0, x1 float64) int {
+	b := img.Bounds()
+	row := b.Min.Y + min(int(y*float64(b.Dy())), b.Dy()-1)
+	code := 0
+	for i := range bits {
+		fx := x0 + (float64(i)+0.5)*(x1-x0)/float64(bits)
+		col := b.Min.X + min(int(fx*float64(b.Dx())), b.Dx()-1)
+		if luma(img, col, row) > 0.5 {
+			code |= 1 << i
+		}
+	}
+	return code
+}
+
+// readCodes reads the code of every PNG glob matches, in name order.
+func readCodes(glob string, bits int, y, x0, x1 float64) ([]int, error) {
+	paths, err := filepath.Glob(glob)
+	if err != nil {
+		return nil, err
+	}
+	if len(paths) == 0 {
+		return nil, fmt.Errorf("frame-code: no file matches %s", glob)
+	}
+	out := make([]int, len(paths))
+	for i, p := range paths {
+		img, err := raster.Load(p)
+		if err != nil {
+			return nil, err
+		}
+		out[i] = readCode(img, bits, y, x0, x1)
+	}
+	return out, nil
+}
+
+// frameCode counts the duplicates and drops an output adds to a master
+// whose frames each carry their frame number as a code (frame n at
+// n·1000/master_fps ms, default 60 fps). Output frame k sits at start_ms +
+// k·1000/fps of master time, and expects the code of the latest master
+// frame (master: its frames decoded with -fps_mode passthrough) at or before
+// it, so a frame a variable-rate master holds is expected held. A duplicate
+// repeats its predecessor's code where the expected code advanced; a drop
+// is an expected code no output frame shows. The anchor is a time, never a
+// code read from the output. start_ms and fps come from params, or from
+// sidecar, a clip render's JSON (trim.start_ms, fps), which also excludes
+// its last crossfade_frames: the loop's crossfade blends them by design.
+func frameCode(p Params) (float64, error) {
+	bitsF, err := p.Float("bits", 12)
+	if err != nil {
+		return 0, err
+	}
+	bits := int(bitsF)
+	var f [6]float64
+	for i, k := range []struct {
+		key string
+		def float64
+	}{{"y", -1}, {"master_y", -1}, {"x0", 0}, {"x1", 1}, {"fps", 60}, {"master_fps", 60}} {
+		if f[i], err = p.Float(k.key, k.def); err != nil {
+			return 0, err
+		}
+	}
+	y, masterY, x0, x1, fps, masterFPS := f[0], f[1], f[2], f[3], f[4], f[5]
+	if y < 0 || y > 1 || masterY < 0 || masterY > 1 || x0 < 0 || x1 > 1 || x0 >= x1 || bits < 1 || bits > 30 {
+		return 0, fmt.Errorf("frame-code: want y and master_y in 0..1, 0 <= x0 < x1 <= 1 and bits 1-30")
+	}
+	start, err := p.Float("start_ms", math.NaN())
+	if err != nil {
+		return 0, err
+	}
+	tail := 0
+	if side, err := p.Path("sidecar"); err == nil {
+		b, err := os.ReadFile(side)
+		if err != nil {
+			return 0, err
+		}
+		var m struct {
+			FPS  float64 `json:"fps"`
+			Trim struct {
+				Start float64 `json:"start_ms"`
+			} `json:"trim"`
+			Crossfade int `json:"crossfade_frames"`
+		}
+		if err := json.Unmarshal(b, &m); err != nil {
+			return 0, fmt.Errorf("%s: %w", side, err)
+		}
+		start, fps, tail = m.Trim.Start, m.FPS, m.Crossfade
+	}
+	if math.IsNaN(start) || fps <= 0 || masterFPS <= 0 {
+		return 0, fmt.Errorf("frame-code: want start_ms or a sidecar, and fps > 0")
+	}
+	fg, err := p.Path("frames")
+	if err != nil {
+		return 0, err
+	}
+	mg, err := p.Path("master")
+	if err != nil {
+		return 0, err
+	}
+	got, err := readCodes(fg, bits, y, x0, x1)
+	if err != nil {
+		return 0, err
+	}
+	master, err := readCodes(mg, bits, masterY, x0, x1)
+	if err != nil {
+		return 0, err
+	}
+	if tail >= len(got) {
+		return 0, fmt.Errorf("frame-code: %d frames, %d of them crossfade", len(got), tail)
+	}
+	got = got[:len(got)-tail]
+	slices.Sort(master)
+	want := make([]int, len(got))
+	for k := range want {
+		// The latest master frame at or before t, in master frames; the
+		// epsilon absorbs a time that lands on a frame in floating point.
+		t := (start + float64(k)*1000/fps) * masterFPS / 1000
+		i, _ := slices.BinarySearch(master, int(math.Floor(t+1e-6))+1)
+		want[k] = master[max(i-1, 0)]
+	}
+	shown := map[int]bool{}
+	for _, c := range got {
+		shown[c] = true
+	}
+	var n int
+	for k := 1; k < len(got); k++ {
+		if got[k] == got[k-1] && want[k] != want[k-1] {
+			n++
+		}
+	}
+	for k, c := range want {
+		if (k == 0 || c != want[k-1]) && !shown[c] {
+			n++
+		}
+	}
+	return float64(n), nil
 }
