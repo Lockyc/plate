@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"math"
 	"os"
 	"path/filepath"
 	"slices"
@@ -17,16 +18,18 @@ import (
 	"github.com/lockyc/plate/internal/outdir"
 )
 
-// FormatResult is one written output: its file name in --out and its size.
+// FormatResult is one written output: its file name in --out, its size,
+// and for a video encode its Sharpness.
 type FormatResult struct {
-	File  string `json:"file"`
-	Bytes int64  `json:"bytes"`
+	File      string  `json:"file"`
+	Bytes     int64   `json:"bytes"`
+	Sharpness float64 `json:"sharpness,omitempty"`
 }
 
 // Measurement is the render's sidecar, <name>.json: the clip's shape, the
 // span of the master it shows, each output, and the measures its checks
-// hold. Sharpness is measured on the mp4, else the webm, and is 1 when the
-// clip has neither.
+// hold. Sharpness is the least of the video encodes' (sharpFormats), and
+// 1 when the clip has none.
 type Measurement struct {
 	Name            string                  `json:"name"`
 	Width           int                     `json:"width"`
@@ -195,18 +198,15 @@ func Render(ctx context.Context, o RenderOptions, warn io.Writer) (Measurement, 
 	if meas.LoopSeam, err = loopSeam(refs); err != nil {
 		return Measurement{}, err
 	}
-	meas.Sharpness = 1
-	for _, f := range []string{"mp4", "webm"} {
-		if r, ok := meas.Formats[f]; ok {
-			decDir, err := work("decoded")
-			if err != nil {
-				return Measurement{}, err
-			}
-			if meas.Sharpness, err = sharpness(ctx, filepath.Join(tmp, r.File), refs, decDir); err != nil {
-				return Measurement{}, err
-			}
-			break
+	err = scoreSharpness(&meas, func(file string) (float64, error) {
+		decDir, err := work("decoded-" + file)
+		if err != nil {
+			return 0, err
 		}
+		return sharpness(ctx, filepath.Join(tmp, file), refs, decDir)
+	})
+	if err != nil {
+		return Measurement{}, err
 	}
 	if err := check(ctx, s, meas, tmp); err != nil {
 		return meas, err
@@ -253,6 +253,41 @@ func sharpness(ctx context.Context, file string, refs []string, dir string) (flo
 	return Sharpness(want, got)
 }
 
+// sharpFormats are the encodes Sharpness scores: the video ones, whose
+// encoders lose fine detail. GIF and WebP are palette and still formats
+// with their own losses, unscored.
+var sharpFormats = []string{"mp4", "webm"}
+
+// scoreSharpness scores every video encode in meas with score (given its
+// file name), and sets meas.Sharpness to the least, or 1 with none.
+func scoreSharpness(meas *Measurement, score func(file string) (float64, error)) error {
+	meas.Sharpness = 1
+	for _, f := range sharpFormats {
+		r, ok := meas.Formats[f]
+		if !ok {
+			continue
+		}
+		v, err := score(r.File)
+		if err != nil {
+			return fmt.Errorf("%s: %w", f, err)
+		}
+		r.Sharpness = v
+		meas.Formats[f] = r
+		meas.Sharpness = math.Min(meas.Sharpness, v)
+	}
+	return nil
+}
+
+// checkSharpness holds each video encode to MinSharpness.
+func checkSharpness(meas Measurement) error {
+	for _, f := range sharpFormats {
+		if r, ok := meas.Formats[f]; ok && r.Sharpness < MinSharpness {
+			return fmt.Errorf("%s sharpness %.3f is below %.2f: the encode loses the frames' fine detail", f, r.Sharpness, MinSharpness)
+		}
+	}
+	return nil
+}
+
 // check holds the encodes to the floor and the measures to their limits:
 // the mp4 as ffprobe reads it, budget_kb, MinSharpness and MaxSeam.
 func check(ctx context.Context, s *Script, meas Measurement, tmp string) error {
@@ -264,8 +299,8 @@ func check(ctx context.Context, s *Script, meas Measurement, tmp string) error {
 			return fmt.Errorf("mp4 is %d KB, above budget_kb %d", kb, s.Output.BudgetKB)
 		}
 	}
-	if meas.Sharpness < MinSharpness {
-		return fmt.Errorf("sharpness %.3f is below %.2f: the encode loses the frames' fine detail", meas.Sharpness, MinSharpness)
+	if err := checkSharpness(meas); err != nil {
+		return err
 	}
 	if meas.LoopSeam > MaxSeam {
 		return fmt.Errorf("loop seam %.3g%% is above %.3g%%: the loop shows a cut", meas.LoopSeam, MaxSeam)
