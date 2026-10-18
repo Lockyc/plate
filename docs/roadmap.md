@@ -132,7 +132,7 @@ independently of phase 5. Within a phase, order is open.
 - **The desktop cursor travels on an eased path between action points.**
   The event log carries actions, not pointer moves, so the drawn path is
   not the real one. Unlock: an event-log version carrying pointer `move`
-  events, read by `clip.Timeline`.
+  events, read by `clip.ParseEvents` and drawn by `clip.Timeline`.
 - **GIF goes through ffmpeg's palette pipeline.** Deferred because no case
   shows it losing to gifski. Unlock: a `quality/` case where it measurably
   does, then gifski pinned.
@@ -145,10 +145,10 @@ independently of phase 5. Within a phase, order is open.
   measured end to end and no colour but magenta slips through. Unlock: a
   per-channel score that separates the magenta smear from a real encode,
   measured on the `clip-text-*` cases.
-- **WebKit decodes the clip with a residual gap of about 0.037.** Deferred
-  because it sits under the colour tolerance the quality cases pin and no
-  caller sees it. Unlock: a measurement of the gap's source (decoder or
-  tagging), then the encode tagged or converted to close it.
+- **WebKit's video path still differs from the decode reference.** The
+  residual after the sRGB tag is recorded at `bt709` in internal/clip/encode.go.
+  Deferred because the quality harness measures Chromium only. Unlock: a
+  WebKit-side measurement in the harness, then the encode tuned against it.
 - **frame-code can miss an early frame.** The `frame-code` quality metric
   reads a frame's code from a pixel strip, and a frame before the strip is
   drawn reads as no code. Deferred because the cases that use it start
