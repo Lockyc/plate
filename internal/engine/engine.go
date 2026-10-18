@@ -364,7 +364,8 @@ func Version(ctx context.Context, e pins.Engine) (string, error) {
 
 // Capable reports whether the engine build has c: c.Args run, and c.Token
 // appears in the output as a whole word. Like Version, the exit status is
-// ignored and stdout and stderr are read together.
+// ignored and stdout and stderr are read together. A run cut off by the
+// timeout or ctx is an error, not a build that lacks c.
 func Capable(ctx context.Context, e pins.Engine, c pins.Capability) (bool, error) {
 	path, err := Find(e)
 	if err != nil {
@@ -376,6 +377,9 @@ func Capable(ctx context.Context, e pins.Engine, c pins.Capability) (bool, error
 	killGroupOnCancel(cmd)
 	cmd.WaitDelay = time.Second
 	out, err := cmd.CombinedOutput()
+	if ctx.Err() != nil {
+		return false, fmt.Errorf("%s %s: timed out: %w", e.Name, strings.Join(c.Args, " "), ctx.Err())
+	}
 	var ee *exec.ExitError
 	if err != nil && !errors.As(err, &ee) {
 		return false, fmt.Errorf("%s: %w", e.Name, err)
