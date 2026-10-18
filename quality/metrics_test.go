@@ -252,6 +252,44 @@ func TestDetail(t *testing.T) {
 	if v, err := Metrics["detail"](Params{"a": small, "b": orig}); err == nil {
 		t.Errorf("mismatched sizes gave %v, want an error", v)
 	}
+	if v, err := Metrics["detail"](Params{"a": orig, "b": orig, "channel": "chroma"}); err == nil {
+		t.Errorf("an unknown channel gave %v, want an error", v)
+	}
+}
+
+func TestDetailRGBMin(t *testing.T) {
+	dir := t.TempDir()
+	save := func(name string, c color.RGBA) (string, *image.RGBA64) {
+		img := image.NewRGBA(image.Rect(0, 0, 16, 16))
+		for y := 0; y < 16; y++ {
+			for x := 0; x < 16; x++ {
+				if x%4 == 1 {
+					img.SetRGBA(x, y, c)
+				} else {
+					img.SetRGBA(x, y, color.RGBA{0, 0, 0, 255})
+				}
+			}
+		}
+		p := filepath.Join(dir, name)
+		raster.SavePNG(p, img)
+		rgba, err := raster.Load(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return p, rgba
+	}
+	b, bi := save("b.png", color.RGBA{255, 0, 255, 255})
+	a, ai := save("a.png", color.RGBA{255, 0, 96, 255})
+	want, err := raster.DetailMin(ai, bi, 2)
+	if err != nil || want >= 1 {
+		t.Fatalf("DetailMin = %v, %v", want, err)
+	}
+	if v, err := Metrics["detail"](Params{"a": a, "b": b, "channel": "rgb-min"}); err != nil || v != want {
+		t.Errorf("rgb-min = %v, %v; want raster.DetailMin's %v", v, err, want)
+	}
+	if v, err := Metrics["detail"](Params{"a": a, "b": b}); err != nil || v == want {
+		t.Errorf("luma = %v, %v; want a different score from rgb-min's %v", v, err, want)
+	}
 }
 
 func TestBytes(t *testing.T) {
