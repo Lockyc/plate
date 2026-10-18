@@ -18,9 +18,15 @@ import (
 // errEmptyWindow refuses a trim window with no frame in it.
 var errEmptyWindow = errors.New("the trim window is empty: nothing to render")
 
-// toRGB is the tail of every colour decode: BT.709 YCbCr in its tagged
+// toRGB is the tail of every master decode: BT.709 YCbCr in its tagged
 // range to 8-bit RGB.
 const toRGB = "scale=in_color_matrix=bt709:in_range=auto,format=rgb24"
+
+// toViewerRGB decodes an encode the way Chromium draws it: 4:2:0 chroma
+// interpolated bilinearly at every pixel. Chromium's frame matches it to
+// RMSE 0.0001, and swscale's default bicubic chroma to only 0.03, so a
+// measure on the default decode scores colour fringes no viewer sees.
+const toViewerRGB = "scale=in_color_matrix=bt709:in_range=auto:flags=accurate_rnd+full_chroma_int+bilinear,format=rgb24"
 
 // seconds formats a master time in ms as ffmpeg seconds, to the µs.
 func seconds(ms float64) string {
@@ -139,13 +145,14 @@ func ExtractFrames(ctx context.Context, master string, c Colour, w Window, fps i
 }
 
 // ExtractEncoded decodes frames indices (ascending) of an encoded clip to
-// RGB, e%05d.png in dir, in the order given.
+// RGB as a viewer sees them (toViewerRGB), e%05d.png in dir, in the order
+// given.
 func ExtractEncoded(ctx context.Context, file string, indices []int, dir string) ([]*image.RGBA64, error) {
 	terms := make([]string, len(indices))
 	for i, k := range indices {
 		terms[i] = fmt.Sprintf(`eq(n\,%d)`, k)
 	}
-	vf := "select=" + strings.Join(terms, "+") + "," + toRGB
+	vf := "select=" + strings.Join(terms, "+") + "," + toViewerRGB
 	paths, err := decode(ctx, file, vf, []string{"-fps_mode", "passthrough"}, len(indices), file, "e", dir)
 	if err != nil {
 		return nil, err
