@@ -2,6 +2,7 @@ package clip
 
 import (
 	"math"
+	"strings"
 	"testing"
 )
 
@@ -138,6 +139,11 @@ func TestKeyboardStripTakesRegionSpace(t *testing.T) {
 		if !near(v.RegionH+stripsH(v), 1048, 1e-9) {
 			t.Fatalf("frame %d: region %g + strips %g != 1048", k, v.RegionH, stripsH(v))
 		}
+		for _, p := range v.Pins {
+			if !near(p.Src.H/p.H, p.Src.W/600, 1e-12) {
+				t.Fatalf("frame %d: %s strip stretched, src %gx%g into 600x%g", k, p.Name, p.Src.W, p.Src.H, p.H)
+			}
+		}
 		switch {
 		case at <= 750:
 			if !near(v.RegionH, 955.46, 0.01) || len(v.Pins) != 1 || v.Pins[0].Name != "touchbar" {
@@ -217,6 +223,65 @@ func TestLayoutRefusesUpsampling(t *testing.T) {
 	want := "output.width 1440 px would sample below capture resolution: the master is 1206 px across, max_zoom 1.0"
 	if err == nil || err.Error() != want {
 		t.Errorf("err = %v, want %q", err, want)
+	}
+}
+
+func TestLayoutRefusesNarrowPin(t *testing.T) {
+	s := camScript(600, "fixed", &regionT, touchbarT)
+	l := camLog(rs(0, map[string]*Rect{"region": {0, 120, 402, 640}, "touchbar": {100, 812, 150, 62}}))
+	_, err := NewLayout(s, l, NewTrack(l))
+	want := "output.width 600 px would sample below capture resolution: pin touchbar is 450 px across at t=0 ms, max_zoom 1.0"
+	if err == nil || err.Error() != want {
+		t.Errorf("err = %v, want %q", err, want)
+	}
+}
+
+func TestZoomClampRefusesSqueezedRegion(t *testing.T) {
+	// No pins: clamped to 200 pt wide, the region is 1600 pt tall, and the
+	// screen's 874 would squeeze it to 109.25 pt.
+	s := camScript(600, "fixed", &regionT)
+	l := camLog(rs(0, map[string]*Rect{"region": {150, 30, 100, 800}}))
+	tr := NewTrack(l)
+	_, err := NewLayout(s, l, tr)
+	want := "camera region would sample below capture resolution at t=0 ms: 109.25 pt across, minimum 200 pt at max_zoom 1.0"
+	if err == nil || err.Error() != want {
+		t.Errorf("NewLayout err = %v, want %q", err, want)
+	}
+	if _, err := Path(s, l, tr, Layout{W: 600, H: 4800, RegionH: 4800}, Window{0, 100}); err == nil || err.Error() != want {
+		t.Errorf("Path err = %v, want %q", err, want)
+	}
+
+	// The keyboard rising pushes the touchbar to 498 and squeezes the region.
+	s = camScript(600, "fixed", &regionT, touchbarT, kbT)
+	down := map[string]*Rect{"touchbar": {0, 812, 402, 62}, "kb": nil}
+	l = camLog(
+		rs(0, map[string]*Rect{"region": {100, 20, 200, 750}, "touchbar": {0, 812, 402, 62}, "kb": nil}),
+		rs(750, down),
+		rs(1000, map[string]*Rect{"touchbar": {0, 498, 402, 62}, "kb": {0, 560, 402, 314}}),
+	)
+	_, err = NewLayout(s, l, NewTrack(l))
+	if prefix := "camera region would sample below capture resolution at t=1000 ms: "; err == nil || !strings.HasPrefix(err.Error(), prefix) {
+		t.Errorf("err = %v, want %q…", err, prefix)
+	}
+}
+
+func TestFollowReturnsToOpening(t *testing.T) {
+	// The tap at 400 leaves no room for a move from R0, so the clip opens
+	// on the union; the loop's return must land there, not on R0.
+	s, l := followFixture(
+		tap(400, Point{200, 200}, &Rect{150, 180, 100, 40}),
+		tap(3000, Point{340, 770}, &Rect{300, 750, 80, 40}),
+	)
+	_, vs := path(t, s, l, Window{0, 5000})
+	first, last := vs[0].Region, vs[len(vs)-1].Region
+	if rectNear(first, r0, 1e-9) {
+		t.Fatalf("clip opens on R0 %+v, want the union", first)
+	}
+	if !rectNear(last, first, 1e-9) {
+		t.Errorf("clip ends on %+v, opens on %+v", last, first)
+	}
+	if n := moves(vs); n != 2 {
+		t.Errorf("moves = %d, want 2", n)
 	}
 }
 

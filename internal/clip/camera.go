@@ -61,22 +61,27 @@ type camera struct {
 	tr     *Track
 	lay    Layout
 	screen Rect
-	minW   float64
+	zoom   float64
+	minW   float64 // the narrowest region max_zoom allows, pt
 }
 
 func newCamera(s *Script, l *Log, tr *Track, lay Layout) *camera {
 	return &camera{tr: tr, lay: lay,
 		screen: Rect{0, 0, l.Meta.Screen[0], l.Meta.Screen[1]},
-		minW:   float64(lay.W) / (*s.Camera.MaxZoom * l.Meta.Scale)}
+		zoom:   *s.Camera.MaxZoom,
+		minW:   float64(s.Output.Width) / (*s.Camera.MaxZoom * l.Meta.Scale)}
 }
 
-// pin is pin slot p at t; an element pin is always fully shown.
-func (c *camera) pin(p PinSlot, t float64) PinView {
+// pin is pin slot p at t, and its whole rect. An element pin is always
+// fully shown; a system pin's Src is the top Shown share of its rect, the
+// part that has risen into view, so Src keeps the strip's aspect.
+func (c *camera) pin(p PinSlot, t float64) (PinView, Rect) {
 	r, shown := c.tr.PinAt(p.Name, t)
 	if !p.System {
 		shown = 1
 	}
-	return PinView{Name: p.Name, Src: r, Shown: shown, H: shown * float64(c.lay.W) * r.H / r.W}
+	src := Rect{r.X, r.Y, r.W, r.H * shown}
+	return PinView{Name: p.Name, Src: src, Shown: shown, H: float64(c.lay.W) * src.H / src.W}, r
 }
 
 // strips stacks the shown pins at t about a region centred at cy, and gives
@@ -89,17 +94,17 @@ func (c *camera) strips(t, cy float64) (v View, bounds Rect) {
 	top, bottom := c.screen.Y, edge
 	total := 0.0
 	for _, p := range c.lay.Pins {
-		pv := c.pin(p, t)
+		pv, r := c.pin(p, t)
 		if pv.Shown <= 0 {
 			continue
 		}
 		total += pv.H
-		if pv.Src.Y+pv.Src.H/2 < cy {
+		if r.Y+r.H/2 < cy {
 			above = append(above, pv)
-			top = math.Max(top, c.screen.Y+pv.Shown*(pv.Src.Y+pv.Src.H-c.screen.Y))
+			top = math.Max(top, c.screen.Y+pv.Shown*(r.Y+r.H-c.screen.Y))
 		} else {
 			below = append(below, pv)
-			bottom = math.Min(bottom, edge+pv.Shown*(pv.Src.Y-edge))
+			bottom = math.Min(bottom, edge+pv.Shown*(r.Y-edge))
 		}
 	}
 	byY := func(ps []PinView) {
@@ -196,25 +201,23 @@ func NewLayout(s *Script, l *Log, tr *Track) (Layout, error) {
 		return Layout{}, errors.New("no rects sample")
 	}
 	w := s.Output.Width
-	zoom := *s.Camera.MaxZoom
-	minW := float64(w) / (zoom * l.Meta.Scale)
-	if l.Meta.Screen[0] < minW {
-		return Layout{}, fmt.Errorf("output.width %d px would sample below capture resolution: the master is %g px across, max_zoom %s",
-			w, l.Meta.Screen[0]*l.Meta.Scale, zoomString(zoom))
-	}
 	lay := Layout{W: w}
 	for _, p := range s.Camera.Pin {
 		lay.Pins = append(lay.Pins, PinSlot{Name: p.Name, System: p.System != ""})
 	}
-	c := &camera{tr: tr, lay: lay}
+	c := newCamera(s, l, tr, lay)
+	if c.screen.W < c.minW {
+		return Layout{}, fmt.Errorf("output.width %d px would sample below capture resolution: the master is %g px across, max_zoom %s",
+			w, c.screen.W*l.Meta.Scale, zoomString(c.zoom))
+	}
 	for _, e := range l.Events {
 		if e.Type != "rects" {
 			continue
 		}
 		for _, p := range lay.Pins {
-			if r := e.Rects[p.Name]; r != nil && r.W < minW {
+			if r := e.Rects[p.Name]; r != nil && r.W < c.minW {
 				return Layout{}, fmt.Errorf("output.width %d px would sample below capture resolution: pin %s is %g px across at t=%g ms, max_zoom %s",
-					w, p.Name, r.W*l.Meta.Scale, e.T, zoomString(zoom))
+					w, p.Name, r.W*l.Meta.Scale, e.T, zoomString(c.zoom))
 			}
 		}
 	}
@@ -226,7 +229,8 @@ func NewLayout(s *Script, l *Log, tr *Track) (Layout, error) {
 	lay.RegionH = int(math.Round(float64(w) * r.H / r.W))
 	lay.H = lay.RegionH
 	for _, p := range lay.Pins {
-		lay.H += int(math.Round(c.pin(p, tr.first).H))
+		pv, _ := c.pin(p, tr.first)
+		lay.H += int(math.Round(pv.H))
 	}
 	if lay.H%2 != 0 {
 		lay.RegionH++
@@ -241,7 +245,7 @@ func NewLayout(s *Script, l *Log, tr *Track) (Layout, error) {
 		var names []string
 		total := 0.0
 		for _, p := range lay.Pins {
-			if pv := c.pin(p, e.T); pv.Shown > 0 {
+			if pv, _ := c.pin(p, e.T); pv.Shown > 0 {
 				names = append(names, p.Name)
 				total += pv.H
 			}
@@ -255,7 +259,29 @@ func NewLayout(s *Script, l *Log, tr *Track) (Layout, error) {
 				word, strings.Join(names, ", "), e.T)
 		}
 	}
+
+	// The start state frames every sample in full and fixed mode; in follow
+	// it holds at least at the first, and Path checks every frame.
+	start := c.fit(r, tr.first)
+	for _, e := range l.Events {
+		if e.Type != "rects" || (s.Camera.Mode == "follow" && e.T != tr.first) {
+			continue
+		}
+		if err := c.sampled(c.view(start, e.T), e.T); err != nil {
+			return Layout{}, err
+		}
+	}
 	return lay, nil
+}
+
+// sampled refuses a frame whose region, squeezed by its bounds, is narrower
+// than the zoom clamp allows.
+func (c *camera) sampled(v View, t float64) error {
+	if v.Region.W < c.minW-1e-9 {
+		return fmt.Errorf("camera region would sample below capture resolution at t=%g ms: %g pt across, minimum %g pt at max_zoom %s",
+			t, v.Region.W, c.minW, zoomString(c.zoom))
+	}
+	return nil
 }
 
 // key is one camera move: depart from the previous key's state, arrive at g.
@@ -286,6 +312,9 @@ func Path(s *Script, l *Log, tr *Track, lay Layout, w Window) ([]View, error) {
 	for k := range vs {
 		t := w.Start + float64(k)*1000/fps
 		vs[k] = c.view(stateAt(keys, t), t)
+		if err := c.sampled(vs[k], t); err != nil {
+			return nil, err
+		}
 	}
 	return vs, nil
 }
@@ -321,9 +350,9 @@ func goalBox(e Event) (Rect, bool) {
 
 // follow appends a move per action whose padded target the camera does not
 // already frame, arriving lead before it; goals too close to fit a minMove
-// move merge, and a return to R0 lands as the loop crossfade starts.
+// move merge, and a return to the opening state lands as the loop
+// crossfade starts.
 func (c *camera) follow(l *Log, w Window, keys []key) []key {
-	home := keys[0].g
 	for _, e := range l.Events {
 		if _, ok := actionOf[e.Type]; !ok {
 			continue
@@ -352,7 +381,8 @@ func (c *camera) follow(l *Log, w Window, keys []key) []key {
 	if last := keys[len(keys)-1]; len(keys) > 1 {
 		arrive := w.End - crossfadeMS
 		if arrive-last.arrive >= minMove+400 {
-			keys = append(keys, key{math.Max(last.arrive, arrive-move), arrive, home})
+			// Home is where the clip opens, so the loop seam matches.
+			keys = append(keys, key{math.Max(last.arrive, arrive-move), arrive, keys[0].g})
 		}
 	}
 	return keys
