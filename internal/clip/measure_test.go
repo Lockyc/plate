@@ -1,11 +1,15 @@
 package clip
 
 import (
+	"context"
 	"image"
 	"image/color"
+	"math"
+	"path/filepath"
 	"reflect"
 	"testing"
 
+	"github.com/lockyc/plate/internal/engine"
 	"github.com/lockyc/plate/internal/raster"
 )
 
@@ -57,10 +61,10 @@ func TestSharpnessCatchesChromaSmear(t *testing.T) {
 	if err != nil || luma <= 0.95 {
 		t.Fatalf("luma Detail = %v, %v; want > 0.95", luma, err)
 	}
-	if s, err := Sharpness([]*image.RGBA64{ref}, []*image.RGBA64{got}); err != nil || s >= 0.8 {
-		t.Fatalf("Sharpness = %v, %v; want < 0.8", s, err)
+	if s, err := Sharpness([]*image.RGBA64{ref}, []*image.RGBA64{got}); err != nil || s >= MinSharpness {
+		t.Fatalf("Sharpness = %v, %v; want < MinSharpness", s, err)
 	}
-	if s, err := Sharpness([]*image.RGBA64{ref, ref}, []*image.RGBA64{ref, got}); err != nil || s >= 0.8 {
+	if s, err := Sharpness([]*image.RGBA64{ref, ref}, []*image.RGBA64{ref, got}); err != nil || s >= MinSharpness {
 		t.Fatalf("Sharpness over two frames = %v, %v; want the worse frame's", s, err)
 	}
 }
@@ -89,5 +93,91 @@ func TestSampleFrames(t *testing.T) {
 		if got := SampleFrames(n); !reflect.DeepEqual(got, want) {
 			t.Errorf("SampleFrames(%d) = %v, want %v", n, got, want)
 		}
+	}
+}
+
+// neonText is glyph-like strokes, about 39 px text's (3 px stems, rings
+// 20 px across), in c on #0a0a12, anti-aliased by 4×4 supersampling.
+func neonText(c color.RGBA64) *image.RGBA64 {
+	const w, h = 240, 60
+	ground := color.RGBA64{0x0a0a, 0x0a0a, 0x1212, 0xffff}
+	ink := func(x, y float64) bool {
+		for k := 0.0; k < 6; k++ {
+			ox := 14 + k*38
+			if d := math.Hypot(x-ox, y-30); d <= 10 && d >= 7 {
+				return true
+			}
+			if x >= ox+12 && x < ox+15 && y >= 12 && y < 41 {
+				return true
+			}
+			if y >= 44+math.Mod(k, 2) && y < 47+math.Mod(k, 2) && x >= ox-8 && x < ox+20 {
+				return true
+			}
+		}
+		return false
+	}
+	img := image.NewRGBA64(image.Rect(0, 0, w, h))
+	for y := range h {
+		for x := range w {
+			n := 0.0
+			for sy := range 4 {
+				for sx := range 4 {
+					if ink(float64(x)+(float64(sx)+0.5)/4, float64(y)+(float64(sy)+0.5)/4) {
+						n++
+					}
+				}
+			}
+			f := n / 16
+			mix := func(a, b uint16) uint16 { return uint16(math.Round(float64(a)*(1-f) + float64(b)*f)) }
+			img.SetRGBA64(x, y, color.RGBA64{mix(ground.R, c.R), mix(ground.G, c.G), mix(ground.B, c.B), 0xffff})
+		}
+	}
+	return img
+}
+
+// crf18 is img through the mp4 encode and the decode Sharpness reads it
+// back with.
+func crf18(t *testing.T, img *image.RGBA64) *image.RGBA64 {
+	t.Helper()
+	dir := t.TempDir()
+	savePNG(filepath.Join(dir, "r00000.png"), img)
+	b := img.Bounds()
+	mp4 := filepath.Join(dir, "c.mp4")
+	if err := Encode(context.Background(), "mp4", dir, 60, b.Dx(), b.Dy(), mp4); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ExtractEncoded(context.Background(), mp4, []int{0}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return got[0]
+}
+
+// TestSharpnessPassesNeonText: neon text on near black keeps its detail
+// through 4:2:0, lossless and at crf 18, above MinSharpness, though one of
+// its channels barely moves.
+func TestSharpnessPassesNeonText(t *testing.T) {
+	real := true
+	if _, err := engine.Resolve("ffmpeg"); err != nil {
+		real = false
+	} else if err := requireEncoders(context.Background(), []string{"mp4"}); err != nil {
+		real = false
+	}
+	for _, hex := range []uint32{0x00e5ff, 0xff2bd6, 0x39ff14, 0xffd400} {
+		c := color.RGBA64{uint16(hex>>16) * 0x101, uint16(hex>>8&0xff) * 0x101, uint16(hex&0xff) * 0x101, 0xffff}
+		ref := neonText(c)
+		encodes := map[string]*image.RGBA64{"lossless 4:2:0": subsample420(ref)}
+		if real {
+			encodes["crf 18"] = crf18(t, ref)
+		}
+		for name, got := range encodes {
+			s, err := Sharpness([]*image.RGBA64{ref}, []*image.RGBA64{got})
+			if err != nil || s < MinSharpness {
+				t.Errorf("#%06x %s: Sharpness = %.3f, %v; want ≥ %v", hex, name, s, err, MinSharpness)
+			}
+		}
+	}
+	if !real {
+		t.Log("no ffmpeg with libx264: crf 18 unchecked")
 	}
 }

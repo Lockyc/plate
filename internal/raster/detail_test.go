@@ -56,3 +56,23 @@ func TestDetailMinSkipsFlatChannels(t *testing.T) {
 		t.Fatalf("all flat: err = %v, want ErrNoDetail", err)
 	}
 }
+
+// TestDetailMinSkipsWeakChannels: neon green text on near black barely
+// moves blue, and a channel normalised by its own tiny energy scores any
+// codec noise orders of magnitude negative. A channel with under
+// weakChannel of the strongest channel's energy is left out.
+func TestDetailMinSkipsWeakChannels(t *testing.T) {
+	ref := lines(16, 8, color.RGBA64{0, 0xffff, 0x0400, 0xffff})
+	got := lines(16, 8, color.RGBA64{0, 0xffff, 0, 0xffff})
+	if v, _ := Detail(got, ref, 1, Blue); v > 0.5 {
+		t.Fatalf("blue alone = %v; the fixture should lose the weak channel", v)
+	}
+	if v, err := DetailMin(got, ref, 1); err != nil || v != 1 {
+		t.Fatalf("DetailMin = %v, %v; want green's 1, blue (under 5%% of green's energy) skipped", v, err)
+	}
+	// At 25% of the strongest a channel counts.
+	ref = lines(16, 8, color.RGBA64{0, 0xffff, 0x8000, 0xffff})
+	if v, _ := DetailMin(got, ref, 1); v != 0 {
+		t.Fatalf("DetailMin = %v; a channel well above 5%% must count, and blue was lost", v)
+	}
+}

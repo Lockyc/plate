@@ -13,9 +13,15 @@ import (
 // The render's checks: the least Sharpness an encode may score, and the
 // most LoopSeam a clip may show where it loops.
 const (
-	MinSharpness = 0.90
+	MinSharpness = 0.80
 	MaxSeam      = 1.0
 )
+
+// sharpSigma is the detail scale Sharpness scores, px: at 3, 4:2:0's loss
+// of a stroke's 1-px colour fringe weighs less than at 1, where lossless
+// 4:2:0 alone scored magenta text 0.48, while a 1-px coloured line's smear
+// still scores far below MinSharpness.
+const sharpSigma = 3
 
 // Seam is the percent of pixels that differ between a and b, plate diff's
 // measure at tolerance 28 with no shift search: how visible the cut is
@@ -45,8 +51,8 @@ func SampleFrames(n int) []int {
 }
 
 // Sharpness is how much of the reference frames' fine detail the encoded
-// frames keep: the least raster.DetailMin(got[i], refs[i], 1) over the
-// SampleFrames pairs given. A pair with no fine detail is skipped, so 1
+// frames keep: the least raster.DetailMin(got[i], refs[i], sharpSigma) over
+// the SampleFrames pairs given. A pair with no fine detail is skipped, so 1
 // means none had any to lose. Pairs that differ in size or count are an
 // error: a bad decode, not a soft encode.
 func Sharpness(refs, got []*image.RGBA64) (float64, error) {
@@ -55,7 +61,7 @@ func Sharpness(refs, got []*image.RGBA64) (float64, error) {
 	}
 	least := 1.0
 	for i := range refs {
-		v, err := raster.DetailMin(got[i], refs[i], 1)
+		v, err := raster.DetailMin(got[i], refs[i], sharpSigma)
 		if errors.Is(err, raster.ErrNoDetail) {
 			continue
 		}
