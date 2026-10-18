@@ -634,3 +634,30 @@ func TestRenderExplicitZeroQualityNeedsJPEG(t *testing.T) {
 		t.Errorf("code %d, want 2", code)
 	}
 }
+
+func TestPNGAlphaIsTransparent(t *testing.T) {
+	e := setup(t, 200, 100)
+	if err := PNGAlpha(context.Background(), e.page, e.out("a.png"), 100, 50, 2); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(chromeArgs(t, e), "--default-background-color=00000000") {
+		t.Errorf("chrome args %q lack the transparent background", chromeArgs(t, e))
+	}
+}
+
+func TestPNGAlphaRefusesOpaqueResult(t *testing.T) {
+	e := setup(t, 200, 100)
+	p := filepath.Join(t.TempDir(), "opaque.png")
+	f, _ := os.Create(p)
+	img := image.NewRGBA(image.Rect(0, 0, 200, 100))
+	for i := 3; i < len(img.Pix); i += 4 {
+		img.Pix[i] = 255
+	}
+	png.Encode(f, img)
+	f.Close()
+	t.Setenv("FIXTURE_PNG", p)
+	err := PNGAlpha(context.Background(), e.page, e.out("a.png"), 100, 50, 2)
+	if err == nil || !strings.Contains(err.Error(), "alpha") || exists(e.out("a.png")) {
+		t.Errorf("err %v, file left: %v", err, exists(e.out("a.png")))
+	}
+}

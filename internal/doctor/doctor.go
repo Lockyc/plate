@@ -122,6 +122,17 @@ func check(ctx context.Context, e pins.Engine) status {
 		s.note = "too old: " + e.Hint()
 		return s
 	}
+	for _, c := range e.Capabilities {
+		has, err := engine.Capable(ctx, e, c)
+		if err != nil {
+			s.note = err.Error()
+			return s
+		}
+		if !has {
+			s.note = "missing " + c.Token + " (" + c.For + ")"
+			return s
+		}
+	}
 	s.note, s.ok = "ok", true
 	return s
 }

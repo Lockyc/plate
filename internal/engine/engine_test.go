@@ -278,3 +278,18 @@ func TestRunAllowExitStillFailsOnTimeout(t *testing.T) {
 		t.Error("a timeout must fail even with AllowExit")
 	}
 }
+
+func TestCapable(t *testing.T) {
+	e := pins.Engine{Name: "ffmpeg", Kind: pins.Minimum}
+	enginetest.Stub(t, "ffmpeg", "echo ' V....D libx264   libx264 H.264'")
+	for token, want := range map[string]bool{"libx264": true, "libx26": false} {
+		got, err := engine.Capable(ctx, e, pins.Capability{Args: []string{"-encoders"}, Token: token, For: "x"})
+		if err != nil || got != want {
+			t.Errorf("Capable(%q) = %v, %v; want %v", token, got, err, want)
+		}
+	}
+	enginetest.Stub(t, "ffmpeg", "echo libx264; exit 1")
+	if got, err := engine.Capable(ctx, e, pins.Capability{Args: []string{"-encoders"}, Token: "libx264", For: "x"}); err != nil || !got {
+		t.Errorf("exit status 1 with the token printed: %v, %v; want true", got, err)
+	}
+}

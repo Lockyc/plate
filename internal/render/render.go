@@ -310,6 +310,16 @@ func PDF(ctx context.Context, page, out string, warn io.Writer) error {
 // PNG renders the page at path (a file or URL) to a w×h CSS px PNG at out,
 // at device scale factor scale, under the checks `plate render --png` runs.
 func PNG(ctx context.Context, page, out string, w, h int, scale float64) error {
+	return pageToPNG(ctx, page, out, w, h, scale, false)
+}
+
+// PNGAlpha is PNG with the page's transparent areas left transparent, under
+// the checks `plate render --png --transparent` runs.
+func PNGAlpha(ctx context.Context, page, out string, w, h int, scale float64) error {
+	return pageToPNG(ctx, page, out, w, h, scale, true)
+}
+
+func pageToPNG(ctx context.Context, page, out string, w, h int, scale float64, transparent bool) error {
 	if w <= 0 || h <= 0 || !(scale > 0) || math.IsInf(scale, 0) {
 		return fmt.Errorf("render %dx%d at scale %g: want a positive size and scale", w, h, scale)
 	}
@@ -317,7 +327,7 @@ func PNG(ctx context.Context, page, out string, w, h int, scale float64) error {
 	if err != nil {
 		return err
 	}
-	_, _, err = job{url: u, local: local, query: query, png: out, w: w, h: h, scale: scale, budget: DefaultBudget, warn: io.Discard}.run(ctx)
+	_, _, err = job{url: u, local: local, query: query, png: out, w: w, h: h, scale: scale, transparent: transparent, budget: DefaultBudget, warn: io.Discard}.run(ctx)
 	return err
 }
 

@@ -362,6 +362,27 @@ func Version(ctx context.Context, e pins.Engine) (string, error) {
 	return string(m[1]), nil
 }
 
+// Capable reports whether the engine build has c: c.Args run, and c.Token
+// appears in the output as a whole word. Like Version, the exit status is
+// ignored and stdout and stderr are read together.
+func Capable(ctx context.Context, e pins.Engine, c pins.Capability) (bool, error) {
+	path, err := Find(e)
+	if err != nil {
+		return false, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, path, c.Args...)
+	killGroupOnCancel(cmd)
+	cmd.WaitDelay = time.Second
+	out, err := cmd.CombinedOutput()
+	var ee *exec.ExitError
+	if err != nil && !errors.As(err, &ee) {
+		return false, fmt.Errorf("%s: %w", e.Name, err)
+	}
+	return regexp.MustCompile(`(?m)\b` + regexp.QuoteMeta(c.Token) + `\b`).Match(out), nil
+}
+
 func lastLines(s string, n int) string {
 	lines := strings.Split(strings.TrimSpace(s), "\n")
 	if len(lines) > n {

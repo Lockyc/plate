@@ -20,6 +20,8 @@ func TestAtLeast(t *testing.T) {
 		{"0.12.19", "0.12.0", true},
 		{"0.11.9", "0.12.0", false},
 		{"6.4", "5.9", true},
+		{"9.0.2", "7.1", true},
+		{"7.0.2", "7.1", false},
 	}
 	for _, c := range cases {
 		if got := AtLeast(c.have, c.min); got != c.want {
@@ -36,6 +38,11 @@ func TestTableIsWellFormed(t *testing.T) {
 			t.Errorf("%s: listed twice", e.Name)
 		}
 		seen[e.Name] = true
+		for _, c := range e.Capabilities {
+			if len(c.Args) == 0 || c.Token == "" || c.For == "" {
+				t.Errorf("%s: capability %+v needs Args, Token and For", e.Name, c)
+			}
+		}
 		if len(e.UsedBy) == 0 {
 			t.Errorf("%s: UsedBy is empty; an engine nothing uses does not belong in the table", e.Name)
 		}
@@ -69,7 +76,7 @@ func TestTableIsWellFormed(t *testing.T) {
 			}
 		}
 	}
-	for _, name := range []string{"magick", "gs", "pdfinfo", "pdffonts", "pdfimages", "pdftotext", "pdftoppm", "pandoc", "hb-subset", "qpdf", "qrencode", "uv", "swiftc", "chrome-headless-shell"} {
+	for _, name := range []string{"magick", "gs", "pdfinfo", "pdffonts", "pdfimages", "pdftotext", "pdftoppm", "pandoc", "hb-subset", "qpdf", "qrencode", "uv", "swiftc", "chrome-headless-shell", "ffmpeg", "ffprobe"} {
 		if _, ok := Lookup(name); !ok {
 			t.Errorf("Lookup(%q) failed", name)
 		}
