@@ -30,7 +30,8 @@ type FormatResult struct {
 // span of the master it shows, each output, and the measures its checks
 // hold. Sharpness is the least of the video encodes' (sharpFormats), and
 // 1 when the clip has none. The loop frames are LoopClose's: the frames at
-// each end the loop close altered.
+// each end the loop close altered. Trim is the master span before IdleCuts;
+// RemovedMS is how much of it the cuts dropped.
 type Measurement struct {
 	Name           string                  `json:"name"`
 	Width          int                     `json:"width"`
@@ -39,6 +40,7 @@ type Measurement struct {
 	Frames         int                     `json:"frames"`
 	DurationMS     float64                 `json:"duration_ms"`
 	Trim           Window                  `json:"trim"`
+	RemovedMS      float64                 `json:"removed_ms"`
 	Formats        map[string]FormatResult `json:"formats"`
 	Sharpness      float64                 `json:"sharpness"`
 	LoopSeam       float64                 `json:"loop_seam"`
@@ -135,10 +137,26 @@ func Render(ctx context.Context, o RenderOptions, warn io.Writer) (Measurement, 
 	if s.Camera.Mode == "follow" {
 		head = FollowHead()
 	}
-	w := TrimWindow(l, Activity(act), fps, head)
-	if w.Frames(fps) <= 0 {
+	activity := Activity(act)
+	trim := TrimWindow(l, activity, fps, head)
+	if trim.Frames(fps) <= 0 {
 		return Measurement{}, errEmptyWindow
 	}
+
+	masterDir, err := work("master")
+	if err != nil {
+		return Measurement{}, err
+	}
+	frames, err := ExtractFrames(ctx, o.Master, m.Colour, trim, fps, masterDir)
+	if err != nil {
+		return Measurement{}, err
+	}
+	frames, cuts, err := ApplyCuts(frames, trim, fps, IdleCuts(s, l, activity, trim, fps))
+	if err != nil {
+		return Measurement{}, err
+	}
+	// From here the log and the window are on the cut timeline.
+	l, w := CompressLog(l, cuts), Compress(trim, cuts)
 
 	tr := NewTrack(l)
 	lay, err := NewLayout(s, l, tr)
@@ -162,14 +180,6 @@ func Render(ctx context.Context, o RenderOptions, warn io.Writer) (Measurement, 
 		return Measurement{}, err
 	}
 
-	masterDir, err := work("master")
-	if err != nil {
-		return Measurement{}, err
-	}
-	frames, err := ExtractFrames(ctx, o.Master, m.Colour, w, fps, masterDir)
-	if err != nil {
-		return Measurement{}, err
-	}
 	refDir, err := work("refs")
 	if err != nil {
 		return Measurement{}, err
@@ -180,7 +190,7 @@ func Render(ctx context.Context, o RenderOptions, warn io.Writer) (Measurement, 
 	}
 
 	meas := Measurement{Name: s.Name, Width: lay.W, Height: lay.H, FPS: fps, Frames: len(refs),
-		DurationMS: float64(len(refs)) * 1000 / float64(fps), Trim: w,
+		DurationMS: float64(len(refs)) * 1000 / float64(fps), Trim: trim, RemovedMS: Removed(cuts),
 		Formats: map[string]FormatResult{}, LoopHeadFrames: lc.Head, LoopTailFrames: lc.Tail}
 	var files []string
 	for _, f := range s.Output.Formats {

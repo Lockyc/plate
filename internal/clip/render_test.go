@@ -155,7 +155,7 @@ func TestMeasurementJSONShape(t *testing.T) {
 		keys = append(keys, k)
 	}
 	slices.Sort(keys)
-	want := []string{"duration_ms", "formats", "fps", "frames", "height", "loop_head_frames", "loop_seam", "loop_tail_frames", "name", "sharpness", "trim", "width"}
+	want := []string{"duration_ms", "formats", "fps", "frames", "height", "loop_head_frames", "loop_seam", "loop_tail_frames", "name", "removed_ms", "sharpness", "trim", "width"}
 	if !reflect.DeepEqual(keys, want) {
 		t.Fatalf("keys = %q, want %q", keys, want)
 	}
