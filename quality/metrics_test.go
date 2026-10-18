@@ -418,3 +418,53 @@ func TestFrameCodeSidecar(t *testing.T) {
 		}
 	}
 }
+
+// twoBlockFrames writes one 20x10 frame per pair of levels: the left half
+// at the first, the right at the second, out of a ground of 16.
+func twoBlockFrames(t *testing.T, dir string, levels [][2]uint8) string {
+	t.Helper()
+	for i, l := range levels {
+		img := image.NewRGBA(image.Rect(0, 0, 20, 10))
+		for y := range 10 {
+			for x := range 20 {
+				v := l[x/10]
+				img.Set(x, y, color.RGBA{v, v, v, 255})
+			}
+		}
+		if err := raster.SavePNG(filepath.Join(dir, fmt.Sprintf("f%05d.png", i)), img); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return filepath.Join(dir, "f*.png")
+}
+
+func TestDoubleExposure(t *testing.T) {
+	ab := Params{"a": "0,0,0.5,1", "b": "0.5,0,0.5,1", "ground": "#101010"}
+	with := func(frames string) Params {
+		q := Params{"frames": frames}
+		for k, v := range ab {
+			q[k] = v
+		}
+		return q
+	}
+	// A dip: the left block fades out to the ground, then the right fades in.
+	dip := twoBlockFrames(t, t.TempDir(), [][2]uint8{{230, 16}, {120, 16}, {16, 16}, {16, 120}, {16, 230}})
+	if v, err := Metrics["double-exposure"](with(dip)); err != nil || v != 0 {
+		t.Fatalf("dip: double-exposure = %v, %v; want 0", v, err)
+	}
+	// A crossfade: the middle frame shows both at half strength.
+	fade := twoBlockFrames(t, t.TempDir(), [][2]uint8{{230, 16}, {123, 123}, {16, 230}})
+	v, err := Metrics["double-exposure"](with(fade))
+	if want := (123.0 - 16) / 255; err != nil || math.Abs(v-want) > 1e-9 {
+		t.Fatalf("crossfade: double-exposure = %v, %v; want %v", v, err, want)
+	}
+	for name, q := range map[string]Params{
+		"no frames":  with(filepath.Join(t.TempDir(), "f*.png")),
+		"bad region": {"frames": dip, "a": "0,0,2,1", "b": "0.5,0,0.5,1", "ground": "#101010"},
+		"no ground":  {"frames": dip, "a": "0,0,0.5,1", "b": "0.5,0,0.5,1"},
+	} {
+		if _, err := Metrics["double-exposure"](q); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+}
