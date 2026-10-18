@@ -18,10 +18,6 @@ import (
 	"github.com/lockyc/plate/internal/atomicfile"
 )
 
-// cleanSeam is the loop-seam score, percent, at or under which a clip loops
-// as it is; above it the tail crossfades into the first frame.
-const cleanSeam = 0.2
-
 // maxWorkers caps Compose's parallelism: each worker holds a master frame
 // and its output in 16 bits, about 100 MB at phone capture size.
 const maxWorkers = 8
@@ -218,8 +214,9 @@ func composeFrame(in, out string, scale float64, lay Layout, v View, ops []Op, s
 }
 
 // closeLoop measures the seam from the last frame back to the first and,
-// when it shows, blends the last n frames toward the first, frame i of n
-// at weight i/(n+1).
+// when it is above MaxSeam, the most a loop may show, blends the last n
+// frames toward the first, frame i of n at weight i/(n+1); at or under it
+// the clip loops as it is.
 func closeLoop(refs []string, fps int) (int, error) {
 	first, err := loadRGBA64(refs[0])
 	if err != nil {
@@ -233,7 +230,7 @@ func closeLoop(refs []string, fps int) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	if seam <= cleanSeam {
+	if seam <= MaxSeam {
 		return 0, nil
 	}
 	n := min(int(math.Round(crossfadeMS*float64(fps)/1000)), len(refs)-1)

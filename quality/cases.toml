@@ -1150,8 +1150,9 @@ body { background: url(truth.png) 0 0 / 600px 600px; image-rendering: pixelated;
 # over a cyan box swinging sideways, 6 s at 60 fps, lossless RGB. The strip
 # is a camera pin, so every frame of the clip shows a master frame's code;
 # frame-code counts the duplicates and drops render adds against the master
-# decoded passthrough. The output is 1080 px wide and the strip's centre
-# row sits at 0.0148 of its 2420 px height.
+# decoded passthrough. The output frame is 1080x2420: the strip, 72 px,
+# over the region's 2348 px slot, so the strip's centre row sits at 0.0148
+# of the frame's height.
 
 [[case]]
 name   = "clip-follow-frame-steps"
@@ -1331,11 +1332,9 @@ target = { xy = [340, 800] }
 '''
 
 # clip loop: a pale square slides 300 px/s across the dark ground for the
-# whole 3 s master, so its last frame is far from its first. The seam bound
-# is 1.5 times the median change between the clip's own consecutive frames,
-# its crossfade excluded, measured from the decoded mp4 (a median of
-# 0.1339%, so 0.2009%): a loop's cut may jump no more than a frame and a
-# half of the clip's own motion. That bound is MaxSeam.
+# whole 3 s master, so its last frame is far from its first. Its body sets
+# clip.MaxSeam (the derivation is MaxSeam's docblock), and the seam bound
+# below is that bound rounded toward failing.
 
 [[case]]
 name   = "clip-loop-crossfade"

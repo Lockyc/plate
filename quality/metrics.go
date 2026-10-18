@@ -553,8 +553,8 @@ func readCodes(glob string, bits int, y, x0, x1 float64) ([]int, error) {
 // it, so a frame a variable-rate master holds is expected held. A duplicate
 // repeats its predecessor's code where the expected code advanced; a drop
 // is an expected code no output frame shows. The anchor is a time, never a
-// code read from the output. start_ms and fps come from params, or from
-// sidecar, a clip render's JSON (trim.start_ms, fps), which also excludes
+// code read from the output. start_ms and fps come from params or, never
+// alongside them, from sidecar, a clip render's JSON (trim.start_ms, fps), which also excludes
 // its last crossfade_frames: the loop's crossfade blends them by design.
 func frameCode(p Params) (float64, error) {
 	bitsF, err := p.Float("bits", 12)
@@ -580,7 +580,16 @@ func frameCode(p Params) (float64, error) {
 		return 0, err
 	}
 	tail := 0
-	if side, err := p.Path("sidecar"); err == nil {
+	if _, ok := p["sidecar"]; ok {
+		side, err := p.Path("sidecar")
+		if err != nil {
+			return 0, err
+		}
+		for _, k := range []string{"start_ms", "fps"} {
+			if _, ok := p[k]; ok {
+				return 0, fmt.Errorf("frame-code: give sidecar or %s, not both", k)
+			}
+		}
 		b, err := os.ReadFile(side)
 		if err != nil {
 			return 0, err

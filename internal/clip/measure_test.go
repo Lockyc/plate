@@ -223,7 +223,7 @@ func TestSharpnessPassesNeonText(t *testing.T) {
 }
 
 // neutralBesideCyan is a white block in a black strip above a cyan box on
-// #0a0a12, as the clip-follow-sharp-600 case frames them: neutral detail
+// #0a0a12, as the clip-sharp-neutral-beside-cyan case frames them: neutral detail
 // gives the red channel its energy while 4:2:0 adds red at the cyan edge.
 func neutralBesideCyan() *image.RGBA64 {
 	img := solid(600, 400, color.RGBA64{0x0a0a, 0x0a0a, 0x1212, 0xffff})
