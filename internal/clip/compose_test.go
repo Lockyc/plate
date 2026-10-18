@@ -121,6 +121,32 @@ func TestComposeOverlayOpacity(t *testing.T) {
 	checkRows(t, readRGBA64(t, refs[0]), 0, 8, grey(0.5), "white at 0.5 over black")
 }
 
+func TestComposeFullFrameSpriteLandsOnWholePixels(t *testing.T) {
+	lay := Layout{W: 8, H: 12, RegionH: 12}
+	views := []View{{Region: Rect{0, 0, 8, 12}, RegionH: 12}}
+	caption := solid(8, 12, color.RGBA64{})
+	fill(caption, image.Rect(2, 3, 6, 5), grey(1))
+	ops := [][]Op{{{Key: "caption-0", Y: -1.5, Scale: 1, Opacity: 1}}}
+	refs, _, err := Compose(context.Background(), sources(t, solid(8, 12, grey(0))), 60, 1, lay, views, ops,
+		map[string]*image.RGBA64{"caption-0": caption}, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	img := readRGBA64(t, refs[0])
+	// Y -1.5 rounds to -2 (half away from zero), as the region's rows round.
+	for y := range 12 {
+		for x := range 8 {
+			want := 0.0
+			if x >= 2 && x < 6 && y >= 1 && y < 3 {
+				want = 1
+			}
+			if v := level(img, x, y); v != want {
+				t.Fatalf("(%d,%d) = %.4f, want %g: the caption was resampled, not placed", x, y, v, want)
+			}
+		}
+	}
+}
+
 func TestComposePointSpriteCentredAndScaled(t *testing.T) {
 	lay := Layout{W: 40, H: 40, RegionH: 40}
 	v := View{Region: Rect{0, 0, 40, 40}, RegionH: 40}

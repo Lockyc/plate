@@ -22,6 +22,10 @@ import (
 // as it is; above it the tail crossfades into the first frame.
 const cleanSeam = 0.2
 
+// maxWorkers caps Compose's parallelism: each worker holds a master frame
+// and its output in 16 bits, about 100 MB at phone capture size.
+const maxWorkers = 8
+
 func loadImage(path string) (image.Image, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -111,6 +115,11 @@ func (s *sprite) draw(dst *image.RGBA64, op Op) {
 	if s.point {
 		x, y = x-w/2, y-h/2
 	}
+	if f == 1 {
+		// At its rendered size a sprite lands on whole pixels, rounded as
+		// the region's rows are, so a caption easing with a strip stays sharp.
+		x, y = math.Round(x), math.Round(y)
+	}
 	box := image.Rect(int(math.Floor(x)), int(math.Floor(y)), int(math.Ceil(x+w)), int(math.Ceil(y+h))).Intersect(dst.Bounds())
 	if box.Empty() {
 		return
@@ -155,7 +164,7 @@ func Compose(ctx context.Context, frames []string, fps int, scale float64, lay L
 	defer cancel(nil)
 	jobs := make(chan int)
 	var wg sync.WaitGroup
-	for range runtime.NumCPU() {
+	for range min(runtime.NumCPU(), maxWorkers) {
 		wg.Go(func() {
 			for k := range jobs {
 				if ctx.Err() == nil {

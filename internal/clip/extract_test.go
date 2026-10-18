@@ -2,7 +2,9 @@ package clip
 
 import (
 	"context"
+	"fmt"
 	"image"
+	"image/color"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -10,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lockyc/plate/internal/engine"
 	"github.com/lockyc/plate/internal/enginetest"
 )
 
@@ -50,9 +53,9 @@ func TestExtractFramesArgs(t *testing.T) {
 		t.Fatalf("output pattern %q is not in a temporary directory under %s", tmp, dir)
 	}
 	want := []string{"-hide_banner", "-loglevel", "error", "-nostdin",
-		"-ss", "1.0333", "-i", "raw.mov",
+		"-i", "raw.mov",
 		"-vf", "fps=60:round=down,scale=in_color_matrix=bt709:in_range=auto,format=rgb24",
-		"-fps_mode", "cfr", "-frames:v", "30", "-start_number", "0", tmp}
+		"-fps_mode", "cfr", "-ss", "1", "-frames:v", "30", "-start_number", "0", tmp}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("argv = %q\nwant   %q", got, want)
 	}
@@ -103,7 +106,7 @@ for i in 0 1 2; do cp "$GRAY" "$(printf "$pat" $i)"; done`)
 	}
 	got := enginetest.Calls(t, log)[0]
 	want := []string{"-hide_banner", "-loglevel", "error", "-nostdin",
-		"-ss", "0.0333", "-i", "raw.mov",
+		"-i", "raw.mov",
 		"-vf", "fps=60:round=down,scale=200:-2,format=gray",
 		"-fps_mode", "cfr", "-start_number", "0", got[len(got)-1]}
 	if !reflect.DeepEqual(got, want) {
@@ -111,5 +114,57 @@ for i in 0 1 2; do cp "$GRAY" "$(printf "$pat" $i)"; done`)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "a00002.png")); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestExtractFramesHoldsVFRFrames decodes a real variable frame rate master,
+// whose frames sit at pts 0.5 s red, 1.5 s lime, 2.5 s blue and 3.5 s, and
+// checks each output frame holds the master frame on screen at its time.
+func TestExtractFramesHoldsVFRFrames(t *testing.T) {
+	if _, err := engine.Resolve("ffmpeg"); err != nil {
+		t.Skip(err)
+	}
+	fix := t.TempDir()
+	colours := map[string]color.RGBA64{"red": red, "lime": {0, 0xffff, 0, 0xffff}, "blue": {0, 0, 0xffff, 0xffff}}
+	for name, c := range colours {
+		writePNG(t, filepath.Join(fix, name+".png"), solid(16, 16, c))
+	}
+	var list strings.Builder
+	for _, name := range []string{"red", "lime", "blue"} {
+		fmt.Fprintf(&list, "file '%s'\nduration 1\n", filepath.Join(fix, name+".png"))
+	}
+	fmt.Fprintf(&list, "file '%s'\n", filepath.Join(fix, "blue.png"))
+	concat, master := filepath.Join(fix, "list.txt"), filepath.Join(fix, "vfr.mov")
+	if err := os.WriteFile(concat, []byte(list.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := engine.Run(context.Background(), engine.Cmd{Engine: "ffmpeg",
+		Args: []string{"-hide_banner", "-loglevel", "error", "-nostdin", "-f", "concat", "-safe", "0", "-i", concat,
+			"-fps_mode", "passthrough", "-c:v", "png", "-output_ts_offset", "0.5", master},
+		Inputs: []string{concat}, Outputs: []string{master}}); err != nil {
+		t.Fatal(err)
+	}
+	// 700 ms after the first frame is pts 1.2 s: three red ticks, ten lime, then blue.
+	frames, err := ExtractFrames(context.Background(), master, Master{FirstPTS: 500}, Window{Start: 700, End: 2100}, 10, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "RRRLLLLLLLLLLB"
+	var got strings.Builder
+	for _, f := range frames {
+		c := readRGBA64(t, f).RGBA64At(8, 8)
+		switch {
+		case c.R > 0xc000 && c.G < 0x4000 && c.B < 0x4000:
+			got.WriteByte('R')
+		case c.G > 0xc000 && c.R < 0x4000 && c.B < 0x4000:
+			got.WriteByte('L')
+		case c.B > 0xc000 && c.R < 0x4000 && c.G < 0x4000:
+			got.WriteByte('B')
+		default:
+			got.WriteByte('?')
+		}
+	}
+	if got.String() != want {
+		t.Fatalf("frames = %s, want %s", got.String(), want)
 	}
 }
