@@ -134,8 +134,8 @@ output unless given `--force`.
 
 `shrink` scales the image down to fit `--width`, `--height` or both, or with
 `--fit` so its longest side is that size. Each output's extension picks its
-format; `o.png o.webp` writes both, so you can keep the smaller. WebP is lossy at `--quality` (default 90) with
-lossless alpha.
+format; `o.png o.webp` writes both, so you can keep the smaller. WebP is
+lossy at `--quality` (default 90) with lossless alpha.
 
 `clip render` writes `<name>.<ext>` into `--out` for each format the script
 lists (`mp4`, `webm`, `poster.png` for `poster`, `webp`, `gif`), plus
@@ -153,7 +153,8 @@ error exceeds one frame, when the recording's screen size differs from the
 log's, or when the recording ends before the log's first action; it warns
 when the recording ends before the last action. A recording that stops
 early because its screen stood still is fine: its last frame is held to the
-log's end. It also refuses a camera that would upsample the recording. After encoding it fails when the
+log's end. It also refuses a camera that would upsample the recording.
+After encoding it fails when the
 MP4 is over the script's `budget_kb`, when the encode loses too much of the
 frames' fine detail (sharpness, measured per colour channel, so smeared
 coloured text counts), or when the loop's last frame visibly differs from
