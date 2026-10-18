@@ -1144,3 +1144,459 @@ body { background: url(truth.png) 0 0 / 600px 600px; image-rendering: pixelated;
 </style>
 </head><body><div class="clip-caption"><span class="clip-caption-text">Tap to add a node</span></div></body></html>
 '''
+
+# clip motion: a master whose top 80 px (26.67 pt) carry the frame number
+# N as a 12-cell binary code (cell i, 100.5 px wide, white for bit i),
+# over a cyan box swinging sideways, 6 s at 60 fps, lossless RGB. The strip
+# is a camera pin, so every frame of the clip shows a master frame's code;
+# frame-code counts the duplicates and drops render adds against the master
+# decoded passthrough. The output is 1080 px wide and the strip's centre
+# row sits at 0.0148 of its 2420 px height.
+
+[[case]]
+name   = "clip-follow-frame-steps"
+why    = "a follow clip must show each master frame once, in order: a dropped or doubled frame stutters"
+setup  = [
+  ["ffmpeg", "-f", "lavfi", "-i", "color=c=0x0a0a12:s=1206x2622:r=60:d=6", "-f", "lavfi", "-i", "color=c=0x00e5ff:s=300x300:r=60:d=6", "-filter_complex", "[0]geq=lum='if(lt(Y,80),if(mod(floor(N/pow(2,floor(X/100.5))),2),235,16),lum(X,Y))':cb=128:cr=128[bg];[bg][1]overlay=x='200+100*sin(t)':y=1200:format=rgb", "-c:v", "png", "{tmp:master.mov}"],
+]
+run    = ["clip", "render", "--script", "{tmp:clip.toml}", "--master", "{tmp:master.mov}", "--events", "{tmp:events.jsonl}", "--out", "{tmp:out}"]
+post   = [
+  ["ffmpeg", "-i", "{tmp:out/code.mp4}", "-vf", "scale=in_color_matrix=bt709:in_range=auto:flags=accurate_rnd+full_chroma_int+bilinear,format=rgb24", "-fps_mode", "passthrough", "{tmp:f%05d.png}"],
+  ["ffmpeg", "-i", "{tmp:master.mov}", "-fps_mode", "passthrough", "{tmp:m%05d.png}"],
+]
+metric = "frame-code"
+params = { frames = "{tmp:f*.png}", master = "{tmp:m*.png}", sidecar = "{tmp:out/code.json}", y = 0.0148, master_y = 0.0153 }
+max    = 0
+
+[case.files]
+"clip.toml" = '''
+version  = 1
+name     = "code"
+platform = "ios"
+form     = "mobile"
+app      = "com.example.code"
+device   = "iPhone 17 Pro"
+state    = "code"
+fps      = 60
+
+[output]
+width   = 1080
+formats = ["mp4"]
+
+[camera]
+mode = "follow"
+pin  = [{ target = "code" }]
+
+[targets]
+code = { id = "code" }
+
+[[step]]
+action = "tap"
+target = { xy = [60, 300] }
+
+[[step]]
+action = "tap"
+target = { xy = [200, 600] }
+
+[[step]]
+action = "tap"
+target = { xy = [340, 800] }
+'''
+"events.jsonl" = '''
+{"type":"meta","version":1,"platform":"ios","scale":3,"screen":[402,874],"fps":60,"sync":"simctl-start","sync_error_ms":4}
+{"type":"rects","t":0,"rects":{"code":[0,0,402,26.67]}}
+{"type":"tap","t":1500,"step":0,"at":[60,300],"target":[20,260,80,80]}
+{"type":"tap","t":3000,"step":1,"at":[200,600],"target":[160,560,80,80]}
+{"type":"tap","t":4500,"step":2,"at":[340,800],"target":[300,760,80,80]}
+{"type":"end","t":5990}
+'''
+
+[[case]]
+name   = "clip-vfr-master-holds"
+why    = "a variable-rate master (simctl writes a frame only on change) must be held frame for frame, never stepped past or doubled beyond its own holds"
+setup  = [
+  ["ffmpeg", "-f", "lavfi", "-i", "color=c=0x0a0a12:s=1206x2622:r=60:d=6", "-f", "lavfi", "-i", "color=c=0x00e5ff:s=300x300:r=60:d=6", "-filter_complex", "[0]geq=lum='if(lt(Y,80),if(mod(floor(N/pow(2,floor(X/100.5))),2),235,16),lum(X,Y))':cb=128:cr=128[bg];[bg][1]overlay=x='200+100*sin(t)':y=1200:format=rgb", "-c:v", "png", "{tmp:master.mov}"],
+  ["ffmpeg", "-i", "{tmp:master.mov}", "-vf", 'select=lt(mod(n\,7)\,4)', "-fps_mode", "passthrough", "-c:v", "png", "{tmp:vfr.mov}"],
+]
+run    = ["clip", "render", "--script", "{tmp:clip.toml}", "--master", "{tmp:vfr.mov}", "--events", "{tmp:events.jsonl}", "--out", "{tmp:out}"]
+post   = [
+  ["ffmpeg", "-i", "{tmp:out/code.mp4}", "-vf", "scale=in_color_matrix=bt709:in_range=auto:flags=accurate_rnd+full_chroma_int+bilinear,format=rgb24", "-fps_mode", "passthrough", "{tmp:f%05d.png}"],
+  ["ffmpeg", "-i", "{tmp:vfr.mov}", "-fps_mode", "passthrough", "{tmp:m%05d.png}"],
+]
+metric = "frame-code"
+params = { frames = "{tmp:f*.png}", master = "{tmp:m*.png}", sidecar = "{tmp:out/code.json}", y = 0.0148, master_y = 0.0153 }
+max    = 0
+
+[case.files]
+"clip.toml" = '''
+version  = 1
+name     = "code"
+platform = "ios"
+form     = "mobile"
+app      = "com.example.code"
+device   = "iPhone 17 Pro"
+state    = "code"
+fps      = 60
+
+[output]
+width   = 1080
+formats = ["mp4"]
+
+[camera]
+mode = "follow"
+pin  = [{ target = "code" }]
+
+[targets]
+code = { id = "code" }
+
+[[step]]
+action = "tap"
+target = { xy = [60, 300] }
+
+[[step]]
+action = "tap"
+target = { xy = [200, 600] }
+
+[[step]]
+action = "tap"
+target = { xy = [340, 800] }
+'''
+"events.jsonl" = '''
+{"type":"meta","version":1,"platform":"ios","scale":3,"screen":[402,874],"fps":60,"sync":"simctl-start","sync_error_ms":4}
+{"type":"rects","t":0,"rects":{"code":[0,0,402,26.67]}}
+{"type":"tap","t":1500,"step":0,"at":[60,300],"target":[20,260,80,80]}
+{"type":"tap","t":3000,"step":1,"at":[200,600],"target":[160,560,80,80]}
+{"type":"tap","t":4500,"step":2,"at":[340,800],"target":[300,760,80,80]}
+{"type":"end","t":5990}
+'''
+
+# clip loop: a pale square slides 300 px/s across the dark ground for the
+# whole 3 s master, so its last frame is far from its first. The seam bound
+# is 1.5 times the median change between the clip's own consecutive frames,
+# its crossfade excluded, measured from the decoded mp4 (a median of
+# 0.1339%, so 0.2009%): a loop's cut may jump no more than a frame and a
+# half of the clip's own motion. That bound is MaxSeam.
+
+[[case]]
+name   = "clip-loop-crossfade"
+why    = "a clip that ends away from where it began must crossfade its loop, leaving a cut no bigger than its own motion"
+setup  = [
+  ["ffmpeg", "-f", "lavfi", "-i", "color=c=0x0a0a12:s=1206x2622:r=60:d=3", "-f", "lavfi", "-i", "color=c=0xe8e8f0:s=300x300:r=60:d=3", "-filter_complex", "[0][1]overlay=x='100+300*t':y=1200:format=rgb", "-c:v", "png", "{tmp:master.mov}"],
+]
+run    = ["clip", "render", "--script", "{tmp:clip.toml}", "--master", "{tmp:master.mov}", "--events", "{tmp:events.jsonl}", "--out", "{tmp:out}"]
+metric = "json"
+params = { file = "{tmp:out/square.json}", field = "loop_seam" }
+max    = 0.200
+
+[case.files]
+"clip.toml" = '''
+version  = 1
+name     = "square"
+platform = "ios"
+form     = "mobile"
+app      = "com.example.square"
+device   = "iPhone 17 Pro"
+state    = "square"
+fps      = 60
+
+[output]
+width   = 600
+formats = ["mp4"]
+
+[[step]]
+action = "tap"
+target = { xy = [200, 450] }
+'''
+"events.jsonl" = '''
+{"type":"meta","version":1,"platform":"ios","scale":3,"screen":[402,874],"fps":60,"sync":"simctl-start","sync_error_ms":4}
+{"type":"rects","t":0,"rects":{}}
+{"type":"tap","t":1500,"step":0,"at":[200,450],"target":[150,400,100,100]}
+{"type":"end","t":2990}
+'''
+
+[[case]]
+name   = "clip-loop-crossfade-frames"
+why    = "a loop's crossfade must run its full 300 ms, 18 frames at 60 fps"
+setup  = [
+  ["ffmpeg", "-f", "lavfi", "-i", "color=c=0x0a0a12:s=1206x2622:r=60:d=3", "-f", "lavfi", "-i", "color=c=0xe8e8f0:s=300x300:r=60:d=3", "-filter_complex", "[0][1]overlay=x='100+300*t':y=1200:format=rgb", "-c:v", "png", "{tmp:master.mov}"],
+]
+run    = ["clip", "render", "--script", "{tmp:clip.toml}", "--master", "{tmp:master.mov}", "--events", "{tmp:events.jsonl}", "--out", "{tmp:out}"]
+metric = "json"
+params = { file = "{tmp:out/square.json}", field = "crossfade_frames" }
+min    = 18
+max    = 18
+
+[case.files]
+"clip.toml" = '''
+version  = 1
+name     = "square"
+platform = "ios"
+form     = "mobile"
+app      = "com.example.square"
+device   = "iPhone 17 Pro"
+state    = "square"
+fps      = 60
+
+[output]
+width   = 600
+formats = ["mp4"]
+
+[[step]]
+action = "tap"
+target = { xy = [200, 450] }
+'''
+"events.jsonl" = '''
+{"type":"meta","version":1,"platform":"ios","scale":3,"screen":[402,874],"fps":60,"sync":"simctl-start","sync_error_ms":4}
+{"type":"rects","t":0,"rects":{}}
+{"type":"tap","t":1500,"step":0,"at":[200,450],"target":[150,400,100,100]}
+{"type":"end","t":2990}
+'''
+
+[[case]]
+name   = "clip-loop-clean"
+why    = "a clip that returns to where it began must loop as it is, with no crossfade"
+setup  = [
+  ["ffmpeg", "-f", "lavfi", "-i", "color=c=0x0a0a12:s=1206x2622:r=60:d=3", "-f", "lavfi", "-i", "color=c=0xe8e8f0:s=300x300:r=60:d=3", "-filter_complex", "[0][1]overlay=x='400-300*cos(2*PI*t/3)':y=1200:format=rgb", "-c:v", "png", "{tmp:master.mov}"],
+]
+run    = ["clip", "render", "--script", "{tmp:clip.toml}", "--master", "{tmp:master.mov}", "--events", "{tmp:events.jsonl}", "--out", "{tmp:out}"]
+metric = "json"
+params = { file = "{tmp:out/square.json}", field = "crossfade_frames" }
+max    = 0
+
+[case.files]
+"clip.toml" = '''
+version  = 1
+name     = "square"
+platform = "ios"
+form     = "mobile"
+app      = "com.example.square"
+device   = "iPhone 17 Pro"
+state    = "square"
+fps      = 60
+
+[output]
+width   = 600
+formats = ["mp4"]
+
+[[step]]
+action = "tap"
+target = { xy = [200, 450] }
+'''
+"events.jsonl" = '''
+{"type":"meta","version":1,"platform":"ios","scale":3,"screen":[402,874],"fps":60,"sync":"simctl-start","sync_error_ms":4}
+{"type":"rects","t":0,"rects":{}}
+{"type":"tap","t":1500,"step":0,"at":[200,450],"target":[150,400,100,100]}
+{"type":"end","t":2990}
+'''
+
+# clip-trim-idle: still for 2 s, a square moving from 2.0 to 3.0 s, still
+# to 6 s; the trim keeps 500 ms either side of the action and the motion,
+# 1500 to 3500 ms.
+
+[[case]]
+name   = "clip-trim-idle"
+why    = "a clip must cut the idle stretches before and after the interaction, keeping only the settle either side"
+setup  = [
+  ["ffmpeg", "-f", "lavfi", "-i", "color=c=0x0a0a12:s=1206x2622:r=60:d=6", "-f", "lavfi", "-i", "color=c=0xe8e8f0:s=300x300:r=60:d=6", "-filter_complex", "[0][1]overlay=x='if(lt(t,2),200,if(lt(t,3),200+400*(t-2),600))':y=1200:format=rgb", "-c:v", "png", "{tmp:master.mov}"],
+]
+run    = ["clip", "render", "--script", "{tmp:clip.toml}", "--master", "{tmp:master.mov}", "--events", "{tmp:events.jsonl}", "--out", "{tmp:out}"]
+metric = "json"
+params = { file = "{tmp:out/square.json}", field = "duration_ms" }
+min    = 1983
+max    = 2017
+
+[case.files]
+"clip.toml" = '''
+version  = 1
+name     = "square"
+platform = "ios"
+form     = "mobile"
+app      = "com.example.square"
+device   = "iPhone 17 Pro"
+state    = "square"
+fps      = 60
+
+[output]
+width   = 600
+formats = ["mp4"]
+
+[[step]]
+action = "tap"
+target = { xy = [200, 450] }
+'''
+"events.jsonl" = '''
+{"type":"meta","version":1,"platform":"ios","scale":3,"screen":[402,874],"fps":60,"sync":"simctl-start","sync_error_ms":4}
+{"type":"rects","t":0,"rects":{}}
+{"type":"tap","t":2000,"step":0,"at":[200,450],"target":[150,400,100,100]}
+{"type":"end","t":5900}
+'''
+
+# clip-size-ui: the clip-text page with the cyan box swinging over it, 6 s
+# followed across three taps at width 1080: what a UI clip of that length
+# costs.
+
+[[case]]
+name   = "clip-size-ui"
+why    = "a 6 s UI clip at 1080 px must stay at the bytes it was measured at, so a clip under its budget stays under it"
+setup  = [
+  ["plate", "render", "--png", "{tmp:text.png}", "--size", "402x874", "--scale", "3", "{asset:clip-text.html}"],
+  ["ffmpeg", "-loop", "1", "-framerate", "60", "-t", "6", "-i", "{tmp:text.png}", "-f", "lavfi", "-i", "color=c=0x00e5ff:s=300x300:r=60:d=6", "-filter_complex", "[0][1]overlay=x='200+100*sin(t)':y=1200:format=rgb", "-c:v", "png", "{tmp:master.mov}"],
+]
+run    = ["clip", "render", "--script", "{tmp:clip.toml}", "--master", "{tmp:master.mov}", "--events", "{tmp:events.jsonl}", "--out", "{tmp:out}"]
+metric = "json"
+params = { file = "{tmp:out/text.json}", field = "formats.mp4.bytes" }
+max    = 1349000
+
+[case.files]
+"clip.toml" = '''
+version  = 1
+name     = "text"
+platform = "ios"
+form     = "mobile"
+app      = "com.example.text"
+device   = "iPhone 17 Pro"
+state    = "text"
+fps      = 60
+
+[output]
+width   = 1080
+formats = ["mp4"]
+
+[camera]
+mode = "follow"
+
+[[step]]
+action = "tap"
+target = { xy = [60, 300] }
+
+[[step]]
+action = "tap"
+target = { xy = [200, 600] }
+
+[[step]]
+action = "tap"
+target = { xy = [340, 800] }
+'''
+"events.jsonl" = '''
+{"type":"meta","version":1,"platform":"ios","scale":3,"screen":[402,874],"fps":60,"sync":"simctl-start","sync_error_ms":4}
+{"type":"rects","t":0,"rects":{}}
+{"type":"tap","t":1500,"step":0,"at":[60,300],"target":[20,260,80,80]}
+{"type":"tap","t":3000,"step":1,"at":[200,600],"target":[160,560,80,80]}
+{"type":"tap","t":4500,"step":2,"at":[340,800],"target":[300,760,80,80]}
+{"type":"end","t":5990}
+'''
+
+# clip refusals: a 2 s master of a sliding square; each script breaks one
+# limit the render holds, and the render leaves no output behind.
+
+[[case]]
+name   = "clip-refuses-budget"
+why    = "an mp4 above the script's budget_kb must be refused, with nothing written"
+setup  = [
+  ["ffmpeg", "-f", "lavfi", "-i", "color=c=0x0a0a12:s=1206x2622:r=60:d=2", "-f", "lavfi", "-i", "color=c=0xe8e8f0:s=300x300:r=60:d=2", "-filter_complex", "[0][1]overlay=x='100+300*t':y=1200:format=rgb", "-c:v", "png", "{tmp:master.mov}"],
+]
+run    = ["clip", "render", "--script", "{tmp:clip.toml}", "--master", "{tmp:master.mov}", "--events", "{tmp:events.jsonl}", "--out", "{tmp:out}"]
+exit   = 1
+stderr = "above budget_kb"
+absent = ["{tmp:out/clip.mp4}", "{tmp:out/clip.json}"]
+
+[case.files]
+"clip.toml" = '''
+version  = 1
+name     = "clip"
+platform = "ios"
+form     = "mobile"
+app      = "com.example.square"
+device   = "iPhone 17 Pro"
+state    = "square"
+fps      = 60
+
+[output]
+width     = 600
+formats   = ["mp4"]
+budget_kb = 1
+
+[[step]]
+action = "tap"
+target = { xy = [200, 450] }
+'''
+"events.jsonl" = '''
+{"type":"meta","version":1,"platform":"ios","scale":3,"screen":[402,874],"fps":60,"sync":"simctl-start","sync_error_ms":4}
+{"type":"rects","t":0,"rects":{}}
+{"type":"tap","t":1000,"step":0,"at":[200,450],"target":[150,400,100,100]}
+{"type":"end","t":1990}
+'''
+
+[[case]]
+name   = "clip-refuses-sync-error"
+why    = "a log whose sync error exceeds one frame must be refused, with nothing written"
+setup  = [
+  ["ffmpeg", "-f", "lavfi", "-i", "color=c=0x0a0a12:s=1206x2622:r=60:d=2", "-f", "lavfi", "-i", "color=c=0xe8e8f0:s=300x300:r=60:d=2", "-filter_complex", "[0][1]overlay=x='100+300*t':y=1200:format=rgb", "-c:v", "png", "{tmp:master.mov}"],
+]
+run    = ["clip", "render", "--script", "{tmp:clip.toml}", "--master", "{tmp:master.mov}", "--events", "{tmp:events.jsonl}", "--out", "{tmp:out}"]
+exit   = 1
+stderr = "exceeds one frame"
+absent = ["{tmp:out/clip.mp4}", "{tmp:out/clip.json}"]
+
+[case.files]
+"clip.toml" = '''
+version  = 1
+name     = "clip"
+platform = "ios"
+form     = "mobile"
+app      = "com.example.square"
+device   = "iPhone 17 Pro"
+state    = "square"
+fps      = 60
+
+[output]
+width   = 600
+formats = ["mp4"]
+
+[[step]]
+action = "tap"
+target = { xy = [200, 450] }
+'''
+"events.jsonl" = '''
+{"type":"meta","version":1,"platform":"ios","scale":3,"screen":[402,874],"fps":60,"sync":"simctl-start","sync_error_ms":20}
+{"type":"rects","t":0,"rects":{}}
+{"type":"tap","t":1000,"step":0,"at":[200,450],"target":[150,400,100,100]}
+{"type":"end","t":1990}
+'''
+
+[[case]]
+name   = "clip-refuses-upsampling"
+why    = "an output wider than the capture must be refused: it would invent pixels"
+setup  = [
+  ["ffmpeg", "-f", "lavfi", "-i", "color=c=0x0a0a12:s=1206x2622:r=60:d=2", "-f", "lavfi", "-i", "color=c=0xe8e8f0:s=300x300:r=60:d=2", "-filter_complex", "[0][1]overlay=x='100+300*t':y=1200:format=rgb", "-c:v", "png", "{tmp:master.mov}"],
+]
+run    = ["clip", "render", "--script", "{tmp:clip.toml}", "--master", "{tmp:master.mov}", "--events", "{tmp:events.jsonl}", "--out", "{tmp:out}"]
+exit   = 1
+stderr = "below capture resolution"
+absent = ["{tmp:out/clip.mp4}", "{tmp:out/clip.json}"]
+
+[case.files]
+"clip.toml" = '''
+version  = 1
+name     = "clip"
+platform = "ios"
+form     = "mobile"
+app      = "com.example.square"
+device   = "iPhone 17 Pro"
+state    = "square"
+fps      = 60
+
+[output]
+width   = 1440
+formats = ["mp4"]
+
+[[step]]
+action = "tap"
+target = { xy = [200, 450] }
+'''
+"events.jsonl" = '''
+{"type":"meta","version":1,"platform":"ios","scale":3,"screen":[402,874],"fps":60,"sync":"simctl-start","sync_error_ms":4}
+{"type":"rects","t":0,"rects":{}}
+{"type":"tap","t":1000,"step":0,"at":[200,450],"target":[150,400,100,100]}
+{"type":"end","t":1990}
+'''

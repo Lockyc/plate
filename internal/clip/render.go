@@ -269,7 +269,7 @@ func check(ctx context.Context, s *Script, meas Measurement, tmp string) error {
 		return fmt.Errorf("sharpness %.3f is below %.2f: the encode loses the frames' fine detail", meas.Sharpness, MinSharpness)
 	}
 	if meas.LoopSeam > MaxSeam {
-		return fmt.Errorf("loop seam %.2f%% is above %.1f%%: the loop shows a cut", meas.LoopSeam, MaxSeam)
+		return fmt.Errorf("loop seam %.3g%% is above %.3g%%: the loop shows a cut", meas.LoopSeam, MaxSeam)
 	}
 	return nil
 }
