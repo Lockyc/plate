@@ -124,10 +124,18 @@ func shift(t float64, cuts []Cut) float64 {
 }
 
 // CompressLog is a copy of l on the timeline with cuts dropped: every
-// event's t and end, and the log's end, shifted, so the overlays and the
+// event's t and end, each measured motion's times, and the log's end,
+// shifted, so the overlays and the
 // camera, which read the log, stay locked to the frames ApplyCuts keeps.
 func CompressLog(l *Log, cuts []Cut) *Log {
 	out := &Log{Meta: l.Meta, Events: slices.Clone(l.Events), End: shift(l.End, cuts)}
+	for _, m := range l.Motions {
+		ts := make([]float64, len(m.T))
+		for i, t := range m.T {
+			ts[i] = shift(t, cuts)
+		}
+		out.Motions = append(out.Motions, Motion{ts, m.X})
+	}
 	for i := range out.Events {
 		e := &out.Events[i]
 		if e.Type == "type" {

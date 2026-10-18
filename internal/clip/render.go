@@ -133,6 +133,10 @@ func Render(ctx context.Context, o RenderOptions, warn io.Writer) (Measurement, 
 	if err != nil {
 		return Measurement{}, err
 	}
+	l, kbWarns := TimeKeyboard(s, l, act, fps)
+	for _, msg := range kbWarns {
+		fmt.Fprintf(warn, "plate clip render: warning: %s\n", msg)
+	}
 	head := Settle
 	if s.Camera.Mode == "follow" {
 		head = FollowHead()
