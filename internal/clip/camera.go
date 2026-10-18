@@ -163,20 +163,70 @@ func (c *camera) pin(p PinSlot, t float64) PinView {
 	return PinView{Name: p.Name, Src: src, Shown: shown, H: float64(c.lay.W) * src.H / src.W}
 }
 
-// strips stacks the shown pins at t in their fixed order and gives the
-// region's slot, the screen area the region may occupy (between the
-// strips' Src), and how many px the strips above and below take beyond
-// their first-sample share.
+// unshared crops the shown strips at t, in stack order, so no two show the
+// same master rows. Strips' rects come from separate samples, and between
+// samples an element strip riding the keyboard (a touchbar, a filter bar)
+// moves on its own interpolation, not flush with the keyboard's eased
+// share, so their Srcs overlap mid-ease and the overlap would be drawn
+// twice. Contested rows go to the strip nearer the screen edge its side is
+// anchored to (the outer one in the stack), the inner one losing them off
+// its outer edge; its H follows its Src at the strip's own scale. A strip
+// cropped to nothing is dropped.
+func (c *camera) unshared(t float64) []PinView {
+	var above, below []PinView
+	for _, p := range c.stack {
+		if pv := c.pin(p, t); pv.Shown > 0 {
+			if c.above[p.Name] {
+				above = append(above, pv)
+			} else {
+				below = append(below, pv)
+			}
+		}
+	}
+	scale := func(pv *PinView) bool {
+		pv.H = float64(c.lay.W) * pv.Src.H / pv.Src.W
+		return pv.Src.H > 1e-9
+	}
+	var out []PinView
+	limit := c.screen.Y
+	for _, pv := range above { // outermost first
+		if pv.Src.Y < limit {
+			pv.Src.H -= limit - pv.Src.Y
+			pv.Src.Y = limit
+		}
+		if scale(&pv) {
+			out = append(out, pv)
+			limit = math.Max(limit, pv.Src.Y+pv.Src.H)
+		}
+	}
+	var kept []PinView
+	limit = c.screen.Y + c.screen.H
+	for i := len(below) - 1; i >= 0; i-- { // outermost first
+		pv := below[i]
+		if pv.Src.Y+pv.Src.H > limit {
+			pv.Src.H = limit - pv.Src.Y
+		}
+		if scale(&pv) {
+			kept = append(kept, pv)
+			limit = math.Min(limit, pv.Src.Y)
+		}
+	}
+	for i := len(kept) - 1; i >= 0; i-- {
+		out = append(out, kept[i])
+	}
+	return out
+}
+
+// strips stacks the shown pins at t in their fixed order, cropped so none
+// shares rows with another (unshared), and gives the region's slot, the
+// screen area the region may occupy (between the strips' Src), and how
+// many px the strips above and below take beyond their first-sample share.
 func (c *camera) strips(t float64) (v View, bounds Rect, growA, growB float64) {
 	top, bottom := c.screen.Y, c.screen.Y+c.screen.H
 	var sumA, sumB float64
 	y := 0.0
-	for _, p := range c.stack {
-		pv := c.pin(p, t)
-		if pv.Shown <= 0 {
-			continue
-		}
-		if c.above[p.Name] {
+	for _, pv := range c.unshared(t) {
+		if c.above[pv.Name] {
 			sumA += pv.H
 			top = math.Max(top, pv.Src.Y+pv.Src.H)
 			pv.Y = y
