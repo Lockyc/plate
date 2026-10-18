@@ -1,12 +1,12 @@
 name    = "plate"
-summary = "Go CLI that makes or inspects visual artefacts for print and web pipelines: cutout, inpaint, infill, upscale, colour grade, HTML→PNG/PDF render, markdown→PDF, press-ready PDF, diff, font embed, QR — pinned engines, measured quality"
+summary = "Go CLI that makes or inspects visual artefacts for print and web pipelines: cutout, inpaint, infill, upscale, colour grade, HTML→PNG/PDF render, markdown→PDF, press-ready PDF, diff, font embed, QR, demo-clip render — pinned engines, measured quality"
 kind    = "tool"
 status  = "active"
-tags    = ["images", "print", "render", "cli", "pipelines"]
+tags    = ["images", "print", "render", "video", "cli", "pipelines"]
 stack   = ["go", "python"]
 
 [github]
-topics_extra = ["cli", "golang", "image-processing", "imagemagick", "headless-chrome", "ghostscript", "background-removal", "print"]
+topics_extra = ["cli", "golang", "image-processing", "imagemagick", "headless-chrome", "ffmpeg", "ghostscript", "background-removal", "print"]
 
 [[provides]]
 name    = "image-render-ops"
@@ -21,4 +21,9 @@ url     = "https://github.com/lockyc/plate"
 [[provides]]
 name    = "pdf-read-write"
 summary = "Read PDFs (`plate pdf info|text|pages|images`: metadata with a text-layer check, layout text, page renders, embedded images) and produce them from markdown or HTML with a document stylesheet (`plate doc`)"
+url     = "https://github.com/lockyc/plate"
+
+[[provides]]
+name    = "demo-clip-render"
+summary = "Post-produce a screen recording into a short looping demo clip: `plate clip check [--json]` validates and normalises a clip script (the schema a runner reads); `plate clip render --script --master --events --out` trims, frames (full/fixed/follow camera with pinned strips, never past capture resolution), draws captions and touch/click/key/cursor overlays, and writes a loop-safe H.264 MP4, WebM, poster and optional WebP/GIF with a JSON of measured sharpness, loop seam and size"
 url     = "https://github.com/lockyc/plate"
