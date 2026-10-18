@@ -4,6 +4,7 @@ import (
 	"image"
 	"math"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -42,7 +43,7 @@ func TestIdleCutsShortenAStaticGap(t *testing.T) {
 	s := idleScript(t, "")
 	l := idleLog(1)
 	w := Window{0, 4500}
-	cuts := IdleCuts(s, l, idleActivity(), w, 60)
+	cuts := IdleCuts(s, l, idleActivity(), w, 60, nil)
 	if len(cuts) != 1 {
 		t.Fatalf("cuts = %+v, want one", cuts)
 	}
@@ -78,7 +79,7 @@ func TestIdleCutsShortenAStaticGap(t *testing.T) {
 
 func TestIdleCutsKeepAPause(t *testing.T) {
 	s := idleScript(t, "[[step]]\naction = \"pause\"\nhold_ms = 1200\n")
-	if cuts := IdleCuts(s, idleLog(2), idleActivity(), Window{0, 4500}, 60); len(cuts) != 0 {
+	if cuts := IdleCuts(s, idleLog(2), idleActivity(), Window{0, 4500}, 60, nil); len(cuts) != 0 {
 		t.Fatalf("cuts = %+v: a pause's hold is never cut", cuts)
 	}
 }
@@ -88,8 +89,53 @@ func TestIdleCutsKeepTheHeadAndTail(t *testing.T) {
 	// head and settle, not interior.
 	s := idleScript(t, "")
 	l := &Log{End: 9000, Events: []Event{{Type: "tap", T: 3000, Step: ptr(0)}, {Type: "tap", T: 3100, Step: ptr(1)}}}
-	if cuts := IdleCuts(s, l, make([]float64, 540), Window{0, 9000}, 60); len(cuts) != 0 {
+	if cuts := IdleCuts(s, l, make([]float64, 540), Window{0, 9000}, 60, nil); len(cuts) != 0 {
 		t.Fatalf("cuts = %+v", cuts)
+	}
+	// A caption at t 0, from a leading wait step, ends before a follow
+	// clip's trim starts: the head after it is still the head.
+	l = &Log{End: 9000, Events: []Event{{Type: "caption", T: 0}, {Type: "tap", T: 3000, Step: ptr(0)}, {Type: "tap", T: 3800, Step: ptr(1)}}}
+	if cuts := IdleCuts(s, l, make([]float64, 540), Window{3000 - FollowHead(), 6000}, 60, nil); len(cuts) != 0 {
+		t.Fatalf("cuts = %+v: the head after a caption before the window was cut", cuts)
+	}
+}
+
+func TestIdleCutsKeepAFollowMove(t *testing.T) {
+	// The second tap's target is out of R0, so the camera pans to it: the
+	// cut must leave the pan's move and lead before the tap, never start
+	// it while the first tap's ripple plays.
+	s, l := followFixture(tap(1000, Point{200, 500}, &Rect{150, 480, 100, 40}), tap(4000, Point{200, 200}, &Rect{150, 180, 100, 40}))
+	s.Steps = []Step{{Action: "tap", HoldMS: ptr(400)}}
+	s.Output.MaxIdleMS = ptr(500)
+	w := Window{0, 6000}
+	tr := NewTrack(l)
+	lay, err := NewLayout(s, l, tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	moves, err := FollowMoves(s, l, tr, lay, w)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cuts := IdleCuts(s, l, make([]float64, 360), w, 60, moves)
+	if len(cuts) == 0 {
+		t.Fatal("no cut: the gap before the move is still idle")
+	}
+	if before := shift(4000, cuts) - shift(1400, cuts); before < move+lead-1e-6 {
+		t.Fatalf("%.1f ms kept between the first tap's hold and the second tap: the %g ms pan cannot fit", before, move+lead)
+	}
+}
+
+func TestIdleCutsKeepAGesturesOverlay(t *testing.T) {
+	// A long press with no hold: its disc stays until tapIn + duration +
+	// tapOut after it starts, and no cut may start inside that.
+	body := strings.Replace(minimal, "action = \"tap\"", "action = \"long_press\"\nhold_ms = 0", 1) +
+		"[[step]]\naction = \"tap\"\ntarget = {label=\"B\"}\n"
+	s := load(t, body)
+	l := &Log{End: 5000, Events: []Event{{Type: "long_press", T: 500, Step: ptr(0), At: &Point{10, 10}, Duration: 1500}, {Type: "tap", T: 3500, Step: ptr(1)}}}
+	cuts := IdleCuts(s, l, make([]float64, 300), Window{0, 4500}, 60, nil)
+	if end := 500 + tapIn + 1500 + tapOut; len(cuts) != 1 || cuts[0].Start < end {
+		t.Fatalf("cuts = %+v: a cut starts before the press's disc is gone at %g", cuts, end)
 	}
 }
 
@@ -134,7 +180,7 @@ func TestIdleCutsCountACaretBlinkIdle(t *testing.T) {
 			t.Fatalf("frame %d: the caret alone is activity %.5f, above idleShare %g", i, act[i], idleShare)
 		}
 	}
-	cuts := IdleCuts(idleScript(t, ""), idleLog(1), act, Window{0, 4500}, 60)
+	cuts := IdleCuts(idleScript(t, ""), idleLog(1), act, Window{0, 4500}, 60, nil)
 	if len(cuts) != 1 || Removed(cuts) < 1900 {
 		t.Fatalf("cuts = %+v: the blinking caret kept the gap", cuts)
 	}
@@ -165,7 +211,9 @@ func TestApplyCutsDropsTheFramesAndChecksTheSeam(t *testing.T) {
 	}
 	w := Window{100, 100 + 10*fms}
 	static := Cut{100 + 2*fms, 100 + 5*fms}
-	kept, cuts, err := ApplyCuts(frames, w, 60, []Cut{static})
+	var warned []string
+	warn := func(msg string) { warned = append(warned, msg) }
+	kept, cuts, err := ApplyCuts(frames, w, 60, []Cut{static}, warn)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -175,11 +223,17 @@ func TestApplyCutsDropsTheFramesAndChecksTheSeam(t *testing.T) {
 	// Cutting frames 4-6 joins frame 3 to frame 7, which differ: the cut
 	// would jump, so it is not made.
 	jump := Cut{100 + 4*fms, 100 + 7*fms}
-	kept, cuts, err = ApplyCuts(frames, w, 60, []Cut{jump})
+	if len(warned) != 0 {
+		t.Fatalf("warned %q for a cut that was made", warned)
+	}
+	kept, cuts, err = ApplyCuts(frames, w, 60, []Cut{jump}, warn)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(cuts) != 0 || len(kept) != 10 {
 		t.Fatalf("a cut whose seam frames differ was made: kept %d, cuts %+v", len(kept), cuts)
+	}
+	if len(warned) != 1 || !strings.Contains(warned[0], "166.7-216.7 ms") {
+		t.Fatalf("warned %q, want one naming the span 166.7-216.7 ms", warned)
 	}
 }

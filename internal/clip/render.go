@@ -151,7 +151,17 @@ func Render(ctx context.Context, o RenderOptions, warn io.Writer) (Measurement, 
 	if err != nil {
 		return Measurement{}, err
 	}
-	frames, cuts, err := ApplyCuts(frames, trim, fps, IdleCuts(s, l, activity, trim, fps))
+	tr0 := NewTrack(l)
+	lay0, err := NewLayout(s, l, tr0)
+	if err != nil {
+		return Measurement{}, err
+	}
+	moves, err := FollowMoves(s, l, tr0, lay0, trim)
+	if err != nil {
+		return Measurement{}, err
+	}
+	frames, cuts, err := ApplyCuts(frames, trim, fps, IdleCuts(s, l, activity, trim, fps, moves),
+		func(msg string) { fmt.Fprintf(warn, "plate clip render: warning: %s\n", msg) })
 	if err != nil {
 		return Measurement{}, err
 	}

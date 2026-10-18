@@ -1,6 +1,7 @@
 package clip
 
 import (
+	"fmt"
 	"math"
 	"slices"
 	"sort"
@@ -13,22 +14,23 @@ type Cut struct{ Start, End float64 }
 // span is a busy stretch of master time, ms.
 type span struct{ a, b float64 }
 
-// overlayLife is how long an action's own overlay plays after its end, ms.
-var overlayLife = map[string]float64{"tap": tapIn + tapHold + tapOut, "key": keyHold + keyFade}
-
 // IdleCuts finds every interior stretch of w longer than the script's
 // max_idle_ms in which nothing happens, and cuts it to that length, to the
 // frame, from its middle. Something happens wherever activity (Activity's,
 // per master frame at fps) is above idleShare, which a blinking caret is
-// not, and wherever an event acts: an action from its t to its end (a
-// gesture's duration, a type's end) plus the longer of its step's hold_ms
-// and its own overlay; a caption's fade; and the whole stretch between the
-// actions either side of a pause step, whose hold is explicit. Interior
-// means between the first busy moment and the last: the trim's head and
-// settle are never cut.
-func IdleCuts(s *Script, l *Log, activity []float64, w Window, fps int) []Cut {
+// not; wherever an event acts: an action from its t to the later of its end
+// (a gesture's duration, a type's end) plus its step's hold_ms and its own
+// overlay's end (overlayEnd); a caption's fade; and the whole stretch
+// between the actions either side of a pause step, whose hold is explicit;
+// and across each of holds (FollowMoves). Interior means between the first
+// busy moment inside w and the last: the trim's head and settle are never
+// cut.
+func IdleCuts(s *Script, l *Log, activity []float64, w Window, fps int, holds []Window) []Cut {
 	fr := 1000 / float64(fps)
 	var busy []span
+	for _, h := range holds {
+		busy = append(busy, span{h.Start, h.End})
+	}
 	for i := 1; i < len(activity); i++ {
 		if activity[i] > idleShare {
 			busy = append(busy, span{float64(i-1) * fr, float64(i) * fr})
@@ -55,7 +57,7 @@ func IdleCuts(s *Script, l *Log, activity []float64, w Window, fps int) []Cut {
 			if st := s.Steps[*e.Step]; st.HoldMS != nil {
 				hold = float64(*st.HoldMS)
 			}
-			busy = append(busy, span{e.T, end + math.Max(hold, overlayLife[e.Type])})
+			busy = append(busy, span{e.T, math.Max(end+hold, overlayEnd(e, s.Form))})
 			acts = append(acts, act{*e.Step, e.T, end})
 		}
 	}
@@ -73,6 +75,9 @@ func IdleCuts(s *Script, l *Log, activity []float64, w Window, fps int) []Cut {
 		}
 		busy = append(busy, span{from, to})
 	}
+	// A span over by w.Start (a caption at a leading wait step) is the
+	// head's, never the start of the interior.
+	busy = slices.DeleteFunc(busy, func(b span) bool { return b.b <= w.Start })
 	if len(busy) == 0 {
 		return nil
 	}
@@ -143,7 +148,8 @@ func Compress(w Window, cuts []Cut) Window {
 // the cuts made. A cut is made only if the frames either side of it match
 // within MaxSeam, the jump a loop may show: the dropped span is idle by
 // Activity, but a slow drift below idleShare a frame can add up across it.
-func ApplyCuts(frames []string, w Window, fps int, cuts []Cut) ([]string, []Cut, error) {
+// Each cut not made is reported to warn, naming its span.
+func ApplyCuts(frames []string, w Window, fps int, cuts []Cut, warn func(string)) ([]string, []Cut, error) {
 	fr := 1000 / float64(fps)
 	drop := make([]bool, len(frames))
 	var made []Cut
@@ -166,6 +172,7 @@ func ApplyCuts(frames []string, w Window, fps int, cuts []Cut) ([]string, []Cut,
 			return nil, nil, err
 		}
 		if seam > MaxSeam {
+			warn(fmt.Sprintf("idle %.1f-%.1f ms kept: the frames either side differ by %.3g%%, above %.3g%%", c.Start, c.End, seam, MaxSeam))
 			continue
 		}
 		for k := a; k < b; k++ {

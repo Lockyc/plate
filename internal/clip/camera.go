@@ -371,18 +371,9 @@ type key struct {
 // Path is the camera's view at each output frame of w; frame k is at master
 // time w.Start + k·1000/fps.
 func Path(s *Script, l *Log, tr *Track, lay Layout, w Window) ([]View, error) {
-	c, err := newCamera(s, l, tr, lay)
+	c, keys, err := cameraKeys(s, l, tr, lay, w)
 	if err != nil {
 		return nil, err
-	}
-	start := c.fit(c.r0, tr.first)
-	keys := []key{{depart: w.Start, arrive: w.Start, g: start}}
-	switch s.Camera.Mode {
-	case "full", "fixed":
-	case "follow":
-		keys = c.follow(l, w, keys)
-	default:
-		return nil, fmt.Errorf("camera.mode %q: want full, fixed or follow", s.Camera.Mode)
 	}
 	fps := float64(*s.FPS)
 	vs := make([]View, w.Frames(*s.FPS))
@@ -394,6 +385,41 @@ func Path(s *Script, l *Log, tr *Track, lay Layout, w Window) ([]View, error) {
 		}
 	}
 	return vs, nil
+}
+
+// cameraKeys is the camera over w and its moves: R0 alone for full and
+// fixed, and a move per goal for follow.
+func cameraKeys(s *Script, l *Log, tr *Track, lay Layout, w Window) (*camera, []key, error) {
+	c, err := newCamera(s, l, tr, lay)
+	if err != nil {
+		return nil, nil, err
+	}
+	keys := []key{{depart: w.Start, arrive: w.Start, g: c.fit(c.r0, tr.first)}}
+	switch s.Camera.Mode {
+	case "full", "fixed":
+	case "follow":
+		keys = c.follow(l, w, keys)
+	default:
+		return nil, nil, fmt.Errorf("camera.mode %q: want full, fixed or follow", s.Camera.Mode)
+	}
+	return c, keys, nil
+}
+
+// FollowMoves is the master time each follow-camera move needs kept, from
+// a full move and its lead before the moment it serves (its arrival plus
+// lead) to that moment, so IdleCuts never shortens a pan or starts one
+// over the previous action's response. Nil for a camera that never moves.
+func FollowMoves(s *Script, l *Log, tr *Track, lay Layout, w Window) ([]Window, error) {
+	_, keys, err := cameraKeys(s, l, tr, lay, w)
+	if err != nil {
+		return nil, err
+	}
+	var out []Window
+	for _, k := range keys[1:] {
+		at := k.arrive + lead
+		out = append(out, Window{at - move - lead, at})
+	}
+	return out, nil
 }
 
 // goalBox is what an action event must keep in shot: its target and any

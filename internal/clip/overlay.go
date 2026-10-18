@@ -210,23 +210,49 @@ func (tl *timeline) taps(l *Log) {
 			}
 			continue
 		}
-		var g touch
-		switch {
-		case (e.Type == "tap") && e.At != nil:
-			g = touch{*e.At, *e.At, 0, tapHold}
-		case e.Type == "long_press" && e.At != nil:
-			g = touch{*e.At, *e.At, 0, e.Duration}
-		case (e.Type == "swipe" || e.Type == "drag") && e.From != nil && e.To != nil:
-			g = touch{*e.From, *e.To, e.Duration, math.Max(0, e.Duration-tapIn)}
-		default:
-			continue
+		if g, ok := touchOf(e); ok {
+			tl.touch(e, g)
 		}
-		tl.touch(e, g)
 	}
 }
 
+// touchOf is e's touch disc on a phone, if it draws one.
+func touchOf(e Event) (touch, bool) {
+	switch {
+	case (e.Type == "tap") && e.At != nil:
+		return touch{*e.At, *e.At, 0, tapHold}, true
+	case e.Type == "long_press" && e.At != nil:
+		return touch{*e.At, *e.At, 0, e.Duration}, true
+	case (e.Type == "swipe" || e.Type == "drag") && e.From != nil && e.To != nil:
+		return touch{*e.From, *e.To, e.Duration, math.Max(0, e.Duration-tapIn)}, true
+	}
+	return touch{}, false
+}
+
+// life is how long g's disc shows from its event's t, ms.
+func (g touch) life() float64 { return tapIn + g.hold + tapOut }
+
+// overlayEnd is when e's own overlay is gone, ms of master time: a touch
+// disc's life on a phone, a click's on a desktop, a key badge's; e.T for an
+// event that draws none.
+func overlayEnd(e Event, form string) float64 {
+	switch {
+	case e.Type == "key":
+		return e.T + keyHold
+	case form == "desktop":
+		if (e.Type == "tap" || e.Type == "long_press") && e.At != nil {
+			return e.T + clickMS
+		}
+	default:
+		if g, ok := touchOf(e); ok {
+			return e.T + g.life()
+		}
+	}
+	return e.T
+}
+
 func (tl *timeline) touch(e Event, g touch) {
-	total := tapIn + g.hold + tapOut
+	total := g.life()
 	warned := false
 	for k := range tl.views {
 		u := tl.at(k) - e.T
