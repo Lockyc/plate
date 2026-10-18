@@ -152,7 +152,8 @@ action = "wait"
 target = {label="A"}
 `)
 	if *s.FPS != 60 || s.Camera.Mode != "full" || *s.Camera.MaxZoom != 1.0 ||
-		!reflect.DeepEqual(s.Output.Formats, []string{"mp4"}) || s.Overlays != (Overlays{}) || s.Output.BudgetKB != 0 {
+		!reflect.DeepEqual(s.Output.Formats, []string{"mp4"}) || s.Overlays != (Overlays{}) || s.Output.BudgetKB != 0 ||
+		s.Output.Loop != "crossfade" {
 		t.Fatalf("script defaults: %+v", s)
 	}
 	for i, st := range s.Steps {
@@ -197,6 +198,7 @@ func TestLoadRefuses(t *testing.T) {
 		{"format unknown", sub("width = 600", "width = 600\nformats=[\"mp4\",\"mov\"]"), "output.formats: unknown format mov"},
 		{"format dup", sub("width = 600", "width = 600\nformats=[\"mp4\",\"mp4\"]"), "listed twice"},
 		{"budget", sub("width = 600", "width = 600\nbudget_kb=600\nformats=[\"webm\"]"), "output.budget_kb: applies to mp4"},
+		{"loop unknown", sub("width = 600", "width = 600\nloop=\"fade\""), "output.loop: want crossfade or dip"},
 		{"cursor mobile", sub("[output]", "[overlays]\ncursor=true\n[output]"), "overlays.cursor: refused for form mobile"},
 		{"keys mobile", sub("[output]", "[overlays]\nkeys=true\n[output]"), "overlays.keys: refused for form mobile"},
 		{"tap no target", steps("action = \"tap\""), "step[0].target: required for tap"},
@@ -256,6 +258,13 @@ func TestLoadRefuses(t *testing.T) {
 			t.Fatalf("err = %v", err)
 		}
 	})
+	t.Run("loops accepted", func(t *testing.T) {
+		for _, l := range []string{"crossfade", "dip"} {
+			if s := load(t, sub("width = 600", "width = 600\nloop=\""+l+"\"")); s.Output.Loop != l {
+				t.Errorf("loop %s loaded as %q", l, s.Output.Loop)
+			}
+		}
+	})
 	t.Run("keyboard pin accepted", func(t *testing.T) {
 		load(t, sub("[output]", "[camera]\nmode=\"follow\"\npin=[{target=\"kb\"}]\n[output]")+tgt)
 	})
@@ -307,8 +316,8 @@ func TestJSONIsNormalised(t *testing.T) {
 	if !reflect.DeepEqual(tg["outline"], map[string]any{"id": "outline"}) || !reflect.DeepEqual(tg["kb"], map[string]any{"system": "keyboard"}) {
 		t.Fatalf("targets %v", tg)
 	}
-	if !reflect.DeepEqual(m["output"].(map[string]any)["formats"], []any{"mp4", "webm", "poster"}) {
-		t.Fatalf("formats %v", m["output"])
+	if out := m["output"].(map[string]any); !reflect.DeepEqual(out["formats"], []any{"mp4", "webm", "poster"}) || out["loop"] != "crossfade" {
+		t.Fatalf("output %v", out)
 	}
 }
 
