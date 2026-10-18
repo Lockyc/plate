@@ -335,3 +335,12 @@ func TestCheckMain(t *testing.T) {
 		t.Fatalf("-h: %d", c)
 	}
 }
+
+func TestProblemsCount(t *testing.T) {
+	if got := (Problems{"a"}).Error(); got != "1 problem:\n  a" {
+		t.Errorf("one: %q", got)
+	}
+	if got := (Problems{"a", "b"}).Error(); got != "2 problems:\n  a\n  b" {
+		t.Errorf("two: %q", got)
+	}
+}
