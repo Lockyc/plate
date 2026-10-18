@@ -30,7 +30,7 @@ func TestExtractFramesArgs(t *testing.T) {
 	probe := enginetest.Stub(t, "ffprobe", `exit 1`)
 	log := frameStub(t, 0)
 	dir := t.TempDir()
-	frames, err := ExtractFrames(context.Background(), "raw.mov", w, 60, dir)
+	frames, err := ExtractFrames(context.Background(), "raw.mov", Colour{}, w, 60, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +69,7 @@ func TestExtractFramesArgs(t *testing.T) {
 func TestExtractFramesRefusesShortMaster(t *testing.T) {
 	frameStub(t, 1)
 	dir := t.TempDir()
-	_, err := ExtractFrames(context.Background(), "raw.mov", Window{Start: 0, End: 500}, 60, dir)
+	_, err := ExtractFrames(context.Background(), "raw.mov", Colour{}, Window{Start: 0, End: 500}, 60, dir)
 	if err == nil || !strings.Contains(err.Error(), "master ends before the trim window: decoded 29 of 30 frames") {
 		t.Fatalf("err = %v", err)
 	}
@@ -80,7 +80,7 @@ func TestExtractFramesRefusesShortMaster(t *testing.T) {
 
 func TestExtractFramesRefusesEmptyWindow(t *testing.T) {
 	log := frameStub(t, 0)
-	_, err := ExtractFrames(context.Background(), "raw.mov", Window{}, 60, t.TempDir())
+	_, err := ExtractFrames(context.Background(), "raw.mov", Colour{}, Window{}, 60, t.TempDir())
 	if err == nil || !strings.Contains(err.Error(), "nothing to render") {
 		t.Fatalf("err = %v", err)
 	}
@@ -144,7 +144,7 @@ func TestExtractFramesHoldsVFRFrames(t *testing.T) {
 		t.Fatal(err)
 	}
 	// 700 ms after the first frame is pts 1.2 s: three red ticks, ten lime, then blue.
-	frames, err := ExtractFrames(context.Background(), master, Window{Start: 700, End: 2100}, 10, t.TempDir())
+	frames, err := ExtractFrames(context.Background(), master, Colour{}, Window{Start: 700, End: 2100}, 10, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,5 +165,90 @@ func TestExtractFramesHoldsVFRFrames(t *testing.T) {
 	}
 	if got.String() != want {
 		t.Fatalf("frames = %s, want %s", got.String(), want)
+	}
+}
+
+func TestExtractFramesConvertsWideGamutArgs(t *testing.T) {
+	log := frameStub(t, 0)
+	p3 := Colour{Primaries: "smpte432", Transfer: "iec61966-2-1", Range: "tv"}
+	if _, err := ExtractFrames(context.Background(), "raw.mov", p3, Window{Start: 0, End: 100}, 60, t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	got := enginetest.Calls(t, log)[0]
+	want := "colorspace=ispace=bt709:irange=tv:iprimaries=smpte432:itrc=iec61966-2-1:" +
+		"space=bt709:range=pc:primaries=bt709:trc=iec61966-2-1:format=yuv444p12," +
+		"fps=60:round=down,scale=in_color_matrix=bt709:in_range=auto,format=rgb24"
+	if got[7] != want {
+		t.Fatalf("-vf %q\nwant %q", got[7], want)
+	}
+	for _, c := range []Colour{{}, {Primaries: "bt709", Transfer: "bt709", Range: "tv"}} {
+		log := frameStub(t, 0)
+		if _, err := ExtractFrames(context.Background(), "raw.mov", c, Window{Start: 0, End: 100}, 60, t.TempDir()); err != nil {
+			t.Fatal(err)
+		}
+		if vf := enginetest.Calls(t, log)[0][7]; strings.Contains(vf, "colorspace") {
+			t.Fatalf("%+v: -vf %q converts a BT.709 master", c, vf)
+		}
+	}
+}
+
+// TestExtractFramesConvertsDisplayP3 decodes a real master tagged as
+// simctl tags its recordings (Display P3 primaries, sRGB transfer, BT.709
+// matrix), whose pixel is sRGB red written in P3, and expects sRGB red.
+func TestExtractFramesConvertsDisplayP3(t *testing.T) {
+	if _, err := engine.Resolve("ffmpeg"); err != nil {
+		t.Skip(err)
+	}
+	master := filepath.Join(t.TempDir(), "p3.mp4")
+	if _, err := engine.Run(context.Background(), engine.Cmd{Engine: "ffmpeg",
+		Args: []string{"-hide_banner", "-loglevel", "error", "-nostdin", "-f", "lavfi", "-i", "color=c=0xEA3324:s=64x64:r=60:d=0.2",
+			"-vf", "scale=out_color_matrix=bt709:out_range=tv,format=yuv444p,setparams=color_primaries=smpte432:color_trc=iec61966-2-1:colorspace=bt709:range=tv",
+			"-c:v", "libx264", "-qp", "0", master},
+		Outputs: []string{master}}); err != nil {
+		t.Fatal(err)
+	}
+	m, err := ProbeMaster(context.Background(), master)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, c := range map[string]Colour{"tagged": m.Colour, "read as BT.709": {}} {
+		frames, err := ExtractFrames(context.Background(), master, c, Window{Start: 0, End: 50}, 60, t.TempDir())
+		if err != nil {
+			t.Fatal(err)
+		}
+		px := readRGBA64(t, frames[0]).RGBA64At(32, 32)
+		r, g, b := px.R>>8, px.G>>8, px.B>>8
+		isRed := r >= 250 && g <= 6 && b <= 6
+		if isRed != (name == "tagged") {
+			t.Errorf("%s: pixel = %d,%d,%d", name, r, g, b)
+		}
+	}
+}
+
+func TestExtractEncodedArgs(t *testing.T) {
+	log := enginetest.Stub(t, "ffmpeg", `for a; do pat=$a; done
+for i in 0 1 2; do cp "$RGB" "$(printf "$pat" $i)"; done`)
+	rgb := filepath.Join(t.TempDir(), "c.png")
+	writePNG(t, rgb, solid(4, 6, red))
+	t.Setenv("RGB", rgb)
+	frames, err := ExtractEncoded(context.Background(), "clip.mp4", []int{0, 30, 59}, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(frames) != 3 || frames[2].RGBA64At(1, 1) != red {
+		t.Fatalf("frames = %d", len(frames))
+	}
+	got := enginetest.Calls(t, log)[0]
+	want := []string{"-hide_banner", "-loglevel", "error", "-nostdin",
+		"-i", "clip.mp4",
+		"-vf", `select=eq(n\,0)+eq(n\,30)+eq(n\,59),scale=in_color_matrix=bt709:in_range=auto,format=rgb24`,
+		"-fps_mode", "passthrough", "-start_number", "0", got[len(got)-1]}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("argv = %q\nwant   %q", got, want)
+	}
+	enginetest.Stub(t, "ffmpeg", `for a; do pat=$a; done
+cp "$RGB" "$(printf "$pat" 0)"`)
+	if _, err := ExtractEncoded(context.Background(), "clip.mp4", []int{0, 30}, t.TempDir()); err == nil || !strings.Contains(err.Error(), "decoded 1 of 2 frames") {
+		t.Fatalf("short decode: err = %v", err)
 	}
 }
