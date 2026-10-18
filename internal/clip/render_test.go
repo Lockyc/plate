@@ -160,3 +160,18 @@ func TestRenderRefusesTruncatedMaster(t *testing.T) {
 		t.Fatalf("ffmpeg ran: %q", c)
 	}
 }
+
+func TestRenderWarnsMasterEndsBeforeLastAction(t *testing.T) {
+	dir := t.TempDir()
+	script := writeFile(t, filepath.Join(dir, "clip.toml"), contractExample)
+	events := writeFile(t, filepath.Join(dir, "events.jsonl"), strings.Join(contractLog, "\n")+"\n")
+	enginetest.Stub(t, "ffprobe", `echo '{"streams":[{"width":1206,"height":2622}],"frames":[{"pts_time":"0"}],"format":{"duration":"3.0"}}'`)
+	enginetest.Stub(t, "ffmpeg", `exit 99`)
+	var stdout, stderr bytes.Buffer
+	Main(context.Background(), []string{"render", "--script", script, "--master", filepath.Join(dir, "raw.mov"),
+		"--events", events, "--out", filepath.Join(dir, "out")}, &stdout, &stderr)
+	want := "plate clip render: warning: the master's last frame is at 3000 ms, before the last action at 6400 ms; the screen holds still from there\n"
+	if !strings.Contains(stderr.String(), want) {
+		t.Fatalf("stderr %q lacks %q", stderr.String(), want)
+	}
+}

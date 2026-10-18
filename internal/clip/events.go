@@ -362,7 +362,7 @@ func checkRects(evs []lineEvent, s *Script) Problems {
 // is when recording stopped; but every action changes the screen, so a
 // master over before the first one is cut short or another recording. One
 // over before the last action passes with warn set: an action can change
-// nothing on screen.
+// nothing on screen. A log with no action has no time to hold the master to.
 func (l *Log) CheckMaster(m Master) (warn string, err error) {
 	w := int(math.Round(l.Meta.Screen[0] * l.Meta.Scale))
 	h := int(math.Round(l.Meta.Screen[1] * l.Meta.Scale))
@@ -377,6 +377,7 @@ func (l *Log) CheckMaster(m Master) (warn string, err error) {
 	}
 	end := m.Duration - m.FirstPTS
 	switch {
+	case math.IsInf(first, 1):
 	case end < first:
 		return "", fmt.Errorf("the master's last frame is at %g ms, before the first action at %g ms: it is cut short or not this log's recording", end, first)
 	case end < last:

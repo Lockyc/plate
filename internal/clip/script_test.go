@@ -227,6 +227,8 @@ func TestLoadRefuses(t *testing.T) {
 		{"system mouse", minimal + "[targets]\nkb={system=\"mouse\"}\n", "targets.kb: system must be keyboard"},
 		{"system in step", steps("action = \"tap\"\ntarget={target=\"kb\"}") + tgt, "step[0].target: kb is a system target, usable only as a camera pin"},
 		{"system in region", sub("[output]", "[camera]\nmode=\"fixed\"\nregion={target=\"kb\"}\n[output]") + tgt, "camera.region: kb is a system target, usable only as a camera pin"},
+		{"xy region", sub("[output]", "[camera]\nmode=\"fixed\"\nregion={target=\"p\"}\n[output]") + "\n[targets]\np = {xy=[10, 20]}\n", "camera.region: p is an xy target: a point has no rect to sample"},
+		{"xy pin", sub("[output]", "[camera]\nmode=\"follow\"\npin=[{target=\"p\"}]\n[output]") + "\n[targets]\np = {xy=[10, 20]}\n", "camera.pin[0]: p is an xy target: a point has no rect to sample"},
 		{"system inline", steps("action = \"tap\"\ntarget={system=\"keyboard\"}"), "step[0].target: system targets belong in [targets]"},
 	}
 	for _, r := range rows {

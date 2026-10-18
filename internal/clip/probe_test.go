@@ -62,6 +62,22 @@ func TestCheckMaster(t *testing.T) {
 	}
 }
 
+func TestCheckMasterWithoutActions(t *testing.T) {
+	var lines []string
+	for _, ln := range contractLog {
+		if !strings.Contains(ln, `"step"`) {
+			lines = append(lines, ln)
+		}
+	}
+	l, err := parse(t, load(t, contractExample), lines...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if warn, err := l.CheckMaster(Master{W: 1206, H: 2622, Duration: 500}); err != nil || warn != "" {
+		t.Fatalf("warning %q, err %v", warn, err)
+	}
+}
+
 func TestCheckMasterRefusesTruncated(t *testing.T) {
 	l, err := parse(t, load(t, contractExample), contractLog...)
 	if err != nil {
