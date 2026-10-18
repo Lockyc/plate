@@ -444,3 +444,77 @@ func TestRegionStaysBetweenPins(t *testing.T) {
 		}
 	}
 }
+
+// kbRise is the reviewer's keyboard probe: the touchbar rides the keyboard
+// up from 812 to 498 pt while kb eases in over 1000-1300 ms.
+func kbRise(evs ...Event) (*Script, *Log) {
+	s := camScript(1080, "follow", &regionT, touchbarT, kbT)
+	r0, bar, bar2, kb := Rect{0, 100, 402, 700}, Rect{0, 812, 402, 62}, Rect{0, 498, 402, 62}, Rect{0, 560, 402, 314}
+	return s, camLog(append([]Event{
+		rs(0, map[string]*Rect{"region": &r0, "touchbar": &bar, "kb": nil}),
+		rs(1000, map[string]*Rect{"region": &r0, "touchbar": &bar, "kb": nil}),
+		rs(1300, map[string]*Rect{"region": &r0, "touchbar": &bar2, "kb": &kb}),
+	}, evs...)...)
+}
+
+func overlaps(a, b Rect) bool {
+	const eps = 1e-9
+	return a.X < b.X+b.W-eps && b.X < a.X+a.W-eps && a.Y < b.Y+b.H-eps && b.Y < a.Y+a.H-eps
+}
+
+func TestStripsNeverDuplicateContent(t *testing.T) {
+	s, l := kbRise()
+	_, vs := path(t, s, l, Window{0, 2000})
+	var order []string
+	for k, v := range vs {
+		srcs := []Rect{v.Region}
+		var names []string
+		for _, p := range v.Pins {
+			for _, o := range srcs {
+				if overlaps(p.Src, o) {
+					t.Fatalf("frame %d: %s src %+v overlaps %+v", k, p.Name, p.Src, o)
+				}
+			}
+			srcs = append(srcs, p.Src)
+			names = append(names, p.Name)
+		}
+		if len(names) == 2 {
+			if order == nil {
+				order = names
+			} else if names[0] != order[0] {
+				t.Fatalf("frame %d: strips reordered to %v from %v", k, names, order)
+			}
+		}
+	}
+	if order == nil {
+		t.Fatal("the keyboard never came up")
+	}
+}
+
+func TestRegionTopHeldWhileStripEases(t *testing.T) {
+	s, l := kbRise()
+	_, vs := path(t, s, l, Window{0, 2000})
+	// The camera holds still, so the content does: the keyboard takes its
+	// 314 pt off the region's bottom.
+	for k, v := range vs {
+		if !near(v.Region.Y, vs[0].Region.Y, 1e-9) {
+			t.Fatalf("frame %d: region top %g, was %g", k, v.Region.Y, vs[0].Region.Y)
+		}
+	}
+	first, last := vs[0].Region, vs[len(vs)-1].Region
+	if d := (first.Y + first.H) - (last.Y + last.H); !near(d, 314, 1e-6) {
+		t.Errorf("region bottom rose %g pt, want the keyboard's 314", d)
+	}
+}
+
+func TestFollowIgnoresTapOnPin(t *testing.T) {
+	s := camScript(1080, "follow", &regionT, touchbarT)
+	l := camLog(
+		rs(0, map[string]*Rect{"region": {20, 200, 362, 300}, "touchbar": {0, 812, 402, 62}}),
+		tap(2000, Point{200, 840}, &Rect{180, 820, 40, 40}),
+	)
+	_, vs := path(t, s, l, Window{0, 4000})
+	if n := moves(vs); n != 0 {
+		t.Errorf("a tap inside the touchbar strip moved the camera %d times", n)
+	}
+}

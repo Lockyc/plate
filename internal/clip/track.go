@@ -31,12 +31,17 @@ type sample struct {
 type Track struct {
 	series map[string][]sample
 	first  float64 // time of the log's first rects sample
+	// eased marks the gaps (by the ordinal of the sample opening them) in
+	// which a system target comes up or goes down. Every rect moves on the
+	// system target's eased curve there, as the layout riding the keyboard
+	// does, so a touchbar and the keyboard under it stay flush.
+	eased map[int]bool
 }
 
 // NewTrack indexes every rects sample in the log by name. A name absent from
 // a sample keeps its previous value, so only the samples naming it are kept.
 func NewTrack(l *Log) *Track {
-	tr := &Track{series: map[string][]sample{}, first: math.Inf(1)}
+	tr := &Track{series: map[string][]sample{}, first: math.Inf(1), eased: map[int]bool{}}
 	n := -1
 	for _, e := range l.Events {
 		if e.Type != "rects" {
@@ -48,6 +53,13 @@ func NewTrack(l *Log) *Track {
 			tr.series[name] = append(tr.series[name], sample{e.T, n, r})
 		}
 	}
+	for _, ss := range tr.series {
+		for i := 1; i < len(ss); i++ {
+			if a, b := ss[i-1], ss[i]; b.idx == a.idx+1 && (a.r == nil) != (b.r == nil) {
+				tr.eased[a.idx] = true
+			}
+		}
+	}
 	return tr
 }
 
@@ -55,8 +67,18 @@ func lerp(a, b Rect, f float64) Rect {
 	return Rect{a.X + (b.X-a.X)*f, a.Y + (b.Y-a.Y)*f, a.W + (b.W-a.W)*f, a.H + (b.H-a.H)*f}
 }
 
-// RectAt is the rect of name at t, linear between two consecutive samples
-// that both carry it and held otherwise, so an omitted (off-screen) name
+// between is the rect at t between two adjacent up samples: linear, or
+// eased in a gap where a system target comes or goes.
+func (tr *Track) between(a, b sample, t float64) Rect {
+	x := (t - a.t) / (b.t - a.t)
+	if tr.eased[a.idx] {
+		x = easeInOutCubic(x)
+	}
+	return lerp(*a.r, *b.r, x)
+}
+
+// RectAt is the rect of name at t, interpolated between two consecutive
+// samples that both carry it and held otherwise, so an omitted (off-screen) name
 // keeps its last value. ok is false before the name's first appearance.
 func (tr *Track) RectAt(name string, t float64) (Rect, bool) {
 	ss := tr.series[name]
@@ -84,8 +106,7 @@ func (tr *Track) RectAt(name string, t float64) (Rect, bool) {
 		return r, true
 	}
 	if i+1 < len(ss) && ss[i+1].r != nil && ss[i+1].idx == ss[i].idx+1 {
-		a, b := ss[i], ss[i+1]
-		return lerp(*a.r, *b.r, (t-a.t)/(b.t-a.t)), true
+		return tr.between(ss[i], ss[i+1], t), true
 	}
 	return *ss[i].r, true
 }
@@ -121,7 +142,7 @@ func (tr *Track) PinAt(name string, t float64) (r Rect, shown float64) {
 	x := (t - a.t) / (b.t - a.t)
 	switch {
 	case a.r != nil && b.r != nil:
-		return lerp(*a.r, *b.r, x), 1
+		return tr.between(a, b, t), 1
 	case a.r != nil:
 		return *a.r, 1 - easeInOutCubic(x)
 	case b.r != nil:
