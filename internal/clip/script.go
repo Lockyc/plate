@@ -281,6 +281,9 @@ func (s *Script) validate() Problems {
 	return p
 }
 
+// validateRef refuses a target that names no [targets] entry, a system target
+// outside a camera pin, and an xy target anywhere but a step: a point has no
+// rect to sample as a camera region or pin.
 func (s *Script) validateRef(path string, t *Target, ctx refCtx) Problems {
 	var p Problems
 	add := func(format string, a ...any) { p = append(p, path+": "+fmt.Sprintf(format, a...)) }

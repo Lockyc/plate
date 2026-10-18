@@ -163,9 +163,9 @@ colours, or renders what it is given.
   included, by the `clip-text-*` and `clip-caption-sharp` quality cases;
   the render's own sharpness check scores the encoder alone, against a
   lossless 4:2:0 copy (`clip.Lossless420`). `clip.MaxSeam` is measured by
-  `clip-loop-crossfade`. Codec, colour tagging, the hold of a static
-  tail and the refusals each live in the docblock of `clip.Encode`'s
-  `bt709`, `clip.ExtractFrames` and `validateRef`.
+  `clip-loop-crossfade`. The codec settings are documented at `mp4CRF`, the colour tagging at
+  `bt709` (both internal/clip/encode.go), the hold of a static tail at
+  `clip.ExtractFrames`, and the target refusals at `validateRef`.
 - **inpaint, fonts, qr, pdf, impose, doc, slides** — as the README table and each package's
   doc comment describe.
 
