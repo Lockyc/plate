@@ -378,7 +378,11 @@ func Capable(ctx context.Context, e pins.Engine, c pins.Capability) (bool, error
 	cmd.WaitDelay = time.Second
 	out, err := cmd.CombinedOutput()
 	if ctx.Err() != nil {
-		return false, fmt.Errorf("%s %s: timed out: %w", e.Name, strings.Join(c.Args, " "), ctx.Err())
+		why := "cancelled"
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			why = "timed out"
+		}
+		return false, fmt.Errorf("%s %s: %s: %w", e.Name, strings.Join(c.Args, " "), why, ctx.Err())
 	}
 	var ee *exec.ExitError
 	if err != nil && !errors.As(err, &ee) {
