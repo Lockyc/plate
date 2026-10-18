@@ -69,7 +69,8 @@ type camera struct {
 	stack []PinSlot
 	above map[string]bool
 	// restA and restB are the px the strips above and below take at the
-	// first rects sample, rounded as Layout counts them.
+	// first rects sample, unrounded: with strips that never change, the
+	// state's centre is the region's centre on every frame.
 	restA, restB float64
 }
 
@@ -84,7 +85,7 @@ func newCamera(s *Script, l *Log, tr *Track, lay Layout) (*camera, error) {
 		minW:   float64(s.Output.Width) / (*s.Camera.MaxZoom * l.Meta.Scale)}
 	c.order()
 	for _, p := range c.stack {
-		h := math.Round(c.pin(p, tr.first).H)
+		h := c.pin(p, tr.first).H
 		if c.above[p.Name] {
 			c.restA += h
 		} else {
@@ -206,7 +207,7 @@ func (c *camera) view(st camState, t float64) View {
 	v, b, growA, _ := c.strips(t)
 	w := float64(c.lay.W)
 	a := w / v.RegionH
-	top := st.cy - st.w*float64(c.lay.RegionH)/w/2 + growA*st.w/w
+	top := st.cy - st.w*c.restSlot()/w/2 + growA*st.w/w
 	v.Region = bound(Rect{st.cx - st.w/2, top, st.w, st.w / a}, a, b)
 	return v
 }
@@ -220,8 +221,12 @@ func (c *camera) fit(r Rect, t float64) camState {
 	a := w / v.RegionH
 	rw := math.Max(math.Max(r.W, r.H*a), c.minW)
 	f := bound(Rect{cx - rw/2, cy - rw/a/2, rw, rw / a}, a, b)
-	return camState{f.X + f.W/2, f.Y - growA*f.W/w + f.W*float64(c.lay.RegionH)/w/2, f.W}
+	return camState{f.X + f.W/2, f.Y - growA*f.W/w + f.W*c.restSlot()/w/2, f.W}
 }
+
+// restSlot is the region's slot, px, with the strips at their first-sample
+// heights: the height the camera state describes.
+func (c *camera) restSlot() float64 { return float64(c.lay.H) - c.restA - c.restB }
 
 // bound shifts r of aspect a inside b; a rect larger than b becomes the
 // largest a-rect inside it, about r's centre, then shifted inside.
@@ -301,7 +306,10 @@ func NewLayout(s *Script, l *Log, tr *Track) (Layout, error) {
 	}
 
 	lay.RegionH = int(math.Round(float64(w) * c.r0.H / c.r0.W))
-	lay.H = lay.RegionH + int(c.restA+c.restB)
+	lay.H = lay.RegionH
+	for _, p := range lay.Pins {
+		lay.H += int(math.Round(c.pin(p, tr.first).H))
+	}
 	if lay.H%2 != 0 {
 		lay.RegionH++
 		lay.H++
