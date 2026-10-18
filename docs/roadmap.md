@@ -140,7 +140,7 @@ independently of phase 5. Within a phase, order is open.
   because no caller needs exact WebP timing. Unlock: such a caller.
 - **Animated WebP loads every frame at once.** `clip.Encode` hands the
   frames to ImageMagick, which holds them all at Q16, so memory grows with
-  frame count times frame size (a long full-width clip peaks near 19 GB).
+  frame count times frame size (a 10-second full-width clip at 60 fps needs over 12 GB).
   Deferred because MP4 and WebM are the formats a page plays, and WebP is
   an opt-in extra. Unlock: a pinned ffmpeg carrying `libwebp_anim`, which
   streams the frames, or encoding in batches and joining them.
