@@ -121,14 +121,16 @@ func toBT709(c Colour) string {
 // master's first frame, where ffmpeg's output timeline starts. Output frame
 // k shows the latest master frame before the next output tick, w.Start +
 // (k+1)·1000/fps, so a variable frame rate master is resampled to constant
-// fps by its timestamps. The master is read as BT.709 YCbCr in its tagged
-// range, its primaries converted to BT.709's when c tags others.
+// fps by its timestamps. The last master frame is held to w.End: simctl
+// writes no frame while the screen is still, so a clip's static tail has
+// none to decode. The master is read as BT.709 YCbCr in its tagged range,
+// its primaries converted to BT.709's when c tags others.
 func ExtractFrames(ctx context.Context, master string, c Colour, w Window, fps int, dir string) ([]string, error) {
 	n := w.Frames(fps)
 	if n <= 0 {
 		return nil, errEmptyWindow
 	}
-	vf := fmt.Sprintf("%sfps=%d:round=down,%s", toBT709(c), fps, toRGB)
+	vf := fmt.Sprintf("%stpad=stop_mode=clone:stop_duration=%s,fps=%d:round=down,%s", toBT709(c), seconds(w.End), fps, toRGB)
 	return decode(ctx, master, vf, []string{"-fps_mode", "cfr", "-ss", seconds(w.Start), "-frames:v", strconv.Itoa(n)},
 		n, "master ends before the trim window", "m", dir)
 }

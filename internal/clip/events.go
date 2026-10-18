@@ -355,20 +355,16 @@ func checkRects(evs []lineEvent, s *Script) Problems {
 	return p
 }
 
-// CheckMaster holds the log to the master video it was recorded beside.
+// CheckMaster holds the log to the master video it was recorded beside: the
+// same screen size. Times are not held to the master's duration: simctl
+// writes a frame only when the screen changes, so a master whose screen
+// stood still probes as ending at its last change, and the log's end is
+// when recording stopped.
 func (l *Log) CheckMaster(m Master) error {
 	w := int(math.Round(l.Meta.Screen[0] * l.Meta.Scale))
 	h := int(math.Round(l.Meta.Screen[1] * l.Meta.Scale))
 	if abs(m.W-w) > 1 || abs(m.H-h) > 1 {
 		return fmt.Errorf("master is %dx%d, events say %dx%d", m.W, m.H, w, h)
-	}
-	for _, e := range l.Events {
-		if e.T < 0 || e.T > m.Duration {
-			return fmt.Errorf("%s event at %g ms is past the master's %g ms", e.Type, e.T, m.Duration)
-		}
-	}
-	if l.End > m.Duration {
-		return fmt.Errorf("end at %g ms is past the master's %g ms", l.End, m.Duration)
 	}
 	return nil
 }
