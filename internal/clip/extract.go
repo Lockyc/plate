@@ -71,7 +71,7 @@ func decode(ctx context.Context, master string, start float64, vf string, frames
 // ExtractActivity decodes the whole master small and grey, a%05d.png in
 // dir, for motion detection: frame i sits at i·1000/fps ms from the
 // master's first frame, where ffmpeg's output timeline starts.
-func ExtractActivity(ctx context.Context, master string, _ Master, fps int, dir string) ([]*image.Gray, error) {
+func ExtractActivity(ctx context.Context, master string, fps int, dir string) ([]*image.Gray, error) {
 	paths, err := decode(ctx, master, 0, fmt.Sprintf("fps=%d:round=down,scale=200:-2,format=gray", fps), 0, "a", dir)
 	if err != nil {
 		return nil, err
@@ -98,7 +98,7 @@ func ExtractActivity(ctx context.Context, master string, _ Master, fps int, dir 
 // k shows the latest master frame before the next output tick, w.Start +
 // (k+1)·1000/fps, so a variable frame rate master is resampled to constant
 // fps by its timestamps. The master is read as BT.709 in its tagged range.
-func ExtractFrames(ctx context.Context, master string, _ Master, w Window, fps int, dir string) ([]string, error) {
+func ExtractFrames(ctx context.Context, master string, w Window, fps int, dir string) ([]string, error) {
 	n := w.Frames(fps)
 	if n <= 0 {
 		return nil, errors.New("the trim window is empty: nothing to render")

@@ -26,12 +26,11 @@ while [ $i -lt $n ]; do printf x > "$(printf "$pat" $i)"; i=$((i + 1)); done`)
 }
 
 func TestExtractFramesArgs(t *testing.T) {
-	m := Master{W: 1206, H: 2622, FirstPTS: 33.3, Duration: 8000}
 	w := Window{Start: 1000, End: 1500}
 	probe := enginetest.Stub(t, "ffprobe", `exit 1`)
 	log := frameStub(t, 0)
 	dir := t.TempDir()
-	frames, err := ExtractFrames(context.Background(), "raw.mov", m, w, 60, dir)
+	frames, err := ExtractFrames(context.Background(), "raw.mov", w, 60, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +69,7 @@ func TestExtractFramesArgs(t *testing.T) {
 func TestExtractFramesRefusesShortMaster(t *testing.T) {
 	frameStub(t, 1)
 	dir := t.TempDir()
-	_, err := ExtractFrames(context.Background(), "raw.mov", Master{}, Window{Start: 0, End: 500}, 60, dir)
+	_, err := ExtractFrames(context.Background(), "raw.mov", Window{Start: 0, End: 500}, 60, dir)
 	if err == nil || !strings.Contains(err.Error(), "master ends before the trim window: decoded 29 of 30 frames") {
 		t.Fatalf("err = %v", err)
 	}
@@ -81,7 +80,7 @@ func TestExtractFramesRefusesShortMaster(t *testing.T) {
 
 func TestExtractFramesRefusesEmptyWindow(t *testing.T) {
 	log := frameStub(t, 0)
-	_, err := ExtractFrames(context.Background(), "raw.mov", Master{}, Window{}, 60, t.TempDir())
+	_, err := ExtractFrames(context.Background(), "raw.mov", Window{}, 60, t.TempDir())
 	if err == nil || !strings.Contains(err.Error(), "nothing to render") {
 		t.Fatalf("err = %v", err)
 	}
@@ -97,7 +96,7 @@ for i in 0 1 2; do cp "$GRAY" "$(printf "$pat" $i)"; done`)
 	writePNG(t, gray, image.NewGray(image.Rect(0, 0, 4, 6)))
 	t.Setenv("GRAY", gray)
 	dir := t.TempDir()
-	frames, err := ExtractActivity(context.Background(), "raw.mov", Master{FirstPTS: 33.3}, 60, dir)
+	frames, err := ExtractActivity(context.Background(), "raw.mov", 60, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +144,7 @@ func TestExtractFramesHoldsVFRFrames(t *testing.T) {
 		t.Fatal(err)
 	}
 	// 700 ms after the first frame is pts 1.2 s: three red ticks, ten lime, then blue.
-	frames, err := ExtractFrames(context.Background(), master, Master{FirstPTS: 500}, Window{Start: 700, End: 2100}, 10, t.TempDir())
+	frames, err := ExtractFrames(context.Background(), master, Window{Start: 700, End: 2100}, 10, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
