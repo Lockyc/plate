@@ -12,31 +12,33 @@ import (
 	"github.com/lockyc/plate/internal/pins"
 )
 
-// The lossy encoders' quality, measured by the clip-text-sharp-mp4 and
-// clip-text-sharp-webm quality cases: thin neon text on the app's dark
-// ground. mp4CRF, with mp4Params' chroma QP offset, writes about the bytes
-// a plain crf 18 did, on a still page and on a scrolling one, and keeps
-// more of the text's colour at them. The webm is AV1: at webmCRF it writes
-// the bytes VP9 did at crf 32 on the scrolling page and keeps more detail
-// (0.912 against 0.908 rgb-min), and on the still page it keeps more at
-// half VP9's bytes.
+// The lossy encoders' quality, measured by the clip-text-sharp-* and
+// clip-text-scroll-* quality cases: thin text in four saturated accent
+// colours on a dark UI ground, still and scrolling. mp4CRF, with
+// mp4Params' chroma QP offset, writes the bytes a plain crf 18 did on both
+// pages and keeps more of the text's colour at them (scrolling: 0.907
+// rgb-min against 0.903). The webm is AV1: at webmCRF it keeps more detail
+// than VP9 at crf 32 on both pages, at under half VP9's bytes scrolling.
 const (
-	mp4CRF    = 24
+	mp4CRF    = 22
 	mp4Params = "chroma-qp-offset=-6"
 	webmCRF   = 32
 )
 
-// bt709 tags an encode BT.709 in limited range, and toYUV writes the
-// composed RGB frames as 4:2:0 under that matrix and range, its chroma
-// downsampled by Lanczos, which of swscale's filters keeps the most of a
-// coloured stroke as Chromium upsamples it (clip-text-sharp-mp4: 0.910
-// rgb-min against bicubic's 0.907 and area's 0.905). toYUV tags the frames
-// too: an encoder takes the filtered frames' tags over its own options, and
-// frames from RGB PNGs carry no primaries or transfer.
+// bt709 tags an encode BT.709 matrix and primaries in limited range with
+// the sRGB transfer, and toYUV writes the composed RGB frames as 4:2:0
+// under that matrix and range, its chroma downsampled by Lanczos, which of
+// swscale's filters keeps the most of a coloured stroke as Chromium
+// upsamples it (clip-text-sharp-mp4: 0.910 rgb-min against bicubic's 0.907
+// and area's 0.905). The frames are sRGB, and so is the tag: WebKit applies
+// a BT.709 transfer tag, drawing a #0a0a12 ground as #080812 beside the
+// same CSS colour, and draws the sRGB tag as #0a0a13; Chromium draws both
+// alike. toYUV tags the frames too: an encoder takes the filtered frames'
+// tags over its own options, and frames from RGB PNGs carry none.
 var (
-	bt709 = []string{"-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709", "-color_range", "tv"}
+	bt709 = []string{"-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "iec61966-2-1", "-color_range", "tv"}
 	toYUV = "scale=out_color_matrix=bt709:out_range=tv:flags=accurate_rnd+full_chroma_int+lanczos,format=yuv420p," +
-		"setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv"
+		"setparams=color_primaries=bt709:color_trc=iec61966-2-1:colorspace=bt709:range=tv"
 )
 
 // Encode writes the composed frames r%05d.png in refsDir, w×h at fps, as
