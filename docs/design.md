@@ -155,7 +155,8 @@ colours, or renders what it is given.
   `clip.ExtractFrames`, `clip.Encode`); everything between is Go: the trim
   (`clip.TrimWindow`) and its idle cuts (`clip.IdleCuts`, applied to the
   frames by `clip.ApplyCuts` and to the log by `clip.CompressLog` before
-  anything reads its times), the camera (`clip.NewLayout`, `clip.Path`), the
+  anything reads its times), the camera (`clip.NewLayout`, `clip.Path`, its
+  keyboard rises and drops timed from the master by `clip.TimeKeyboard`), the
   overlay timeline (`clip.Timeline`) and the composite (`clip.Compose`,
   through `clip.Resample`), which also closes the loop (`clip.closeLoop`,
   one of `clip.Loops`; a dip eases to `clip.ground`). Overlay sprites are
