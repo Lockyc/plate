@@ -148,8 +148,9 @@ Any still stretch between steps longer than the script's `[output]
 max_idle_ms` (default 500, 100 to 60000) is cut to that length from its
 middle, so the time a driver spends between steps never shows; captions,
 touches and the camera stay with the picture. A blinking caret counts as
-still. An action, its `hold_ms` and its touch or key overlay, a caption's
-fade, and a `pause` step are never cut.
+still. An action, its `hold_ms` and its touch, click or key overlay, a
+caption's fade, a `pause` step, and a following camera's pan and lead
+before the action it moves to are never cut.
 A clip whose last frame visibly differs from its first has its loop closed
 over its final and opening frames. The script's `[output] loop` picks how:
 `crossfade` (the default) blends the end into the start, and `dip` eases
