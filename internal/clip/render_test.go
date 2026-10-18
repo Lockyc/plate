@@ -60,8 +60,28 @@ func TestRenderRefusesSyncErrorBeforeDecoding(t *testing.T) {
 	if c := enginetest.Calls(t, ffmpeg); len(c) != 0 {
 		t.Fatalf("ffmpeg ran: %q", c)
 	}
-	if n := named(t, out, "adding-nodes"); len(n) != 0 {
-		t.Fatalf("--out holds %q after a refusal", n)
+	if n := named(t, out, "adding-nodes"); !slices.Equal(n, []string{"adding-nodes.mp4"}) {
+		t.Fatalf("a refused log touched the last good clip: --out holds %q", n)
+	}
+}
+
+func TestRenderBadEventsPathKeepsLastClip(t *testing.T) {
+	dir := t.TempDir()
+	script := writeFile(t, filepath.Join(dir, "clip.toml"), contractExample)
+	out := filepath.Join(dir, "out")
+	if err := os.MkdirAll(out, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(out, "adding-nodes.mp4"), "the last good clip")
+	writeFile(t, filepath.Join(out, "adding-nodes.json"), "{}")
+	var stdout, stderr bytes.Buffer
+	code := Main(context.Background(), []string{"render", "--script", script, "--master", filepath.Join(dir, "raw.mov"),
+		"--events", filepath.Join(dir, "missing.jsonl"), "--out", out}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("code %d, stderr %q", code, stderr.String())
+	}
+	if n := named(t, out, "adding-nodes"); !slices.Equal(n, []string{"adding-nodes.json", "adding-nodes.mp4"}) {
+		t.Fatalf("--out holds %q, want the last good clip intact", n)
 	}
 }
 

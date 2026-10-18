@@ -57,9 +57,11 @@ func outputs(name string) []string {
 }
 
 // Render turns a master recording and its event log into the script's
-// clip in o.Out. It refuses everything it can before decoding anything,
-// removes an earlier run's outputs first so a failure leaves none that look
-// current, and publishes the outputs only once every check has passed.
+// clip in o.Out. It refuses everything it can before decoding anything.
+// A log or master that fails its checks leaves an earlier run's outputs
+// alone; once both pass, those outputs are removed so a later failure
+// leaves none that look current. The new outputs are published only once
+// every check has passed.
 // Warnings are written to warn.
 func Render(ctx context.Context, o RenderOptions, warn io.Writer) (Measurement, error) {
 	s, err := Load(o.Script)
@@ -68,9 +70,6 @@ func Render(ctx context.Context, o RenderOptions, warn io.Writer) (Measurement, 
 	}
 	out, _, err := outdir.Make(o.Out, "plate-clip-")
 	if err != nil {
-		return Measurement{}, err
-	}
-	if err := removeOutputs(out, s.Name); err != nil {
 		return Measurement{}, err
 	}
 	ev, err := os.Open(o.Events)
@@ -92,6 +91,9 @@ func Render(ctx context.Context, o RenderOptions, warn io.Writer) (Measurement, 
 	}
 	if msg != "" {
 		fmt.Fprintf(warn, "plate clip render: warning: %s\n", msg)
+	}
+	if err := removeOutputs(out, s.Name); err != nil {
+		return Measurement{}, err
 	}
 	var css string
 	if o.CaptionCSS != "" {
