@@ -230,7 +230,7 @@ func Render(ctx context.Context, o RenderOptions, warn io.Writer) (Measurement, 
 		if err != nil {
 			return 0, err
 		}
-		return sharpness(ctx, filepath.Join(tmp, file), refs, decDir)
+		return sharpness(ctx, filepath.Join(tmp, file), refs, lc, decDir)
 	})
 	if err != nil {
 		return Measurement{}, err
@@ -267,8 +267,8 @@ func loopSeam(refs []string) (float64, error) {
 
 // sharpness is Sharpness of the encoded file against the composed frames'
 // lossless 4:2:0 copy (Lossless420) at SampleFrames.
-func sharpness(ctx context.Context, file string, refs []string, dir string) (float64, error) {
-	idx := SampleFrames(len(refs))
+func sharpness(ctx context.Context, file string, refs []string, lc LoopClose, dir string) (float64, error) {
+	idx := SampleFrames(len(refs), lc)
 	got, err := ExtractEncoded(ctx, file, idx, dir)
 	if err != nil {
 		return 0, err

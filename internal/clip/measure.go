@@ -51,14 +51,21 @@ func Seam(a, b *image.RGBA64) (float64, error) {
 }
 
 // SampleFrames are the frames of an n-frame clip that Sharpness is
-// measured on: the first, every 30th, and the last.
-func SampleFrames(n int) []int {
+// measured on: the first, every 30th after it, and the last of the frames
+// the loop close lc left as composed. A crossfaded or dipped frame's detail
+// is faded by design, and an encoder keeps faint detail worst, so scoring
+// one measures the fade, not the encode.
+func SampleFrames(n int, lc LoopClose) []int {
+	lo, hi := lc.Head, n-1-lc.Tail
+	if hi < lo {
+		lo, hi = 0, n-1
+	}
 	var out []int
-	for k := 0; k < n; k += 30 {
+	for k := lo; k <= hi; k += 30 {
 		out = append(out, k)
 	}
-	if n > 0 && out[len(out)-1] != n-1 {
-		out = append(out, n-1)
+	if len(out) > 0 && out[len(out)-1] != hi {
+		out = append(out, hi)
 	}
 	return out
 }
