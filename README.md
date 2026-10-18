@@ -146,6 +146,9 @@ The MP4 is muted, constant frame rate and faststart, so a web view or Electron
 autoplays it inline, and it draws a colour as the page beside it does in Safari.
 The WebM is AV1, which Safari plays only on hardware with an AV1 decoder,
 so a page lists the MP4 as its fallback source.
+The WebP holds every frame in memory at 16 bits per channel while it
+encodes, about 20 MB per 1080×2348 frame, so a 10-second clip at 60 fps
+needs over 12 GB; list it only for short or small clips.
 `--caption-css` loads after plate's caption style.
 
 `clip render` refuses before decoding anything when the event log's sync

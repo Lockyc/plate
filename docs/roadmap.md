@@ -138,6 +138,12 @@ independently of phase 5. Within a phase, order is open.
   does, then gifski pinned.
 - **Animated WebP frame times round to whole ms at 60 fps.** Deferred
   because no caller needs exact WebP timing. Unlock: such a caller.
+- **Animated WebP loads every frame at once.** `clip.Encode` hands the
+  frames to ImageMagick, which holds them all at Q16, so memory grows with
+  frame count times frame size (a long full-width clip peaks near 19 GB).
+  Deferred because MP4 and WebM are the formats a page plays, and WebP is
+  an opt-in extra. Unlock: a pinned ffmpeg carrying `libwebp_anim`, which
+  streams the frames, or encoding in batches and joining them.
 - **Sharpness misses a magenta chroma smear.** Magenta keeps its strokes
   through either smear `clip.MinSharpness` catches on the other colours
   (see `sharpSigma` in internal/clip/measure.go), so a chroma-smearing
