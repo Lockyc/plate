@@ -20,10 +20,13 @@ const (
 )
 
 // bt709 tags an encode BT.709 in limited range, and toYUV writes the
-// composed RGB frames as 4:2:0 under that matrix and range.
+// composed RGB frames as 4:2:0 under that matrix and range. toYUV tags the
+// frames too: an encoder takes the filtered frames' tags over its own
+// options, and frames from RGB PNGs carry no primaries or transfer.
 var (
 	bt709 = []string{"-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709", "-color_range", "tv"}
-	toYUV = "scale=out_color_matrix=bt709:out_range=tv,format=yuv420p"
+	toYUV = "scale=out_color_matrix=bt709:out_range=tv,format=yuv420p," +
+		"setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv"
 )
 
 // Encode writes the composed frames r%05d.png in refsDir, w×h at fps, as

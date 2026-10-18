@@ -3,12 +3,14 @@ package clip
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
+	"github.com/lockyc/plate/internal/engine"
 	"github.com/lockyc/plate/internal/enginetest"
 )
 
@@ -52,7 +54,7 @@ func TestEncodeArgs(t *testing.T) {
 		t.Fatalf("mp4 argv %q\nlacks the floor, in order: %q", mp4, floor)
 	}
 	if !inOrder(mp4, []string{"-framerate", "60", "-i", filepath.Join(refs, "r%05d.png"), "-vf"}) ||
-		!slices.Contains(mp4, "scale=out_color_matrix=bt709:out_range=tv,format=yuv420p") {
+		!slices.Contains(mp4, toYUV) || !strings.HasPrefix(toYUV, "scale=out_color_matrix=bt709:out_range=tv,") {
 		t.Fatalf("mp4 input or scale: %q", mp4)
 	}
 
@@ -110,5 +112,37 @@ func TestRequireEncoders(t *testing.T) {
 	}
 	if err := requireEncoders(ctx, []string{"mp4"}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestEncodeMP4MeetsFloor encodes with the real ffmpeg and reads the mp4
+// back: checkMP4's floor, and the BT.709 tags, which an encoder option
+// alone leaves unknown when the filtered frames carry none.
+func TestEncodeMP4MeetsFloor(t *testing.T) {
+	if _, err := engine.Resolve("ffmpeg"); err != nil {
+		t.Skip(err)
+	}
+	if err := requireEncoders(context.Background(), []string{"mp4"}); err != nil {
+		t.Skip(err)
+	}
+	refs := t.TempDir()
+	for k := range 3 {
+		writePNG(t, filepath.Join(refs, fmt.Sprintf("r%05d.png", k)), solid(16, 16, red))
+	}
+	out := filepath.Join(t.TempDir(), "c.mp4")
+	ctx := context.Background()
+	if err := Encode(ctx, "mp4", refs, 60, 16, 16, out); err != nil {
+		t.Fatal(err)
+	}
+	if err := checkMP4(ctx, out, 3, 60); err != nil {
+		t.Fatal(err)
+	}
+	res, err := engine.Run(ctx, engine.Cmd{Engine: "ffprobe", Args: []string{"-v", "error",
+		"-show_entries", "stream=color_space,color_primaries,color_transfer,color_range", "-of", "csv=p=0", out}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(string(res.Stdout)); got != "tv,bt709,bt709,bt709" {
+		t.Fatalf("range, space, transfer, primaries = %s", got)
 	}
 }
