@@ -356,17 +356,33 @@ func checkRects(evs []lineEvent, s *Script) Problems {
 }
 
 // CheckMaster holds the log to the master video it was recorded beside: the
-// same screen size. Times are not held to the master's duration: simctl
-// writes a frame only when the screen changes, so a master whose screen
-// stood still probes as ending at its last change, and the log's end is
-// when recording stopped.
-func (l *Log) CheckMaster(m Master) error {
+// same screen size, and a last frame no earlier than the first action.
+// simctl writes a frame only when the screen changes, so a master whose
+// screen stood still probes as ending at its last change and the log's end
+// is when recording stopped; but every action changes the screen, so a
+// master over before the first one is cut short or another recording. One
+// over before the last action passes with warn set: an action can change
+// nothing on screen.
+func (l *Log) CheckMaster(m Master) (warn string, err error) {
 	w := int(math.Round(l.Meta.Screen[0] * l.Meta.Scale))
 	h := int(math.Round(l.Meta.Screen[1] * l.Meta.Scale))
 	if abs(m.W-w) > 1 || abs(m.H-h) > 1 {
-		return fmt.Errorf("master is %dx%d, events say %dx%d", m.W, m.H, w, h)
+		return "", fmt.Errorf("master is %dx%d, events say %dx%d", m.W, m.H, w, h)
 	}
-	return nil
+	first, last := math.Inf(1), math.Inf(-1)
+	for _, e := range l.Events {
+		if _, ok := actionOf[e.Type]; ok {
+			first, last = math.Min(first, e.T), math.Max(last, e.T)
+		}
+	}
+	end := m.Duration - m.FirstPTS
+	switch {
+	case end < first:
+		return "", fmt.Errorf("the master's last frame is at %g ms, before the first action at %g ms: it is cut short or not this log's recording", end, first)
+	case end < last:
+		return fmt.Sprintf("the master's last frame is at %g ms, before the last action at %g ms; the screen holds still from there", end, last), nil
+	}
+	return "", nil
 }
 
 func abs(n int) int {

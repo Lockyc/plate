@@ -57,18 +57,30 @@ func TestSharpnessCatchesChromaSmear(t *testing.T) {
 	if err != nil || luma <= 0.95 {
 		t.Fatalf("luma Detail = %v, %v; want > 0.95", luma, err)
 	}
-	if s := Sharpness([]*image.RGBA64{ref}, []*image.RGBA64{got}); s >= 0.8 {
-		t.Fatalf("Sharpness = %v, want < 0.8", s)
+	if s, err := Sharpness([]*image.RGBA64{ref}, []*image.RGBA64{got}); err != nil || s >= 0.8 {
+		t.Fatalf("Sharpness = %v, %v; want < 0.8", s, err)
 	}
-	if s := Sharpness([]*image.RGBA64{ref, ref}, []*image.RGBA64{ref, got}); s >= 0.8 {
-		t.Fatalf("Sharpness over two frames = %v, want the worse frame's", s)
+	if s, err := Sharpness([]*image.RGBA64{ref, ref}, []*image.RGBA64{ref, got}); err != nil || s >= 0.8 {
+		t.Fatalf("Sharpness over two frames = %v, %v; want the worse frame's", s, err)
 	}
 }
 
 func TestSharpnessSkipsFlatFrames(t *testing.T) {
 	flat := solid(8, 8, color.RGBA64{0, 0, 0, 0xffff})
-	if s := Sharpness([]*image.RGBA64{flat}, []*image.RGBA64{flat}); s != 1 {
-		t.Fatalf("Sharpness of flat frames = %v, want 1", s)
+	if s, err := Sharpness([]*image.RGBA64{flat}, []*image.RGBA64{flat}); err != nil || s != 1 {
+		t.Fatalf("Sharpness of flat frames = %v, %v; want 1", s, err)
+	}
+}
+
+// TestSharpnessRefusesMismatchedFrames: a decode of the wrong size or
+// count is an error, never a score that blames the encode.
+func TestSharpnessRefusesMismatchedFrames(t *testing.T) {
+	a, b := solid(8, 8, red), solid(4, 4, red)
+	if s, err := Sharpness([]*image.RGBA64{a}, []*image.RGBA64{b}); err == nil {
+		t.Fatalf("mismatched sizes scored %v", s)
+	}
+	if s, err := Sharpness([]*image.RGBA64{a, a}, []*image.RGBA64{a}); err == nil {
+		t.Fatalf("mismatched counts scored %v", s)
 	}
 }
 

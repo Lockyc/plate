@@ -14,6 +14,7 @@ import (
 
 	"github.com/lockyc/plate/internal/engine"
 	"github.com/lockyc/plate/internal/enginetest"
+	"github.com/lockyc/plate/internal/pins"
 )
 
 // frameStub is an ffmpeg stand-in writing short frames fewer than its
@@ -70,7 +71,7 @@ func TestExtractFramesRefusesShortMaster(t *testing.T) {
 	frameStub(t, 1)
 	dir := t.TempDir()
 	_, err := ExtractFrames(context.Background(), "raw.mov", Colour{}, Window{Start: 0, End: 500}, 60, dir)
-	if err == nil || !strings.Contains(err.Error(), "master ends before the trim window: decoded 29 of 30 frames") {
+	if err == nil || !strings.Contains(err.Error(), "raw.mov: decoded 29 of 30 frames") {
 		t.Fatalf("err = %v", err)
 	}
 	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
@@ -271,15 +272,24 @@ func TestExtractFramesHoldsStaticTail(t *testing.T) {
 	if err := os.WriteFile(concat, []byte(list), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	for _, codec := range []string{"libx264", "libx265"} {
-		master := filepath.Join(fix, codec+".mp4")
-		if _, err := engine.Run(context.Background(), engine.Cmd{Engine: "ffmpeg",
-			Args: []string{"-hide_banner", "-loglevel", "error", "-nostdin", "-f", "concat", "-safe", "0", "-i", concat,
-				"-fps_mode", "passthrough", "-c:v", codec, "-pix_fmt", "yuv420p", "-x265-params", "log-level=none", master},
-			Inputs: []string{concat}, Outputs: []string{master}}); err != nil {
-			t.Logf("%s: %v", codec, err)
+	ffmpeg, _ := pins.Lookup("ffmpeg")
+	for _, codec := range [][]string{{"libx264"}, {"libx265", "-x265-params", "log-level=none"}} {
+		has, err := engine.Capable(context.Background(), ffmpeg, pins.Capability{Args: []string{"-hide_banner", "-encoders"}, Token: codec[0]})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !has && codec[0] == "libx265" {
+			t.Logf("libx265 is not in this ffmpeg; HEVC unchecked")
 			continue
 		}
+		master := filepath.Join(fix, codec[0]+".mp4")
+		args := append([]string{"-hide_banner", "-loglevel", "error", "-nostdin", "-f", "concat", "-safe", "0", "-i", concat,
+			"-fps_mode", "passthrough", "-pix_fmt", "yuv420p", "-c:v"}, codec...)
+		if _, err := engine.Run(context.Background(), engine.Cmd{Engine: "ffmpeg", Args: append(args, master),
+			Inputs: []string{concat}, Outputs: []string{master}}); err != nil {
+			t.Fatalf("%s: %v", codec[0], err)
+		}
+		codec := codec[0]
 		m, err := ProbeMaster(context.Background(), master)
 		if err != nil || m.Duration > 1000 {
 			t.Fatalf("%s: probe %+v, %v; want a master well short of 3000 ms", codec, m, err)

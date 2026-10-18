@@ -123,8 +123,11 @@ func toBT709(c Colour) string {
 // (k+1)·1000/fps, so a variable frame rate master is resampled to constant
 // fps by its timestamps. The last master frame is held to w.End: simctl
 // writes no frame while the screen is still, so a clip's static tail has
-// none to decode. The master is read as BT.709 YCbCr in its tagged range,
-// its primaries converted to BT.709's when c tags others.
+// none to decode. The hold pads by excess, w.End past the master's last
+// frame rather than past its probed end, and -frames:v cuts it, so a short
+// master is never refused here; CheckMaster refuses one cut short. The
+// master is read as BT.709 YCbCr in its tagged range, its primaries
+// converted to BT.709's when c tags others.
 func ExtractFrames(ctx context.Context, master string, c Colour, w Window, fps int, dir string) ([]string, error) {
 	n := w.Frames(fps)
 	if n <= 0 {
@@ -132,7 +135,7 @@ func ExtractFrames(ctx context.Context, master string, c Colour, w Window, fps i
 	}
 	vf := fmt.Sprintf("%stpad=stop_mode=clone:stop_duration=%s,fps=%d:round=down,%s", toBT709(c), seconds(w.End), fps, toRGB)
 	return decode(ctx, master, vf, []string{"-fps_mode", "cfr", "-ss", seconds(w.Start), "-frames:v", strconv.Itoa(n)},
-		n, "master ends before the trim window", "m", dir)
+		n, master, "m", dir)
 }
 
 // ExtractEncoded decodes frames indices (ascending) of an encoded clip to

@@ -71,10 +71,8 @@ func Render(ctx context.Context, o RenderOptions, warn io.Writer) (Measurement, 
 	if err != nil {
 		return Measurement{}, err
 	}
-	for _, n := range outputs(s.Name) {
-		if err := os.Remove(filepath.Join(out, n)); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return Measurement{}, err
-		}
+	if err := removeOutputs(out, s.Name); err != nil {
+		return Measurement{}, err
 	}
 	ev, err := os.Open(o.Events)
 	if err != nil {
@@ -89,8 +87,12 @@ func Render(ctx context.Context, o RenderOptions, warn io.Writer) (Measurement, 
 	if err != nil {
 		return Measurement{}, err
 	}
-	if err := l.CheckMaster(m); err != nil {
+	msg, err := l.CheckMaster(m)
+	if err != nil {
 		return Measurement{}, err
+	}
+	if msg != "" {
+		fmt.Fprintf(warn, "plate clip render: warning: %s\n", msg)
 	}
 	var css string
 	if o.CaptionCSS != "" {
@@ -249,7 +251,7 @@ func sharpness(ctx context.Context, file string, refs []string, dir string) (flo
 			return 0, err
 		}
 	}
-	return Sharpness(want, got), nil
+	return Sharpness(want, got)
 }
 
 // check holds the encodes to the floor and the measures to their limits:
@@ -320,6 +322,16 @@ func checkMP4(ctx context.Context, file string, frames, fps int) error {
 	return nil
 }
 
+// removeOutputs removes from out every output a render of name may write.
+func removeOutputs(out, name string) error {
+	for _, n := range outputs(name) {
+		if err := os.Remove(filepath.Join(out, n)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
+	}
+	return nil
+}
+
 // publish moves files (names in tmp) into out as name's outputs. It first
 // removes every output a render of name may write, so none from an earlier
 // run with other formats survives, then renames each file in, the sidecar
@@ -327,10 +339,8 @@ func checkMP4(ctx context.Context, file string, frames, fps int) error {
 // removes what it moved; tmp is removed either way.
 func publish(tmp, out, name string, files []string) error {
 	defer os.RemoveAll(tmp)
-	for _, n := range outputs(name) {
-		if err := os.Remove(filepath.Join(out, n)); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return err
-		}
+	if err := removeOutputs(out, name); err != nil {
+		return err
 	}
 	for _, f := range files {
 		if _, err := os.Stat(filepath.Join(tmp, f)); err != nil {

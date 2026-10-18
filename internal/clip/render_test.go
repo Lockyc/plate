@@ -143,3 +143,20 @@ func TestMeasurementJSONShape(t *testing.T) {
 		t.Fatalf("trim %s, formats %s", m["trim"], m["formats"])
 	}
 }
+
+func TestRenderRefusesTruncatedMaster(t *testing.T) {
+	dir := t.TempDir()
+	script := writeFile(t, filepath.Join(dir, "clip.toml"), contractExample)
+	events := writeFile(t, filepath.Join(dir, "events.jsonl"), strings.Join(contractLog, "\n")+"\n")
+	enginetest.Stub(t, "ffprobe", `echo '{"streams":[{"width":1206,"height":2622}],"frames":[{"pts_time":"0"}],"format":{"duration":"1.0"}}'`)
+	ffmpeg := enginetest.Stub(t, "ffmpeg", `exit 99`)
+	var stdout, stderr bytes.Buffer
+	code := Main(context.Background(), []string{"render", "--script", script, "--master", filepath.Join(dir, "raw.mov"),
+		"--events", events, "--out", filepath.Join(dir, "out")}, &stdout, &stderr)
+	if code != 1 || !strings.Contains(stderr.String(), "before the first action at 1520 ms") {
+		t.Fatalf("code %d, stderr %q", code, stderr.String())
+	}
+	if c := enginetest.Calls(t, ffmpeg); len(c) != 0 {
+		t.Fatalf("ffmpeg ran: %q", c)
+	}
+}
