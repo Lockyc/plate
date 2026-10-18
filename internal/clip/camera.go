@@ -38,7 +38,7 @@ type Layout struct {
 }
 
 // PinView is one pin strip at one frame: Src in points, Y and H in output
-// px. H = Shown·W·Src.H/Src.W, so a strip is never stretched.
+// px. H = W·Src.H/Src.W, so a strip is never stretched.
 type PinView struct {
 	Name        string
 	Src         Rect
@@ -60,80 +60,154 @@ type camState struct{ cx, cy, w float64 }
 type camera struct {
 	tr     *Track
 	lay    Layout
+	r0     Rect
 	screen Rect
 	zoom   float64
 	minW   float64 // the narrowest region max_zoom allows, pt
+	// stack is the pins in output order, top to bottom, fixed for the clip;
+	// above says which side of the region each sits on.
+	stack []PinSlot
+	above map[string]bool
+	// restA and restB are the px the strips above and below take at the
+	// first rects sample, rounded as Layout counts them.
+	restA, restB float64
 }
 
-func newCamera(s *Script, l *Log, tr *Track, lay Layout) *camera {
-	return &camera{tr: tr, lay: lay,
+func newCamera(s *Script, l *Log, tr *Track, lay Layout) (*camera, error) {
+	r0, err := startRect(s, l, tr)
+	if err != nil {
+		return nil, err
+	}
+	c := &camera{tr: tr, lay: lay, r0: r0,
 		screen: Rect{0, 0, l.Meta.Screen[0], l.Meta.Screen[1]},
 		zoom:   *s.Camera.MaxZoom,
 		minW:   float64(s.Output.Width) / (*s.Camera.MaxZoom * l.Meta.Scale)}
+	c.order()
+	for _, p := range c.stack {
+		h := math.Round(c.pin(p, tr.first).H)
+		if c.above[p.Name] {
+			c.restA += h
+		} else {
+			c.restB += h
+		}
+	}
+	return c, nil
 }
 
-// pin is pin slot p at t, and its whole rect. An element pin is always
-// fully shown; a system pin's Src is the top Shown share of its rect, the
-// part that has risen into view, so Src keeps the strip's aspect.
-func (c *camera) pin(p PinSlot, t float64) (PinView, Rect) {
+// order fixes each pin's side and the strips' order once for the clip, so
+// a strip never swaps places mid-clip. A pin sits above the region when
+// its centre, at its first up sample, lies above R0's centre. Two pins on
+// one side stack in screen order at the first sample both are up (or, if
+// never together, at each one's first up sample).
+func (c *camera) order() {
+	firstUp := func(name string) (Rect, float64) {
+		for _, s := range c.tr.series[name] {
+			if s.r != nil {
+				return *s.r, s.t
+			}
+		}
+		return Rect{}, 0
+	}
+	centre := func(r Rect) float64 { return r.Y + r.H/2 }
+	cy := centre(c.r0)
+	c.above = map[string]bool{}
+	for _, p := range c.lay.Pins {
+		r, _ := firstUp(p.Name)
+		c.above[p.Name] = centre(r) < cy
+	}
+	together := func(a, b string) (float64, float64) {
+		var ts []float64
+		for _, s := range append(append([]sample{}, c.tr.series[a]...), c.tr.series[b]...) {
+			ts = append(ts, s.t)
+		}
+		sort.Float64s(ts)
+		for _, t := range ts {
+			ra, sa := c.tr.PinAt(a, t)
+			rb, sb := c.tr.PinAt(b, t)
+			if sa == 1 && sb == 1 {
+				return centre(ra), centre(rb)
+			}
+		}
+		ra, _ := firstUp(a)
+		rb, _ := firstUp(b)
+		return centre(ra), centre(rb)
+	}
+	c.stack = append([]PinSlot{}, c.lay.Pins...)
+	sort.SliceStable(c.stack, func(i, j int) bool {
+		a, b := c.stack[i].Name, c.stack[j].Name
+		if c.above[a] != c.above[b] {
+			return c.above[a]
+		}
+		ya, yb := together(a, b)
+		return ya < yb
+	})
+}
+
+// pin is pin slot p at t. An element pin is always fully shown. A system
+// pin's Src is the Shown share of its rect nearest the screen edge it
+// slides in from (the bottom for a pin below the region), where it
+// physically is mid-slide, so Src keeps the strip's aspect.
+func (c *camera) pin(p PinSlot, t float64) PinView {
 	r, shown := c.tr.PinAt(p.Name, t)
 	if !p.System {
 		shown = 1
 	}
+	if shown <= 0 {
+		return PinView{Name: p.Name}
+	}
 	src := Rect{r.X, r.Y, r.W, r.H * shown}
-	return PinView{Name: p.Name, Src: src, Shown: shown, H: float64(c.lay.W) * src.H / src.W}, r
+	if !c.above[p.Name] {
+		src.Y = r.Y + r.H*(1-shown)
+	}
+	return PinView{Name: p.Name, Src: src, Shown: shown, H: float64(c.lay.W) * src.H / src.W}
 }
 
-// strips stacks the shown pins at t about a region centred at cy, and gives
-// the region's slot and the screen area the region may occupy. A strip
-// whose centre is above cy sits above the region. A partly shown pin bounds
-// the region at its edge eased in from the screen edge, as it slides in.
-func (c *camera) strips(t, cy float64) (v View, bounds Rect) {
-	var above, below []PinView
-	edge := c.screen.Y + c.screen.H
-	top, bottom := c.screen.Y, edge
-	total := 0.0
-	for _, p := range c.lay.Pins {
-		pv, r := c.pin(p, t)
+// strips stacks the shown pins at t in their fixed order and gives the
+// region's slot, the screen area the region may occupy (between the
+// strips' Src), and how many px the strips above and below take beyond
+// their first-sample share.
+func (c *camera) strips(t float64) (v View, bounds Rect, growA, growB float64) {
+	top, bottom := c.screen.Y, c.screen.Y+c.screen.H
+	var sumA, sumB float64
+	y := 0.0
+	for _, p := range c.stack {
+		pv := c.pin(p, t)
 		if pv.Shown <= 0 {
 			continue
 		}
-		total += pv.H
-		if r.Y+r.H/2 < cy {
-			above = append(above, pv)
-			top = math.Max(top, c.screen.Y+pv.Shown*(r.Y+r.H-c.screen.Y))
+		if c.above[p.Name] {
+			sumA += pv.H
+			top = math.Max(top, pv.Src.Y+pv.Src.H)
+			pv.Y = y
+			y += pv.H
 		} else {
-			below = append(below, pv)
-			bottom = math.Min(bottom, edge+pv.Shown*(r.Y-edge))
+			sumB += pv.H
+			bottom = math.Min(bottom, pv.Src.Y)
+		}
+		v.Pins = append(v.Pins, pv)
+	}
+	v.RegionY = sumA
+	v.RegionH = float64(c.lay.H) - sumA - sumB
+	y = v.RegionY + v.RegionH
+	for i := range v.Pins {
+		if !c.above[v.Pins[i].Name] {
+			v.Pins[i].Y = y
+			y += v.Pins[i].H
 		}
 	}
-	byY := func(ps []PinView) {
-		sort.SliceStable(ps, func(i, j int) bool { return ps[i].Src.Y < ps[j].Src.Y })
-	}
-	byY(above)
-	byY(below)
-	y := 0.0
-	for i := range above {
-		above[i].Y = y
-		y += above[i].H
-	}
-	v.RegionY = y
-	v.RegionH = float64(c.lay.H) - total
-	y += v.RegionH
-	for i := range below {
-		below[i].Y = y
-		y += below[i].H
-	}
-	v.Pins = append(above, below...)
-	return v, Rect{c.screen.X, top, c.screen.W, bottom - top}
+	return v, Rect{c.screen.X, top, c.screen.W, bottom - top}, sumA - c.restA, sumB - c.restB
 }
 
-// view is the frame at t with the camera at st: the region's height follows
-// its slot about the centre, then the region is fitted into its bounds.
+// view is the frame at t with the camera at st. The state is the region
+// at the first sample's strips; strips growing above take their height
+// off the region's top, those below off its bottom, so the content stays
+// still while a strip eases in. The region is then fitted into its bounds.
 func (c *camera) view(st camState, t float64) View {
-	v, b := c.strips(t, st.cy)
-	a := float64(c.lay.W) / v.RegionH
-	v.Region = bound(Rect{st.cx - st.w/2, st.cy - st.w/a/2, st.w, st.w / a}, a, b)
+	v, b, growA, _ := c.strips(t)
+	w := float64(c.lay.W)
+	a := w / v.RegionH
+	top := st.cy - st.w*float64(c.lay.RegionH)/w/2 + growA*st.w/w
+	v.Region = bound(Rect{st.cx - st.w/2, top, st.w, st.w / a}, a, b)
 	return v
 }
 
@@ -141,11 +215,12 @@ func (c *camera) view(st camState, t float64) View {
 // aspect containing r, grown to the zoom clamp, bounded.
 func (c *camera) fit(r Rect, t float64) camState {
 	cx, cy := r.X+r.W/2, r.Y+r.H/2
-	v, b := c.strips(t, cy)
-	a := float64(c.lay.W) / v.RegionH
-	w := math.Max(math.Max(r.W, r.H*a), c.minW)
-	f := bound(Rect{cx - w/2, cy - w/a/2, w, w / a}, a, b)
-	return camState{f.X + f.W/2, f.Y + f.H/2, f.W}
+	v, b, growA, _ := c.strips(t)
+	w := float64(c.lay.W)
+	a := w / v.RegionH
+	rw := math.Max(math.Max(r.W, r.H*a), c.minW)
+	f := bound(Rect{cx - rw/2, cy - rw/a/2, rw, rw / a}, a, b)
+	return camState{f.X + f.W/2, f.Y - growA*f.W/w + f.W*float64(c.lay.RegionH)/w/2, f.W}
 }
 
 // bound shifts r of aspect a inside b; a rect larger than b becomes the
@@ -205,7 +280,10 @@ func NewLayout(s *Script, l *Log, tr *Track) (Layout, error) {
 	for _, p := range s.Camera.Pin {
 		lay.Pins = append(lay.Pins, PinSlot{Name: p.Name, System: p.System != ""})
 	}
-	c := newCamera(s, l, tr, lay)
+	c, err := newCamera(s, l, tr, lay)
+	if err != nil {
+		return Layout{}, err
+	}
 	if c.screen.W < c.minW {
 		return Layout{}, fmt.Errorf("output.width %d px would sample below capture resolution: the master is %g px across, max_zoom %s",
 			w, c.screen.W*l.Meta.Scale, zoomString(c.zoom))
@@ -222,16 +300,8 @@ func NewLayout(s *Script, l *Log, tr *Track) (Layout, error) {
 		}
 	}
 
-	r, err := startRect(s, l, tr)
-	if err != nil {
-		return Layout{}, err
-	}
-	lay.RegionH = int(math.Round(float64(w) * r.H / r.W))
-	lay.H = lay.RegionH
-	for _, p := range lay.Pins {
-		pv, _ := c.pin(p, tr.first)
-		lay.H += int(math.Round(pv.H))
-	}
+	lay.RegionH = int(math.Round(float64(w) * c.r0.H / c.r0.W))
+	lay.H = lay.RegionH + int(c.restA+c.restB)
 	if lay.H%2 != 0 {
 		lay.RegionH++
 		lay.H++
@@ -245,7 +315,7 @@ func NewLayout(s *Script, l *Log, tr *Track) (Layout, error) {
 		var names []string
 		total := 0.0
 		for _, p := range lay.Pins {
-			if pv, _ := c.pin(p, e.T); pv.Shown > 0 {
+			if pv := c.pin(p, e.T); pv.Shown > 0 {
 				names = append(names, p.Name)
 				total += pv.H
 			}
@@ -262,7 +332,7 @@ func NewLayout(s *Script, l *Log, tr *Track) (Layout, error) {
 
 	// The start state frames every sample in full and fixed mode; in follow
 	// it holds at least at the first, and Path checks every frame.
-	start := c.fit(r, tr.first)
+	start := c.fit(c.r0, tr.first)
 	for _, e := range l.Events {
 		if e.Type != "rects" || (s.Camera.Mode == "follow" && e.T != tr.first) {
 			continue
@@ -293,12 +363,11 @@ type key struct {
 // Path is the camera's view at each output frame of w; frame k is at master
 // time w.Start + k·1000/fps.
 func Path(s *Script, l *Log, tr *Track, lay Layout, w Window) ([]View, error) {
-	c := newCamera(s, l, tr, lay)
-	r, err := startRect(s, l, tr)
+	c, err := newCamera(s, l, tr, lay)
 	if err != nil {
 		return nil, err
 	}
-	start := c.fit(r, tr.first)
+	start := c.fit(c.r0, tr.first)
 	keys := []key{{depart: w.Start, arrive: w.Start, g: start}}
 	switch s.Camera.Mode {
 	case "full", "fixed":
@@ -320,8 +389,8 @@ func Path(s *Script, l *Log, tr *Track, lay Layout, w Window) ([]View, error) {
 }
 
 // goalBox is what an action event must keep in shot: its target and any
-// from/to points, or without a target its at or from/to points, padded.
-// A key event (and a type with no target) has none.
+// from/to points, or without a target its at or from/to points. A key
+// event (and a type with no target) has none.
 func goalBox(e Event) (Rect, bool) {
 	var pts []Point
 	if e.Target != nil {
@@ -345,7 +414,19 @@ func goalBox(e Event) (Rect, bool) {
 		x0, y0 = math.Min(x0, p.X), math.Min(y0, p.Y)
 		x1, y1 = math.Max(x1, p.X), math.Max(y1, p.Y)
 	}
-	return Rect{x0 - followPad, y0 - followPad, x1 - x0 + 2*followPad, y1 - y0 + 2*followPad}, true
+	return Rect{x0, y0, x1 - x0, y1 - y0}, true
+}
+
+// onPin reports whether box lies inside a pin strip shown at t: the strip
+// already keeps it in shot.
+func (c *camera) onPin(box Rect, t float64) bool {
+	v, _, _, _ := c.strips(t)
+	for _, p := range v.Pins {
+		if inside(p.Src, box) {
+			return true
+		}
+	}
+	return false
 }
 
 // follow appends a move per action whose padded target the camera does not
@@ -357,8 +438,12 @@ func (c *camera) follow(l *Log, w Window, keys []key) []key {
 		if _, ok := actionOf[e.Type]; !ok {
 			continue
 		}
-		box, ok := goalBox(e)
-		if !ok || inside(c.view(keys[len(keys)-1].g, e.T).Region, box) {
+		raw, ok := goalBox(e)
+		if !ok || c.onPin(raw, e.T) {
+			continue
+		}
+		box := Rect{raw.X - followPad, raw.Y - followPad, raw.W + 2*followPad, raw.H + 2*followPad}
+		if inside(c.view(keys[len(keys)-1].g, e.T).Region, box) {
 			continue
 		}
 		g, arrive := c.fit(box, e.T), e.T-lead

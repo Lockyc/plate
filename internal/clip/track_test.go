@@ -148,3 +148,23 @@ func TestRectAtHoldsAcrossOmittedSample(t *testing.T) {
 		t.Errorf("RectAt(b, 1500) = %v", r)
 	}
 }
+
+func TestElementEasesWithKeyboard(t *testing.T) {
+	// The touchbar rides the keyboard: in the gap where kb comes up, it
+	// moves on the keyboard's eased curve, not linearly.
+	tr := NewTrack(rectsLog(
+		rs(0, map[string]*Rect{"tb": {0, 812, 402, 62}, "kb": nil}),
+		rs(250, map[string]*Rect{"tb": {0, 498, 402, 62}, "kb": {0, 560, 402, 314}}),
+		rs(500, map[string]*Rect{"tb": {0, 400, 402, 62}, "kb": {0, 560, 402, 314}}),
+	))
+	want := 812 + (498-812)*easeInOutCubic(0.25)
+	if r, _ := tr.RectAt("tb", 62.5); math.Abs(r.Y-want) > 1e-9 {
+		t.Errorf("RectAt(tb, 62.5).Y = %g, want %g", r.Y, want)
+	}
+	if r, _ := tr.PinAt("tb", 62.5); math.Abs(r.Y-want) > 1e-9 {
+		t.Errorf("PinAt(tb, 62.5).Y = %g, want %g", r.Y, want)
+	}
+	if r, _ := tr.RectAt("tb", 312.5); r.Y != 498+(400-498)*0.25 {
+		t.Errorf("RectAt(tb, 312.5).Y = %g: a gap with no system transition is linear", r.Y)
+	}
+}
