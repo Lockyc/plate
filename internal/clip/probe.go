@@ -15,15 +15,28 @@ type Master struct {
 	W, H     int
 	FirstPTS float64
 	Duration float64
+	Colour   Colour
 }
 
-// ProbeMaster reads the master's size, duration and the presentation time of
-// its first frame, which event times are relative to.
+// Colour is how a video's pixels are tagged, in ffprobe's names; a field
+// is "" when the video leaves it untagged.
+type Colour struct{ Primaries, Transfer, Range string }
+
+// tag is an ffprobe colour field, "" for the values that tag nothing.
+func tag(s string) string {
+	if s == "unknown" || s == "unspecified" || s == "reserved" {
+		return ""
+	}
+	return s
+}
+
+// ProbeMaster reads the master's size, duration, colour tags and the
+// presentation time of its first frame, which event times are relative to.
 func ProbeMaster(ctx context.Context, path string) (Master, error) {
 	res, err := engine.Run(ctx, engine.Cmd{
 		Engine: "ffprobe",
 		Args: []string{"-v", "error", "-select_streams", "v:0",
-			"-show_entries", "stream=width,height:format=duration",
+			"-show_entries", "stream=width,height,color_primaries,color_transfer,color_range:format=duration",
 			"-show_frames", "-read_intervals", "%+#1", "-of", "json", path},
 		Inputs: []string{path},
 	})
@@ -31,8 +44,13 @@ func ProbeMaster(ctx context.Context, path string) (Master, error) {
 		return Master{}, err
 	}
 	var out struct {
-		Streams []struct{ Width, Height int }
-		Frames  []struct {
+		Streams []struct {
+			Width, Height int
+			Primaries     string `json:"color_primaries"`
+			Transfer      string `json:"color_transfer"`
+			Range         string `json:"color_range"`
+		}
+		Frames []struct {
 			PTSTime string `json:"pts_time"`
 		}
 		Format struct{ Duration string }
@@ -52,5 +70,7 @@ func ProbeMaster(ctx context.Context, path string) (Master, error) {
 		return Master{}, fmt.Errorf("%s: no duration", path)
 	}
 	ms := func(s float64) float64 { return math.Round(s*1e6) / 1e3 }
-	return Master{W: out.Streams[0].Width, H: out.Streams[0].Height, FirstPTS: ms(pts), Duration: ms(dur)}, nil
+	st := out.Streams[0]
+	return Master{W: st.Width, H: st.Height, FirstPTS: ms(pts), Duration: ms(dur),
+		Colour: Colour{Primaries: tag(st.Primaries), Transfer: tag(st.Transfer), Range: tag(st.Range)}}, nil
 }
