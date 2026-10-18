@@ -158,12 +158,13 @@ when the recording ends before the last action. A recording that stops
 early because its screen stood still is fine: its last frame is held to the
 log's end. It also refuses a camera that would upsample the recording.
 After encoding it fails when the
-MP4 is over the script's `budget_kb`, when the encode loses too much of the
-frames' fine detail (sharpness, measured per colour channel, so smeared
+MP4 is over the script's `budget_kb`, when the MP4 or WebM loses too much of
+the frames' fine detail (sharpness, measured per colour channel, so smeared
 coloured text counts), or when the loop's last frame visibly differs from
-its first. Each failure names the measured value, and leaves no output: an
-earlier run's files for that name are removed first, and the new ones are
-moved in only once every check has passed.
+its first. Each failure names the measured value. A refused log or
+recording leaves an earlier run's files in place; any later failure leaves
+none for that name, and new files are moved in only once every check has
+passed.
 
 `render` runs the page outside Chrome's sandbox with open network access. A
 local page, and any script it runs, including one loaded from the network,
