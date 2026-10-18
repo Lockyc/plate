@@ -518,3 +518,25 @@ func TestFollowIgnoresTapOnPin(t *testing.T) {
 		t.Errorf("a tap inside the touchbar strip moved the camera %d times", n)
 	}
 }
+
+func TestConstantStripsCentreTheRegion(t *testing.T) {
+	// The touchbar's 92.54 px rounds to 93 in Layout; with strips that
+	// never change, the region's centre is still the camera's, so a move
+	// that zooms lerps the centre exactly.
+	s := camScript(600, "follow", &regionT, touchbarT)
+	l := camLog(
+		rs(0, map[string]*Rect{"region": {100, 350, 200, 300}, "touchbar": {0, 812, 402, 62}}),
+		tap(3000, Point{200, 200}, &Rect{20, 180, 360, 40}),
+	)
+	w := Window{1550, 3600}
+	_, vs := path(t, s, l, w)
+	at := func(ms float64) Rect { return vs[int((ms-w.Start)*60/1000)].Region }
+	cy := func(r Rect) float64 { return r.Y + r.H/2 }
+	from, to, mid := at(2050), at(2750), at(2400)
+	if from.W == to.W {
+		t.Fatal("the fixture's move does not zoom")
+	}
+	if want := (cy(from) + cy(to)) / 2; !near(cy(mid), want, 1e-9) {
+		t.Errorf("mid-move centre %g, want %g", cy(mid), want)
+	}
+}
