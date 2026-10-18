@@ -131,3 +131,20 @@ func TestActivity(t *testing.T) {
 		}
 	}
 }
+
+func TestRectAtHoldsAcrossOmittedSample(t *testing.T) {
+	tr := NewTrack(rectsLog(
+		rs(0, map[string]*Rect{"a": {1, 1, 1, 1}}),
+		rs(500, map[string]*Rect{"a": {1, 1, 1, 1}, "b": {5, 5, 5, 5}}),
+		rs(900, map[string]*Rect{"a": {1, 1, 1, 1}}),
+		rs(1500, map[string]*Rect{"a": {1, 1, 1, 1}, "b": {9, 9, 9, 9}}),
+	))
+	for _, at := range []float64{900, 1200, 1499} {
+		if r, ok := tr.RectAt("b", at); !ok || r != (Rect{5, 5, 5, 5}) {
+			t.Errorf("RectAt(b, %g) = %v, %v", at, r, ok)
+		}
+	}
+	if r, _ := tr.RectAt("b", 1500); r.X != 9 {
+		t.Errorf("RectAt(b, 1500) = %v", r)
+	}
+}

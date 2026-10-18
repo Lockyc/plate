@@ -22,8 +22,9 @@ func easeInOutCubic(x float64) float64 {
 }
 
 type sample struct {
-	t float64
-	r *Rect // nil: the target was down
+	t   float64
+	idx int   // ordinal of the rects event; adjacent idx means no event between
+	r   *Rect // nil: the target was down
 }
 
 // Track answers where each named rect is at any master time.
@@ -36,13 +37,15 @@ type Track struct {
 // a sample keeps its previous value, so only the samples naming it are kept.
 func NewTrack(l *Log) *Track {
 	tr := &Track{series: map[string][]sample{}, first: math.Inf(1)}
+	n := -1
 	for _, e := range l.Events {
 		if e.Type != "rects" {
 			continue
 		}
+		n++
 		tr.first = math.Min(tr.first, e.T)
 		for name, r := range e.Rects {
-			tr.series[name] = append(tr.series[name], sample{e.T, r})
+			tr.series[name] = append(tr.series[name], sample{e.T, n, r})
 		}
 	}
 	return tr
@@ -52,29 +55,39 @@ func lerp(a, b Rect, f float64) Rect {
 	return Rect{a.X + (b.X-a.X)*f, a.Y + (b.Y-a.Y)*f, a.W + (b.W-a.W)*f, a.H + (b.H-a.H)*f}
 }
 
-// RectAt is the rect of name at t, linear between samples and held outside
-// them. ok is false before the name's first appearance.
+// RectAt is the rect of name at t, linear between two consecutive samples
+// that both carry it and held otherwise, so an omitted (off-screen) name
+// keeps its last value. ok is false before the name's first appearance.
 func (tr *Track) RectAt(name string, t float64) (Rect, bool) {
-	var up []sample
-	for _, s := range tr.series[name] {
-		if s.r != nil {
-			up = append(up, s)
-		}
-	}
-	if len(up) == 0 {
-		return Rect{}, false
-	}
-	if t < up[0].t {
+	ss := tr.series[name]
+	i := sort.Search(len(ss), func(i int) bool { return ss[i].t > t }) - 1
+	if i < 0 {
 		// Held back to the first sample, but only for a name the log's first
 		// sample already carried; a later arrival does not exist before it.
-		return *up[0].r, up[0].t == tr.first
+		for _, s := range ss {
+			if s.r != nil {
+				return *s.r, s.t == tr.first
+			}
+		}
+		return Rect{}, false
 	}
-	i := sort.Search(len(up), func(i int) bool { return up[i].t > t }) - 1
-	if i == len(up)-1 {
-		return *up[i].r, true
+	if ss[i].r == nil {
+		r := tr.lastUp(ss, i)
+		if r == (Rect{}) {
+			for _, s := range ss[i:] {
+				if s.r != nil {
+					return *s.r, false
+				}
+			}
+			return Rect{}, false
+		}
+		return r, true
 	}
-	a, b := up[i], up[i+1]
-	return lerp(*a.r, *b.r, (t-a.t)/(b.t-a.t)), true
+	if i+1 < len(ss) && ss[i+1].r != nil && ss[i+1].idx == ss[i].idx+1 {
+		a, b := ss[i], ss[i+1]
+		return lerp(*a.r, *b.r, (t-a.t)/(b.t-a.t)), true
+	}
+	return *ss[i].r, true
 }
 
 // PinAt is the rect of a pinned target and how visible it is: 1 while up, 0
@@ -99,6 +112,12 @@ func (tr *Track) PinAt(name string, t float64) (r Rect, shown float64) {
 		return tr.lastUp(ss, i), 0
 	}
 	b := ss[i+1]
+	if b.idx != a.idx+1 { // a sample omitted the name: hold
+		if a.r != nil {
+			return *a.r, 1
+		}
+		return tr.lastUp(ss, i), 0
+	}
 	x := (t - a.t) / (b.t - a.t)
 	switch {
 	case a.r != nil && b.r != nil:
