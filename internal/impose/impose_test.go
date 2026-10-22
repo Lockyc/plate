@@ -41,7 +41,7 @@ func impose(t *testing.T, args ...string) (code int, stderr string) {
 }
 
 // sheet imposes in and returns the output's path.
-func sheet(t *testing.T, in string, flags ...string) string {
+func imposed(t *testing.T, in string, flags ...string) string {
 	t.Helper()
 	out := filepath.Join(t.TempDir(), "sheet.pdf")
 	if code, stderr := impose(t, append(flags, "-o", out, in)...); code != 0 {
@@ -105,7 +105,7 @@ func blank(box string, n int) []tpage {
 
 func TestImposeTwoA5(t *testing.T) {
 	needEngines(t, "qpdf", "pdfinfo")
-	pages, err := pdf.Pages(ctx, sheet(t, flyer))
+	pages, err := pdf.Pages(ctx, imposed(t, flyer))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +121,7 @@ func TestImposeTwoA5(t *testing.T) {
 
 func TestImposeKeepsText(t *testing.T) {
 	needEngines(t, "qpdf", "pdfinfo", "pdftotext")
-	text, err := pdf.Text(ctx, sheet(t, flyer))
+	text, err := pdf.Text(ctx, imposed(t, flyer))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +170,7 @@ func threshold(t *testing.T, name string) float64 {
 
 func TestImposeHalvesMatchSource(t *testing.T) {
 	needEngines(t, "qpdf", "gs", "pdfinfo")
-	out := sheet(t, flyer)
+	out := imposed(t, flyer)
 	max := threshold(t, "impose-halves-match-source")
 	pages, err := pdf.Pages(ctx, flyer)
 	if err != nil {
@@ -261,7 +261,7 @@ func TestImposeBackForShortEdge(t *testing.T) {
 func TestImposeHonoursPageRotation(t *testing.T) {
 	needEngines(t, "qpdf", "pdfinfo", "pdftoppm")
 	mark := tpage{box: "0 0 595.28 419.53", extra: "/Rotate 90", content: "0 0 0 rg 0 0 60 60 re f"}
-	out := sheet(t, writePDF(t, mark, mark))
+	out := imposed(t, writePDF(t, mark, mark))
 	png, err := pdf.RenderPages(ctx, out, filepath.Join(t.TempDir(), "pages"), 72)
 	if err != nil {
 		t.Fatal(err)
@@ -288,7 +288,7 @@ func TestImposeCutMark(t *testing.T) {
 		if mark {
 			flags = []string{"--cut-mark"}
 		}
-		pngs, err := pdf.RenderPages(ctx, sheet(t, in, flags...), filepath.Join(t.TempDir(), "pages"), 144)
+		pngs, err := pdf.RenderPages(ctx, imposed(t, in, flags...), filepath.Join(t.TempDir(), "pages"), 144)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -373,7 +373,7 @@ func TestImposeOutput(t *testing.T) {
 func TestImposeLandscapeOnPaper(t *testing.T) {
 	needEngines(t, "qpdf", "pdfinfo", "pdftoppm")
 	mark := tpage{box: "0 0 595.28 419.53", content: "0 0 0 rg 0 0 60 60 re f"}
-	pngs, err := pdf.RenderPages(ctx, sheet(t, writePDF(t, mark, mark)), filepath.Join(t.TempDir(), "pages"), 72)
+	pngs, err := pdf.RenderPages(ctx, imposed(t, writePDF(t, mark, mark)), filepath.Join(t.TempDir(), "pages"), 72)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -405,7 +405,7 @@ func TestImposeKeepsOutputIntents(t *testing.T) {
 	needEngines(t, "qpdf", "pdfinfo")
 	catalog := "/OutputIntents [<< /Type /OutputIntent /S /GTS_PDFX /OutputConditionIdentifier (FOGRA39) >>] " +
 		"/OCProperties << /OCGs [] /D << /Order [] >> >>"
-	out := sheet(t, writePDFCatalog(t, catalog, blank(a5, 2)...))
+	out := imposed(t, writePDFCatalog(t, catalog, blank(a5, 2)...))
 	res, err := engine.Run(ctx, engine.Cmd{Engine: "qpdf", Args: []string{"--json=2", "--json-key=qpdf", "--json-stream-data=none", out, "-"}, Inputs: []string{out}})
 	if err != nil {
 		t.Fatal(err)
