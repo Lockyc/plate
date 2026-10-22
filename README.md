@@ -36,6 +36,7 @@ the exceptions listed under [Platforms](#platforms). What comes next is in
 | `pdf pages` | Renders PDF pages to PNG and prints each path | `plate pdf pages [--pages N\|N-M] [--out DIR] [--dpi N] <in.pdf>` |
 | `pdf images` | Extracts a PDF's embedded images and prints each path | `plate pdf images [--pages N\|N-M] [--out DIR] <in.pdf>` |
 | `impose` | Puts an A5 flyer's front and back two-up on both sides of an A4 sheet: print double-sided, flip on short edge, cut down the middle | `plate impose [--cut-mark] [--force] -o out.pdf <in.pdf>` |
+| `marks` | A print shop's copy of a PDF: each page unchanged at its trim size, with bleed (default 3 mm) and crop marks, TrimBox and BleedBox set | `plate marks [--bleed MM] [--force] -o out.pdf <in.pdf>` |
 | `doc` | Renders markdown or HTML to a PDF with a plain document look: A4, a running head from the first heading, page numbers, ruled tables | `plate doc [--css FILE] <in.md\|in.html> <out.pdf>` |
 | `slides` | Previews a Google Slides deck that Drive will not export, from its Slides API JSON: one PNG per slide, in the fonts the deck names | `plate slides [--pages LIST] [--out DIR] [--scale S] <deck.json\|->` |
 | `shrink` | Resizes down to a small, sharp web asset: PNG at maximum lossless compression, or WebP, alpha kept, never enlarging | `plate shrink (--width PX \| --height PX \| --width PX --height PX \| --fit PX) [--quality Q] <in> <out.png\|out.webp>...` |
@@ -89,13 +90,14 @@ flyer   flyer.html  792x1120  2      pdf,png  blank-margin=23
 The page is relative to the manifest and may carry a `?query`; each output
 (`pdf`, `png`, `jpeg`, `html`) goes to `--out`, by default `dist` beside the
 manifest, as `name.pdf`, `name.png`, `name.jpg` or `name.html`. The options
-are `blank-margin=PX`, `transparent`, `budget=MS`, `quality=Q` and `2up`,
+are `blank-margin=PX`, `transparent`, `budget=MS`, `quality=Q`, `2up`,
 which imposes the target's PDF onto `name-2up-a4.pdf` as `impose --force`
-does (the PDF must be an A5 front and back). Naming targets renders only
+does (the PDF must be an A5 front and back), and `marks`, which writes it to
+`name-marks.pdf` as `marks --force` does. Naming targets renders only
 those. It logs `rendered NAME`, `rendered NAME (not cached: REASON)`,
 `unchanged NAME` or `failed NAME: ERROR` for each target in manifest order,
-with `imposed NAME-2up-a4.pdf` after a target whose sheet was written, then
-a count. Targets render in parallel, so a target
+with `imposed NAME-2up-a4.pdf` and `marked NAME-marks.pdf` after a target
+whose sheet or copy was written, then a count. Targets render in parallel, so a target
 that loads another target's output fails. A failed target exits 1, and so does an
 unreadable manifest; an invalid manifest line or an unknown target name
 exits 2 before anything renders.
@@ -131,6 +133,15 @@ text, fonts and images, unscaled; a landscape flyer is turned a quarter to
 fit its half. A `press` master's output intent is kept; links and tags are
 dropped. It refuses to replace an existing
 output unless given `--force`.
+
+`marks` sets each page at the ISO A size it is within 1 mm of (so A4 as
+Chrome prints it, 594 x 840 pt, becomes exactly 210 x 297 mm), or at its own
+size, in the middle of a sheet with the bleed round it and hairline crop
+marks in registration colour starting at the bleed's edge. The bleed holds
+nothing past the page's edge, which is right for a page with a white
+margin; a page inked to its edge needs its artwork extended first. Like
+`impose`, it keeps the source's vectors, text, fonts and images, and
+refuses to replace an existing output unless given `--force`.
 
 `shrink` scales the image down to fit `--width`, `--height` or both, or with
 `--fit` so its longest side is that size. Each output's extension picks its

@@ -125,6 +125,12 @@ independently of phase 5. Within a phase, order is open.
   the one caller prints A5 flyers. Unlock: a caller with another size, then
   the sheet and grid as flags and as build options beside `2up`, each
   layout with its own `impose-halves` quality case.
+- **marks leaves the bleed empty.** A page inked to its edge gets a bleed
+  of bare paper, so a cut a little outside the trim shows a white sliver.
+  Deferred because its callers mark office prints, whose white margin is
+  the bleed's true content. Unlock: a caller marking a page drawn to its
+  edge, then a render at the trim plus the bleed (the page's own artwork
+  past the edge) handed to marks in place of the trimmed PDF.
 - **clip check accepts `ios` only.** `clip.Adapters` lists the platforms a
   runner adapter exists for; the iOS one lives in a separate tool, not
   plate. Unlock: a runner adapter for macos or android, then the platform

@@ -24,6 +24,7 @@ import (
 	"github.com/lockyc/plate/internal/impose"
 	"github.com/lockyc/plate/internal/infill"
 	"github.com/lockyc/plate/internal/inpaint"
+	"github.com/lockyc/plate/internal/marks"
 	"github.com/lockyc/plate/internal/pdf"
 	"github.com/lockyc/plate/internal/policy"
 	"github.com/lockyc/plate/internal/press"
@@ -52,6 +53,7 @@ var commands = []command{
 	{"press", "PDF to a print master: outlined text, CMYK, checked against a soft proof", press.Main, false},
 	{"pdf", "inspect a PDF: info with a text-layer check, text, page renders, embedded images", pdf.Main, false},
 	{"impose", "two A5 pages onto both sides of an A4 sheet, to print double-sided and cut", impose.Main, false},
+	{"marks", "a print shop's PDF: each page at its trim size, with bleed and crop marks", marks.Main, false},
 	{"doc", "markdown or HTML to a PDF with a document stylesheet", doc.Main, false},
 	{"slides", "preview a Google Slides deck from its Slides API JSON, one PNG per slide", slides.Main, false},
 	{"shrink", "resize down to a small, sharp PNG or WebP for the web", shrink.Main, false},

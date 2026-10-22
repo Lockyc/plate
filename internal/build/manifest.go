@@ -21,6 +21,9 @@ type Target struct {
 	Opts render.Options
 	// TwoUp is the A4 sheet the 2up option imposes Opts.PDF onto, or "".
 	TwoUp string
+	// Marks is the print shop's copy of Opts.PDF the marks option writes,
+	// with bleed and crop marks, or "".
+	Marks string
 }
 
 // kinds maps each output kind a manifest names to its file extension and
@@ -42,9 +45,10 @@ var kinds = map[string]struct {
 // with a field starting "#" commenting out the rest of the line. The page is
 // relative to the manifest's directory and may carry a ?query; outputs is a
 // comma list of pdf, png, jpeg and html, written to outDir/name.{pdf,png,jpg,html};
-// the options are blank-margin=PX, transparent, budget=MS, quality=Q and
-// 2up, which imposes the target's PDF onto outDir/name-2up-a4.pdf as `plate
-// impose` does. No two targets may write the same file. Every target gets
+// the options are blank-margin=PX, transparent, budget=MS, quality=Q, 2up,
+// which imposes the target's PDF onto outDir/name-2up-a4.pdf as `plate
+// impose` does, and marks, which writes it to outDir/name-marks.pdf with
+// bleed and crop marks as `plate marks` does. No two targets may write the same file. Every target gets
 // failIf. Each target is checked by render.Validate here,
 // so a manifest with one bad target is refused before anything renders.
 // A bad line is a *LineError; any other error is the manifest's file
@@ -164,14 +168,17 @@ func parseLine(fields []string, dir, outDir string, failIf []string) (Target, er
 		seen[key] = true
 		var num *int
 		switch key {
-		case "transparent", "2up":
+		case "transparent", "2up", "marks":
 			if hasVal {
 				return Target{}, fmt.Errorf("%s takes no value", key)
 			}
-			if key == "transparent" {
+			switch key {
+			case "transparent":
 				o.Transparent = true
-			} else {
+			case "2up":
 				t.TwoUp = filepath.Join(outDir, name+twoUpSuffix)
+			case "marks":
+				t.Marks = filepath.Join(outDir, name+marksSuffix)
 			}
 			continue
 		case "blank-margin":
@@ -182,7 +189,7 @@ func parseLine(fields []string, dir, outDir string, failIf []string) (Target, er
 			o.Quality = new(int)
 			num = o.Quality
 		default:
-			return Target{}, fmt.Errorf("option %q: want blank-margin=PX, transparent, budget=MS, quality=Q or 2up", opt)
+			return Target{}, fmt.Errorf("option %q: want blank-margin=PX, transparent, budget=MS, quality=Q, 2up or marks", opt)
 		}
 		v, err := strconv.ParseInt(val, 10, strconv.IntSize)
 		if !hasVal || err != nil {
@@ -193,6 +200,9 @@ func parseLine(fields []string, dir, outDir string, failIf []string) (Target, er
 	if t.TwoUp != "" && o.PDF == "" {
 		return Target{}, errors.New("2up needs the pdf output: it imposes the target's PDF")
 	}
+	if t.Marks != "" && o.PDF == "" {
+		return Target{}, errors.New("marks needs the pdf output: it marks the target's PDF")
+	}
 	if err := o.Validate(); err != nil {
 		return Target{}, err
 	}
@@ -200,15 +210,21 @@ func parseLine(fields []string, dir, outDir string, failIf []string) (Target, er
 	return t, nil
 }
 
-// twoUpSuffix ends the name of the sheet the 2up option writes.
-const twoUpSuffix = "-2up-a4.pdf"
+// twoUpSuffix ends the name of the sheet the 2up option writes, and
+// marksSuffix the print shop's copy the marks option writes.
+const (
+	twoUpSuffix = "-2up-a4.pdf"
+	marksSuffix = "-marks.pdf"
+)
 
 // Outputs lists every file t writes: its render's outputs, then the 2up
-// sheet.
+// sheet and the marked copy.
 func (t Target) Outputs() []string {
 	out := t.Opts.Outputs()
-	if t.TwoUp != "" {
-		out = append(out, t.TwoUp)
+	for _, d := range []string{t.TwoUp, t.Marks} {
+		if d != "" {
+			out = append(out, d)
+		}
 	}
 	return out
 }

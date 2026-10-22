@@ -360,6 +360,45 @@ func TestBuildTwoUpRefusesNotTwoA5(t *testing.T) {
 	}
 }
 
+func TestBuildMarksWritesTheCopy(t *testing.T) {
+	e := setupTwoUp(t, twoA5)
+	os.WriteFile(e.manifest, []byte("f  f.html  560x792  1  pdf  2up marks\n"), 0o644)
+	if code := e.run(e.manifest); code != 0 {
+		t.Fatalf("code %d: %s", code, e.stderr.String())
+	}
+	if want := "rendered f\nimposed f-2up-a4.pdf\nmarked f-marks.pdf\n1 rendered, 0 unchanged\n"; e.stderr.String() != want {
+		t.Errorf("stderr %q, want %q", e.stderr.String(), want)
+	}
+	pages, err := pdf.Pages(context.Background(), filepath.Join(e.dir, "dist", "f-marks.pdf"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pages) != 2 {
+		t.Fatalf("%d pages, want 2", len(pages))
+	}
+	if code := e.run(e.manifest); code != 0 || e.stderr.String() != "unchanged f\n0 rendered, 1 unchanged\n" {
+		t.Errorf("unchanged: code %d, stderr %q", code, e.stderr.String())
+	}
+}
+
+// TestBuildMarksGoesWhenTwoUpFails: a target whose 2up fails has failed, so
+// its marked copy is not left behind either.
+func TestBuildMarksGoesWhenTwoUpFails(t *testing.T) {
+	needPDFEngines(t)
+	one := filepath.Join(t.TempDir(), "one.pdf")
+	if _, err := engine.Run(context.Background(), engine.Cmd{Engine: "qpdf", Args: []string{"--empty", "--pages", twoA5, "1", "--", one}, Inputs: []string{twoA5}, Outputs: []string{one}}); err != nil {
+		t.Fatal(err)
+	}
+	e := setupTwoUp(t, one)
+	os.WriteFile(e.manifest, []byte("f  f.html  560x792  1  pdf  2up marks\n"), 0o644)
+	if code := e.run(e.manifest); code != 1 || !strings.Contains(e.stderr.String(), "failed f: 2up:") {
+		t.Fatalf("code %d: %s", code, e.stderr.String())
+	}
+	if _, err := os.Stat(filepath.Join(e.dir, "dist", "f-marks.pdf")); err == nil {
+		t.Error("a marked copy was written")
+	}
+}
+
 // needPDFEngines skips a test that imposes when qpdf or pdfinfo is missing.
 func needPDFEngines(t *testing.T) {
 	t.Helper()

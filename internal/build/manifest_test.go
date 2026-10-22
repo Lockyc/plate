@@ -168,6 +168,41 @@ func TestManifestTwoUpBadLines(t *testing.T) {
 	}
 }
 
+func TestManifestMarks(t *testing.T) {
+	path, dir := manifest(t, "f f.html 560x792 1 pdf,png marks 2up\ng g.html 560x792 1 pdf\n")
+	out := filepath.Join(dir, "dist")
+	ts, err := ParseManifest(path, out, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ts[0].Marks != filepath.Join(out, "f-marks.pdf") || ts[1].Marks != "" {
+		t.Errorf("f marks %q, g marks %q", ts[0].Marks, ts[1].Marks)
+	}
+	if o := ts[0].Outputs(); o[len(o)-2] != ts[0].TwoUp || o[len(o)-1] != ts[0].Marks {
+		t.Errorf("outputs %q", o)
+	}
+}
+
+func TestManifestMarksBadLines(t *testing.T) {
+	for _, line := range []string{
+		"a a.html 560x792 1 png marks",
+		"a a.html 560x792 1 pdf marks=3",
+		"a a.html 560x792 1 pdf marks marks",
+		"OK-marks b.html 560x792 1 pdf",
+	} {
+		path, _ := manifest(t, "ok ok.html 560x792 1 pdf marks\n"+line+"\n")
+		_, err := ParseManifest(path, t.TempDir(), nil)
+		var le *LineError
+		if !errors.As(err, &le) || le.Line != 2 {
+			t.Errorf("%q: %v", line, err)
+		}
+	}
+	path, _ := manifest(t, "a a.html 560x792 1 png marks\n")
+	if _, err := ParseManifest(path, t.TempDir(), nil); err == nil || !strings.Contains(err.Error(), "marks needs the pdf output") {
+		t.Errorf("marks without pdf: %v", err)
+	}
+}
+
 func TestManifestTwoUpCollidesWithEarlierTarget(t *testing.T) {
 	path, _ := manifest(t, "a-2up-a4 b.html 560x792 1 pdf\na a.html 560x792 1 pdf 2up\n")
 	_, err := ParseManifest(path, t.TempDir(), nil)
