@@ -23,8 +23,9 @@ wrapping it would add nothing; a resize down for the web goes through
 ```
 main.go              dispatch
 internal/<op>/       one package per command (cutout, inpaint, infill, upscale,
-                     grade, render, build, press, pdf, impose, doc, slides,
-                     shrink, diff, clip, fonts, qr, doctor)
+                     grade, render, build, press, pdf, impose, marks, doc,
+                     slides, shrink, diff, clip, fonts, qr, doctor)
+internal/sheet/      a PDF's pages redrawn as forms on new sheets (impose, marks)
 internal/cli/        flag, exit-code and error conventions every command shares
 internal/engine/     the one way an external tool is run
 internal/atomicfile/ a file written whole or not at all: a temp file beside it, renamed
@@ -129,8 +130,8 @@ colours, or renders what it is given.
   `--jobs` workers, logging in manifest order (`build.ParseManifest`). A
   target whose `render.Result.Inputs` holds another target's output fails
   (`build.loadsOutput`). A `2up` target's sheet is `impose.Run` on its
-  PDF, written when the PDF rendered or the sheet is missing or older
-  (`build.twoUp`).
+  PDF, and a `marks` target's copy `marks.Run`, each written when the PDF
+  rendered or the file is missing or older (`build.derive`).
 - **press** — Ghostscript pdfwrite with outlined text, CMYK conversion to a
   supplied ICC, fixed media from the input's page box, and images downsampled
   only above 1.5 × `--max-ppi`. It then checks the result has no fonts, no
@@ -170,7 +171,7 @@ colours, or renders what it is given.
   `clip-loop-crossfade`, and the dip held by `clip-loop-dip`. The codec settings are documented at `mp4CRF`, the colour tagging at
   `bt709` (both internal/clip/encode.go), the hold of a static tail at
   `clip.ExtractFrames`, and the target refusals at `validateRef`.
-- **inpaint, fonts, qr, pdf, impose, doc, slides** — as the README table and each package's
+- **inpaint, fonts, qr, pdf, impose, marks, doc, slides** — as the README table and each package's
   doc comment describe.
 
 ## Platforms and errors

@@ -18,6 +18,7 @@ import (
 	"github.com/lockyc/plate/internal/cli"
 	"github.com/lockyc/plate/internal/engine"
 	"github.com/lockyc/plate/internal/impose"
+	"github.com/lockyc/plate/internal/marks"
 	"github.com/lockyc/plate/internal/render"
 )
 
@@ -28,17 +29,39 @@ const usage = "build [--out DIR] [--jobs N] [--force] [--fail-if TEXT]... <manif
 type result struct {
 	warn    bytes.Buffer
 	res     render.Result
-	imposed bool // the 2up sheet was written
+	derived []string // log lines for the 2up sheet and marked copy written
 	err     error
 	done    chan struct{}
 }
 
-// twoUp writes t's 2up sheet after its render: when the PDF was rendered,
-// or the sheet is missing or older than the PDF. A render that failed
-// leaves no PDF, so its sheet goes too.
-func twoUp(ctx context.Context, t Target, res render.Result, renderErr error) (imposed bool, err error) {
+// derivation is a file a target's options write from its PDF: the 2up
+// sheet or the marked copy.
+type derivation struct {
+	option, verb, path string
+	run                func(ctx context.Context, in, out string) error
+}
+
+func (t Target) derivations() []derivation {
+	var ds []derivation
+	if t.TwoUp != "" {
+		ds = append(ds, derivation{"2up", "imposed", t.TwoUp, func(ctx context.Context, in, out string) error {
+			return impose.Run(ctx, in, out, false, true)
+		}})
+	}
+	if t.Marks != "" {
+		ds = append(ds, derivation{"marks", "marked", t.Marks, func(ctx context.Context, in, out string) error {
+			return marks.Run(ctx, in, out, marks.DefaultBleed, true)
+		}})
+	}
+	return ds
+}
+
+// derive writes d after t's render: when the PDF was rendered, or d's file
+// is missing or older than the PDF. A render that failed leaves no PDF, so
+// d's file goes too.
+func derive(ctx context.Context, t Target, d derivation, res render.Result, renderErr error) (wrote bool, err error) {
 	if renderErr != nil {
-		if err := os.Remove(t.TwoUp); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		if err := os.Remove(d.path); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return false, errors.Join(renderErr, err)
 		}
 		return false, renderErr
@@ -48,13 +71,13 @@ func twoUp(ctx context.Context, t Target, res render.Result, renderErr error) (i
 		if err != nil {
 			return false, err
 		}
-		if sheet, err := os.Stat(t.TwoUp); err == nil && !sheet.ModTime().Before(pdf.ModTime()) {
+		if out, err := os.Stat(d.path); err == nil && !out.ModTime().Before(pdf.ModTime()) {
 			return false, nil
 		}
 	}
-	if err := impose.Run(ctx, t.Opts.PDF, t.TwoUp, false, true); err != nil {
-		os.Remove(t.TwoUp)
-		return false, fmt.Errorf("2up: %w", err)
+	if err := d.run(ctx, t.Opts.PDF, d.path); err != nil {
+		os.Remove(d.path)
+		return false, fmt.Errorf("%s: %w", d.option, err)
 	}
 	return true, nil
 }
@@ -119,8 +142,13 @@ func Main(ctx context.Context, args []string, _, stderr io.Writer) int {
 			}
 			defer func() { <-sem }()
 			r.res, r.err = render.Run(ctx, t.Opts, &r.warn)
-			if t.TwoUp != "" {
-				r.imposed, r.err = twoUp(ctx, t, r.res, r.err)
+			// Once one fails, the rest see its error and remove their files.
+			for _, d := range t.derivations() {
+				var wrote bool
+				wrote, r.err = derive(ctx, t, d, r.res, r.err)
+				if wrote {
+					r.derived = append(r.derived, d.verb+" "+filepath.Base(d.path))
+				}
 			}
 		}()
 	}
@@ -150,8 +178,10 @@ func Main(ctx context.Context, args []string, _, stderr io.Writer) int {
 			rendered++
 			fmt.Fprintf(stderr, "rendered %s\n", name)
 		}
-		if r.err == nil && r.imposed {
-			fmt.Fprintf(stderr, "imposed %s\n", filepath.Base(targets[i].TwoUp))
+		if r.err == nil {
+			for _, line := range r.derived {
+				fmt.Fprintln(stderr, line)
+			}
 		}
 	}
 	if failed > 0 {

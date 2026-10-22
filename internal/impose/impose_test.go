@@ -40,7 +40,7 @@ func impose(t *testing.T, args ...string) (code int, stderr string) {
 	return code, errb.String()
 }
 
-// sheet imposes in and returns the output's path.
+// imposed imposes in and returns the output's path.
 func imposed(t *testing.T, in string, flags ...string) string {
 	t.Helper()
 	out := filepath.Join(t.TempDir(), "sheet.pdf")
