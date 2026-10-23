@@ -1,0 +1,8 @@
+<!doctype html>
+<div id="a" style="width: 40px; height: 40px; background: #36c"></div>
+<script>
+  window.finishEvents = 0;
+  window.anim = document.getElementById("a").animate([{ opacity: 0 }, { opacity: 1 }], { duration: 1000 });
+  window.anim.onfinish = () => window.finishEvents++;
+  window.anim.reverse();
+</script>

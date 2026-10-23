@@ -1,0 +1,7 @@
+<!doctype html>
+<video id="v" src="source.mp4" muted preload="auto"></video>
+<script>
+  const v = document.getElementById("v");
+  v.currentTime = 0.1;
+  v.addEventListener("seeked", () => { v.currentTime += 0.1; });
+</script>
