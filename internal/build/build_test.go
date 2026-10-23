@@ -523,6 +523,19 @@ func TestRemoveVideoSetRemovesOnlyACaptureOfTheLine(t *testing.T) {
 		}
 	})
 
+	t.Run("a json naming the line but no formats", func(t *testing.T) {
+		dir := t.TempDir()
+		write(t, dir, map[string]string{"social.webp": "w", "social.json": `{"name":"social","icons":["a.png"]}`})
+		if err := removeVideoSet(still(dir), dir, []Target{still(dir)}); err != nil {
+			t.Fatal(err)
+		}
+		for _, n := range []string{"social.webp", "social.json"} {
+			if !exists(dir, n) {
+				t.Errorf("%s removed", n)
+			}
+		}
+	})
+
 	t.Run("an earlier capture's set", func(t *testing.T) {
 		dir := t.TempDir()
 		write(t, dir, map[string]string{"social.mp4": "m", "social.poster.png": "p", "social.webp": "w",
