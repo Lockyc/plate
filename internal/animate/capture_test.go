@@ -164,9 +164,9 @@ func TestClockSVG(t *testing.T) {
 	}
 }
 
-// sourceVideo writes video.html and a 3 s 30 fps 320×240 testsrc H.264
-// source.mp4 beside it, returning the page.
-func sourceVideo(t *testing.T) string {
+// sourceVideo writes testdata's page and a 3 s 30 fps 320×240 testsrc H.264
+// source.mp4 beside it, returning the copied page.
+func sourceVideo(t *testing.T, name string) string {
 	t.Helper()
 	if _, err := engine.Resolve("ffmpeg"); err != nil {
 		t.Skip(err)
@@ -175,11 +175,11 @@ func sourceVideo(t *testing.T) string {
 		t.Skip(err)
 	}
 	dir := t.TempDir()
-	page, err := os.ReadFile("testdata/video.html")
+	page, err := os.ReadFile(filepath.Join("testdata", name))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "video.html"), page, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, name), page, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	src := filepath.Join(dir, "source.mp4")
@@ -188,7 +188,7 @@ func sourceVideo(t *testing.T) string {
 		"-c:v", "libx264", "-pix_fmt", "yuv420p", src}, Outputs: []string{src}}); err != nil {
 		t.Fatal(err)
 	}
-	return filepath.Join(dir, "video.html")
+	return filepath.Join(dir, name)
 }
 
 // sourceFrame is frame n of src, decoded by ffmpeg.
@@ -207,7 +207,7 @@ func sourceFrame(t *testing.T, src string, n int) *image.RGBA64 {
 }
 
 func TestClockVideoLateOffsetLoop(t *testing.T) {
-	page := sourceVideo(t)
+	page := sourceVideo(t, "video.html")
 	want := map[int]float64{30: 0.5, 60: 1.5, 120: 0.5}
 	frames := map[int]bool{30: true, 60: true, 120: true}
 	shot := filepath.Join(t.TempDir(), "f60.png")
@@ -327,5 +327,330 @@ func TestCaptureRefusesUnsettledPage(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "not settled after 300 ms") || !strings.Contains(err.Error(), "/never") {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+// hangServer answers nothing until the client goes away.
+func hangServer(t *testing.T) string {
+	t.Helper()
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+	}))
+	t.Cleanup(s.Close)
+	return s.URL
+}
+
+// withQuery is the file URL of page with query.
+func withQuery(t *testing.T, page string, query url.Values) string {
+	t.Helper()
+	abs, err := filepath.Abs(page)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return (&url.URL{Scheme: "file", Path: abs, RawQuery: query.Encode()}).String()
+}
+
+// evalAt seeks frames 0..last and evaluates expr at each frame in want.
+func evalAt[T any](t *testing.T, c *Capture, ctx context.Context, last int, expr string, check map[int]func(T)) error {
+	t.Helper()
+	for n := 0; n <= last; n++ {
+		if err := c.Seek(ctx, at(n)); err != nil {
+			return err
+		}
+		if f, ok := check[n]; ok {
+			var v T
+			if err := c.Eval(ctx, expr, &v); err != nil {
+				return err
+			}
+			f(v)
+		}
+	}
+	return nil
+}
+
+func wantNear(t *testing.T, what string, got, want, tol float64) {
+	t.Helper()
+	if math.Abs(got-want) > tol {
+		t.Errorf("%s = %v, want %v", what, got, want)
+	}
+}
+
+func TestClockCSSPlayState(t *testing.T) {
+	err := withCapture(t, "testdata/csspaused.html", 600, 100, testBudget, func(ctx context.Context, c *Capture) error {
+		x := func(want float64) func(float64) {
+			return func(v float64) { wantNear(t, "x", v, want, 1e-6) }
+		}
+		return evalAt(t, c, ctx, 45,
+			`new DOMMatrix(getComputedStyle(document.getElementById("b")).transform).m41`,
+			map[int]func(float64){15: x(0), 30: x(0), 45: x(125)})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestClockAnimationFinishes(t *testing.T) {
+	type state struct {
+		Done   bool
+		Events int
+		X      float64
+	}
+	err := withCapture(t, "testdata/waapi.html", 200, 100, testBudget, func(ctx context.Context, c *Capture) error {
+		return evalAt(t, c, ctx, 30,
+			`({Done: window.done, Events: window.finishEvents, X: new DOMMatrix(getComputedStyle(document.getElementById("b")).transform).m41})`,
+			map[int]func(state){
+				14: func(s state) {
+					if s.Done || s.Events != 0 {
+						t.Errorf("at %.0f ms: %+v, want not finished", at(14), s)
+					}
+				},
+				15: func(s state) {
+					if !s.Done || s.Events != 1 {
+						t.Errorf("at 500 ms: %+v, want finished once", s)
+					}
+					wantNear(t, "chained x at 500 ms", s.X, 0, 1e-6)
+				},
+				30: func(s state) { wantNear(t, "chained x at 1000 ms", s.X, 50, 1e-6) },
+			})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestClockVideoEndedStartsHeldAnimation(t *testing.T) {
+	page := sourceVideo(t, "videoended.html")
+	type anim struct {
+		N     int
+		Time  float64
+		State string
+	}
+	err := withCapture(t, page, 320, 300, testBudget, func(ctx context.Context, c *Capture) error {
+		return evalAt(t, c, ctx, 100,
+			`(() => { const a = document.getAnimations(); return {N: a.length, Time: a[0]?.currentTime ?? -1, State: a[0]?.playState ?? ""}; })()`,
+			map[int]func(anim){
+				89: func(a anim) {
+					if a.N != 0 {
+						t.Errorf("before the end: %+v, want no animation", a)
+					}
+				},
+				90: func(a anim) {
+					if a.N != 1 || a.Time != 0 || a.State != "paused" {
+						t.Errorf("at 3000 ms: %+v, want one animation held at 0", a)
+					}
+				},
+				100: func(a anim) { wantNear(t, "animation time at 3333 ms", a.Time, at(100)-3000, 1e-6) },
+			})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestClockAutoplayKeepsPageTime(t *testing.T) {
+	page := sourceVideo(t, "videoautoplay.html")
+	err := withCapture(t, page, 320, 240, testBudget, func(ctx context.Context, c *Capture) error {
+		ct := func(want float64) func(float64) {
+			return func(v float64) { wantNear(t, "currentTime", v, want, 1e-6) }
+		}
+		return evalAt(t, c, ctx, 30, `document.getElementById("v").currentTime`,
+			map[int]func(float64){0: ct(1), 30: ct(2)})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestClockVideoNewSourceResets(t *testing.T) {
+	page := sourceVideo(t, "videosrc.html")
+	type st struct {
+		Time   float64
+		Paused bool
+	}
+	err := withCapture(t, page, 320, 240, testBudget, func(ctx context.Context, c *Capture) error {
+		check := func(want st) func(st) {
+			return func(s st) {
+				if math.Abs(s.Time-want.Time) > 1e-6 || s.Paused != want.Paused {
+					t.Errorf("got %+v, want %+v", s, want)
+				}
+			}
+		}
+		return evalAt(t, c, ctx, 45,
+			`(() => { const v = document.getElementById("v"); return {Time: v.currentTime, Paused: v.paused}; })()`,
+			map[int]func(st){29: check(st{at(29) / 1000, false}), 30: check(st{0, true}), 45: check(st{0, true})})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestClockVideoAddedWaitsForFrame(t *testing.T) {
+	page := sourceVideo(t, "videoadd.html")
+	shot := filepath.Join(t.TempDir(), "f.png")
+	err := withCapture(t, page, 320, 240, testBudget, func(ctx context.Context, c *Capture) error {
+		for n := 0; n <= 30; n++ {
+			if err := c.Seek(ctx, at(n)); err != nil {
+				return err
+			}
+		}
+		var ready int
+		if err := c.Eval(ctx, `document.getElementById("v").readyState`, &ready); err != nil {
+			return err
+		}
+		if ready < 2 {
+			t.Errorf("readyState %d after the seek that added the video", ready)
+		}
+		return c.Frame(ctx, shot)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := raster.Load(shot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := sourceFrame(t, filepath.Join(filepath.Dir(page), "source.mp4"), 0)
+	if d, _ := raster.RMSE(got, ref, ref.Bounds(), raster.RGB); d > 0.01 {
+		t.Errorf("frame after the video was added: RMSE %.4f against source frame 0", d)
+	}
+}
+
+func TestCaptureRefusesStalledVideo(t *testing.T) {
+	if _, err := engine.Resolve("ffmpeg"); err != nil {
+		t.Skip(err)
+	}
+	page := withQuery(t, "testdata/videoadd.html", url.Values{"src": {hangServer(t) + "/never.mp4"}})
+	err := withCapture(t, page, 320, 240, 300*time.Millisecond, func(ctx context.Context, c *Capture) error {
+		for n := 0; n <= 30; n++ {
+			if err := c.Seek(ctx, at(n)); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err == nil || !strings.Contains(err.Error(), "not ready after 300 ms") || !strings.Contains(err.Error(), "/never.mp4") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestClockLateSVG(t *testing.T) {
+	err := withCapture(t, "testdata/svglate.html", 300, 100, testBudget, func(ctx context.Context, c *Capture) error {
+		x := func(want float64) func(float64) {
+			return func(v float64) { wantNear(t, "x", v, want, 1e-3) }
+		}
+		return evalAt(t, c, ctx, 60, `document.getElementById("r").x.animVal.value`,
+			map[int]func(float64){30: x(0), 60: x(100)})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestClockDrivesIframe(t *testing.T) {
+	err := withCapture(t, "testdata/iframe.html", 600, 100, testBudget, func(ctx context.Context, c *Capture) error {
+		x := func(want float64) func(float64) {
+			return func(v float64) { wantNear(t, "iframe x", v, want, 1e-6) }
+		}
+		return evalAt(t, c, ctx, 30,
+			`(() => { const d = document.getElementById("f").contentDocument; return new DOMMatrix(d.defaultView.getComputedStyle(d.getElementById("b")).transform).m41; })()`,
+			map[int]func(float64){0: x(0), 15: x(125), 30: x(250)})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCaptureRefusesCrossOriginIframe(t *testing.T) {
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		io.WriteString(w, "<!doctype html><p>elsewhere</p>")
+	}))
+	t.Cleanup(other.Close)
+	page := withQuery(t, "testdata/iframexo.html", url.Values{"src": {other.URL + "/elsewhere.html"}})
+	err := withCapture(t, page, 200, 100, testBudget, func(ctx context.Context, c *Capture) error {
+		return c.Seek(ctx, 0)
+	})
+	if err == nil || !strings.Contains(err.Error(), "cross-origin") || !strings.Contains(err.Error(), "/elsewhere.html") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestCaptureWaitsForLateFont(t *testing.T) {
+	page := withQuery(t, "testdata/fontlate.html", url.Values{"font": {hangServer(t) + "/late.woff2"}})
+	err := withCapture(t, page, 200, 100, 300*time.Millisecond, func(context.Context, *Capture) error {
+		t.Fatal("Open settled a page whose font never loads")
+		return nil
+	})
+	if err == nil || !strings.Contains(err.Error(), "not settled after 300 ms: fonts") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestCaptureRefusesThrowBeforeFrame(t *testing.T) {
+	err := withCapture(t, "testdata/css.html", 100, 100, testBudget, func(ctx context.Context, c *Capture) error {
+		if err := c.Seek(ctx, 0); err != nil {
+			t.Fatal(err)
+		}
+		if err := c.Eval(ctx, `queueMicrotask(() => { throw new Error("late throw"); })`, nil); err != nil {
+			t.Fatal(err)
+		}
+		return c.Frame(ctx, filepath.Join(t.TempDir(), "f.png"))
+	})
+	if err == nil || !strings.Contains(err.Error(), "page threw at 0 ms") || !strings.Contains(err.Error(), "late throw") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+// boxLeft is the left edge, in px with subpixel coverage, of css.html's red
+// box on white along row y.
+func boxLeft(img *image.RGBA64, y int) float64 {
+	b := img.Bounds()
+	for x := b.Min.X; x < b.Max.X; x++ {
+		g := float64(img.RGBA64At(x, y).G) / 0xffff
+		cov := (1 - g) / (1 - 51.0/255)
+		if cov > 0.02 {
+			return float64(x) + 1 - math.Min(cov, 1)
+		}
+	}
+	return math.Inf(1)
+}
+
+// TestCapturePixelsMatchClock reads positions from the screenshots, which
+// the compositor paints, not from getComputedStyle.
+func TestCapturePixelsMatchClock(t *testing.T) {
+	dir := t.TempDir()
+	frames := []int{0, 1, 15, 30, 45, 60}
+	err := withCapture(t, "testdata/css.html", 600, 100, testBudget, func(ctx context.Context, c *Capture) error {
+		return sample(ctx, c, 60, map[int]bool{0: true, 1: true, 15: true, 30: true, 45: true, 60: true}, func(n int) error {
+			return c.Frame(ctx, filepath.Join(dir, fmt.Sprintf("css%d.png", n)))
+		})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range frames {
+		img, err := raster.Load(filepath.Join(dir, fmt.Sprintf("css%d.png", n)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		wantNear(t, fmt.Sprintf("frame %d box edge", n), boxLeft(img, 20), at(n)*0.25, 1)
+	}
+
+	err = withCapture(t, "testdata/transition.html", 100, 100, testBudget, func(ctx context.Context, c *Capture) error {
+		return sample(ctx, c, 45, map[int]bool{15: true, 30: true, 45: true}, func(n int) error {
+			return c.Frame(ctx, filepath.Join(dir, fmt.Sprintf("tr%d.png", n)))
+		})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// #3a3 over white at opacity o has red 255 − 204·o.
+	for n, o := range map[int]float64{15: 0, 30: 0.5, 45: 1} {
+		img, err := raster.Load(filepath.Join(dir, fmt.Sprintf("tr%d.png", n)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		r := float64(img.RGBA64At(20, 20).R) / 0xffff * 255
+		wantNear(t, fmt.Sprintf("transition red at %.0f ms", at(n)), r, 255-204*o, 3)
 	}
 }

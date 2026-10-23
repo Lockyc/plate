@@ -32,14 +32,17 @@ type Capture struct {
 	conn    *cdp.Conn
 	session string
 	pw, ph  int // the screenshot's pixel size
+	budget  time.Duration
+	at      float64 // the last seek, in ms
 
 	mu     sync.Mutex
-	thrown []string // exceptions since the last seek
+	thrown []string // exceptions since the last check
 }
 
 // Open loads l's page at w×h CSS px and scale, on plate's clock, and waits
-// up to budget for it to settle: the load event, document.fonts.ready,
-// every img complete and every video with a frame to show.
+// up to budget for it to settle: the load event, fonts loaded, every img
+// complete and every video with a frame to show, in every same-origin
+// frame. A seek waits up to budget for a video's frame too.
 func Open(ctx context.Context, l render.Load, w, h int, scale float64, budget time.Duration) (_ *Capture, err error) {
 	if err := render.CheckSize(w, h, scale); err != nil {
 		return nil, err
@@ -48,7 +51,7 @@ func Open(ctx context.Context, l render.Load, w, h int, scale float64, budget ti
 	if err != nil {
 		return nil, err
 	}
-	c := &Capture{conn: conn, pw: int(math.Round(float64(w) * scale)), ph: int(math.Round(float64(h) * scale))}
+	c := &Capture{conn: conn, pw: int(math.Round(float64(w) * scale)), ph: int(math.Round(float64(h) * scale)), budget: budget}
 	defer func() {
 		if err != nil {
 			conn.Close()
@@ -126,26 +129,44 @@ func (d exceptionDetails) String() string {
 }
 
 // Seek moves the page's clock to ms and returns once every video shows its
-// frame. It refuses a page that threw since the last seek, or whose video
-// cannot play.
+// frame. It refuses a page that threw since the last seek, a video that
+// cannot play or shows no frame within the budget, and a cross-origin
+// iframe, whose clock plate cannot drive.
 func (c *Capture) Seek(ctx context.Context, ms float64) error {
-	var bad []struct {
-		Src  string `json:"src"`
-		Code int    `json:"code"`
+	var r struct {
+		Errors []struct {
+			Src  string `json:"src"`
+			Code int    `json:"code"`
+		} `json:"errors"`
+		Stalled     []string `json:"stalled"`
+		CrossOrigin []string `json:"crossOrigin"`
 	}
-	err := c.Eval(ctx, fmt.Sprintf("__plate.seek(%s)", jsNumber(ms)), &bad)
+	c.at = ms
+	err := c.Eval(ctx, fmt.Sprintf("__plate.seek(%s)", jsNumber(ms)), &r)
+	if err := c.threw(); err != nil {
+		return err
+	}
+	switch {
+	case err != nil:
+		return err
+	case len(r.CrossOrigin) > 0:
+		return fmt.Errorf("iframe %s is cross-origin: plate's clock cannot drive it", r.CrossOrigin[0])
+	case len(r.Errors) > 0:
+		return fmt.Errorf("video %s cannot play: MediaError %d", r.Errors[0].Src, r.Errors[0].Code)
+	case len(r.Stalled) > 0:
+		return fmt.Errorf("video %s not ready after %d ms at %.0f ms", r.Stalled[0], c.budget.Milliseconds(), ms)
+	}
+	return nil
+}
+
+// threw refuses the page when it threw since the last check.
+func (c *Capture) threw() error {
 	c.mu.Lock()
 	thrown := c.thrown
 	c.thrown = nil
 	c.mu.Unlock()
 	if len(thrown) > 0 {
-		return fmt.Errorf("page threw at %.0f ms: %s", ms, strings.Join(thrown, "; "))
-	}
-	if err != nil {
-		return err
-	}
-	if len(bad) > 0 {
-		return fmt.Errorf("video %s cannot play: MediaError %d", bad[0].Src, bad[0].Code)
+		return fmt.Errorf("page threw at %.0f ms: %s", c.at, strings.Join(thrown, "; "))
 	}
 	return nil
 }
@@ -156,8 +177,11 @@ func jsNumber(f float64) string {
 }
 
 // Frame writes the page as it stands to path as a PNG, refusing one that is
-// not w×h × scale pixels.
+// not w×h × scale pixels, or a page that threw since the last seek.
 func (c *Capture) Frame(ctx context.Context, path string) error {
+	if err := c.threw(); err != nil {
+		return err
+	}
 	var shot struct {
 		Data string `json:"data"`
 	}
