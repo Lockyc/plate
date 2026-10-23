@@ -242,7 +242,8 @@ func (c *Conn) Expect(session, method string) func(ctx context.Context) (json.Ra
 }
 
 // Subscribe calls fn for every (session, method) event, in arrival order on
-// the reader goroutine, so fn must not block on a Call.
+// the reader goroutine, so fn must not call Call or Close: both wait on
+// the reader.
 func (c *Conn) Subscribe(session, method string, fn func(json.RawMessage)) {
 	k := key{session, method}
 	c.mu.Lock()

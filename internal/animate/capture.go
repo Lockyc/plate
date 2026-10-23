@@ -11,7 +11,6 @@ import (
 	"errors"
 	"fmt"
 	"image/png"
-	"math"
 	"os"
 	"strings"
 	"sync"
@@ -51,7 +50,8 @@ func Open(ctx context.Context, l render.Load, w, h int, scale float64, budget ti
 	if err != nil {
 		return nil, err
 	}
-	c := &Capture{conn: conn, pw: int(math.Round(float64(w) * scale)), ph: int(math.Round(float64(h) * scale)), budget: budget}
+	c := &Capture{conn: conn, budget: budget}
+	c.pw, c.ph = render.Pixels(w, h, scale)
 	defer func() {
 		if err != nil {
 			conn.Close()

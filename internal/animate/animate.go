@@ -67,11 +67,6 @@ func (e usageError) Error() string { return string(e) }
 // frames is the capture's frame count.
 func (o Options) frames() int { return int(math.Round(o.DurationS * float64(o.FPS))) }
 
-// pixels is the capture's size in device px.
-func (o Options) pixels() (int, int) {
-	return int(math.Round(float64(o.W) * o.Scale)), int(math.Round(float64(o.H) * o.Scale))
-}
-
 // name is Name, or the page's base name without its extension.
 func (o Options) name() string {
 	if o.Name != "" {
@@ -116,7 +111,7 @@ func (o Options) Validate() error {
 			return usageError(fmt.Sprintf("--format lists %s twice", f))
 		}
 	}
-	pw, ph := o.pixels()
+	pw, ph := render.Pixels(o.W, o.H, o.Scale)
 	for _, f := range []string{"mp4", "webm"} {
 		if slices.Contains(o.Formats, f) && (pw%2 != 0 || ph%2 != 0) {
 			return usageError(fmt.Sprintf("%s needs even pixel sides, not %dx%d (--size × --scale)", f, pw, ph))
@@ -275,7 +270,7 @@ func (o Options) capture(ctx context.Context, l render.Load) (_ video.Measuremen
 		}
 	}
 
-	pw, ph := o.pixels()
+	pw, ph := render.Pixels(o.W, o.H, o.Scale)
 	meas := video.Measurement{Name: name, Width: pw, Height: ph, FPS: o.FPS, Frames: len(refs),
 		DurationMS: float64(len(refs)) * 1000 / float64(o.FPS), Formats: map[string]video.FormatResult{},
 		LoopHeadFrames: lc.Head, LoopTailFrames: lc.Tail}
