@@ -5,11 +5,13 @@ import (
 	"math"
 	"strings"
 	"testing"
+
+	"github.com/lockyc/plate/internal/video"
 )
 
 // kbMaster is a master's Activity frames, 200 px across a 402 x 874 pt
 // screen at 60 fps for 4 s: a bar rests at 804 pt and, from 2000 to
-// 2300 ms on easeInOutCubic, rides a keyboard up from the screen's foot
+// 2300 ms on video.EaseInOutCubic, rides a keyboard up from the screen's foot
 // until the bar sits at 529 and the keyboard's top at 583; with moving
 // false nothing moves at all, and with bar false there is no bar.
 func kbMaster(moving bool, bar ...bool) []*image.Gray {
@@ -18,7 +20,7 @@ func kbMaster(moving bool, bar ...bool) []*image.Gray {
 	for i := range frames {
 		e := 0.0
 		if moving {
-			e = easeInOutCubic(clamp01((float64(i)*1000/60 - 2000) / 300))
+			e = video.EaseInOutCubic(clamp01((float64(i)*1000/60 - 2000) / 300))
 		}
 		g := image.NewGray(image.Rect(0, 0, w, h))
 		row := func(pt float64) int { return int(math.Round(pt * h / 874)) }
@@ -87,7 +89,7 @@ func TestTimeKeyboardEasesOverTheMeasuredMotion(t *testing.T) {
 			// over the motion's span instead, one frame off at either end
 			// of a 300 ms move leaves the strip up to 23 pt (half a row of
 			// text) from the master's bar mid-move.
-			e := easeInOutCubic((ts - 2000) / 300)
+			e := video.EaseInOutCubic((ts - 2000) / 300)
 			bar, ok := pin(v, "touchbar")
 			if !ok || math.Abs(bar.Src.Y-(804-275*e)) > 874.0/434*1.5 {
 				t.Fatalf("%.0f ms: touchbar Src %+v, the master's bar is at %.2f", ts, bar.Src, 804-275*e)
@@ -124,7 +126,7 @@ func TestTimeKeyboardTimesADrop(t *testing.T) {
 	for k, v := range vs {
 		ts := 1000 + float64(k)*1000/60
 		mt := float64(len(up)-1)*1000/60 - ts // the rising master's time
-		e := easeInOutCubic(clamp01((mt - 2000) / 300))
+		e := video.EaseInOutCubic(clamp01((mt - 2000) / 300))
 		for _, p := range v.Pins {
 			if p.Name == "touchbar" && p.Src.H > 0 && math.Abs(p.Src.Y-(804-275*e)) > 874.0/434*1.5 {
 				t.Fatalf("%.0f ms: touchbar Src %+v, the master's bar is at %.2f", ts, p.Src, 804-275*e)

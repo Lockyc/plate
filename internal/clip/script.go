@@ -11,6 +11,8 @@ import (
 	"strings"
 
 	"github.com/BurntSushi/toml"
+
+	"github.com/lockyc/plate/internal/video"
 )
 
 // Target names one thing on screen: exactly one of Label (accessibility
@@ -48,18 +50,8 @@ var (
 	MobileKeys = []string{"return", "delete", "space"}
 )
 
-// Adapters are the platforms a driver exists for; Formats the outputs a
-// render can write.
-var (
-	Adapters = []string{"ios"}
-	Formats  = []string{"mp4", "webm", "poster", "webp", "gif"}
-)
-
-// Loops are the ways a render may close a clip's loop (closeLoop), the
-// first the default: crossfade blends the end into the start; dip eases
-// both toward the ground and back, for a clip whose end state differs from
-// its start, where a blend shows both at once.
-var Loops = []string{"crossfade", "dip"}
+// Adapters are the platforms a driver exists for.
+var Adapters = []string{"ios"}
 
 // The range output.max_idle_ms may take, ms. Below minIdleMS the step
 // before an idle stretch and the motion after it abut with no rest, which
@@ -70,14 +62,6 @@ const (
 	minIdleMS = 100
 	maxIdleMS = 60000
 )
-
-// Ext is the file extension a format is written with.
-func Ext(format string) string {
-	if format == "poster" {
-		return "poster.png"
-	}
-	return format
-}
 
 type Output struct {
 	Width    int      `toml:"width" json:"width"`
@@ -235,7 +219,7 @@ func (s *Script) validate() Problems {
 	seen := map[string]bool{}
 	for _, f := range s.Output.Formats {
 		switch {
-		case !slices.Contains(Formats, f):
+		case !slices.Contains(video.Formats, f):
 			add("output.formats: unknown format %s", f)
 		case seen[f]:
 			add("output.formats: %s listed twice", f)
@@ -254,8 +238,8 @@ func (s *Script) validate() Problems {
 	if v := s.Output.MaxIdleMS; v != nil && (*v < minIdleMS || *v > maxIdleMS) {
 		add("output.max_idle_ms: want %d-%d", minIdleMS, maxIdleMS)
 	}
-	if s.Output.Loop != "" && !slices.Contains(Loops, s.Output.Loop) {
-		add("output.loop: want %s", strings.Join(Loops, " or "))
+	if s.Output.Loop != "" && !slices.Contains(video.Loops, s.Output.Loop) {
+		add("output.loop: want %s", strings.Join(video.Loops, " or "))
 	}
 
 	mode := s.Camera.Mode
@@ -460,7 +444,7 @@ func (s *Script) fillDefaults() {
 		s.Output.MaxIdleMS = ptr(500)
 	}
 	if s.Output.Loop == "" {
-		s.Output.Loop = Loops[0]
+		s.Output.Loop = video.Loops[0]
 	}
 	for i := range s.Steps {
 		st := &s.Steps[i]

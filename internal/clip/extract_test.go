@@ -226,34 +226,6 @@ func TestExtractFramesConvertsDisplayP3(t *testing.T) {
 	}
 }
 
-func TestExtractEncodedArgs(t *testing.T) {
-	log := enginetest.Stub(t, "ffmpeg", `for a; do pat=$a; done
-for i in 0 1 2; do cp "$RGB" "$(printf "$pat" $i)"; done`)
-	rgb := filepath.Join(t.TempDir(), "c.png")
-	writePNG(t, rgb, solid(4, 6, red))
-	t.Setenv("RGB", rgb)
-	frames, err := ExtractEncoded(context.Background(), "clip.mp4", []int{0, 30, 59}, t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(frames) != 3 || frames[2].RGBA64At(1, 1) != red {
-		t.Fatalf("frames = %d", len(frames))
-	}
-	got := enginetest.Calls(t, log)[0]
-	want := []string{"-hide_banner", "-loglevel", "error", "-nostdin",
-		"-i", "clip.mp4",
-		"-vf", `select=eq(n\,0)+eq(n\,30)+eq(n\,59),scale=in_color_matrix=bt709:in_range=auto:flags=accurate_rnd+full_chroma_int+bilinear,format=rgb24`,
-		"-fps_mode", "passthrough", "-start_number", "0", got[len(got)-1]}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("argv = %q\nwant   %q", got, want)
-	}
-	enginetest.Stub(t, "ffmpeg", `for a; do pat=$a; done
-cp "$RGB" "$(printf "$pat" 0)"`)
-	if _, err := ExtractEncoded(context.Background(), "clip.mp4", []int{0, 30}, t.TempDir()); err == nil || !strings.Contains(err.Error(), "decoded 1 of 2 frames") {
-		t.Fatalf("short decode: err = %v", err)
-	}
-}
-
 // TestExtractFramesHoldsStaticTail decodes masters shaped like simctl's:
 // variable frame rate, frames only when the screen changes, here at 0 and
 // 0.5 s and none after, while the log runs to 3000 ms. Every output frame

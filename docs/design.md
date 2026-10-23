@@ -155,23 +155,23 @@ colours, or renders what it is given.
   (internal/ml/scripts/upscale.py); alpha, which the model does not take, is
   enlarged separately.
 - **clip** — ffmpeg only decodes and encodes (`clip.ExtractActivity`,
-  `clip.ExtractFrames`, `clip.Encode`); everything between is Go: the trim
+  `clip.ExtractFrames`, `video.Encode`); everything between is Go: the trim
   (`clip.TrimWindow`) and its idle cuts (`clip.IdleCuts`, applied to the
   frames by `clip.ApplyCuts` and to the log by `clip.CompressLog` before
   anything reads its times), the camera (`clip.NewLayout`, `clip.Path`, its
   keyboard rises and drops timed from the master by `clip.TimeKeyboard`), the
   overlay timeline (`clip.Timeline`) and the composite (`clip.Compose`,
-  through `clip.Resample`), which also closes the loop (`clip.closeLoop`,
-  one of `clip.Loops`; a dip eases to `clip.ground`). Overlay sprites are
+  through `clip.Resample`), which also closes the loop (`video.CloseLoop`,
+  one of `video.Loops`; a dip eases to the ground). Overlay sprites are
   HTML pages rendered once each through `render.PNGAlpha`. `clip.Render`
   refuses before decoding what the log and probe can show, holds the encode
-  to its checks, and publishes the set only whole (`clip.publish`). The
+  to its checks, and publishes the set only whole (`video.Publish`). The
   encode settings and the resampling kernel are measured end to end, 4:2:0
   included, by the `clip-text-*` and `clip-caption-sharp` quality cases;
   the render's own sharpness check scores the encoder alone, against a
-  lossless 4:2:0 copy (`clip.Lossless420`). `clip.MaxSeam` is measured by
+  lossless 4:2:0 copy (`video.Lossless420`). `video.MaxSeam` is measured by
   `clip-loop-crossfade`, and the dip held by `clip-loop-dip`. The codec settings are documented at `mp4CRF`, the colour tagging at
-  `bt709` (both internal/clip/encode.go), the hold of a static tail at
+  `bt709` (both internal/video/encode.go), the hold of a static tail at
   `clip.ExtractFrames`, and the target refusals at `validateRef`.
 - **animate** — a page's own animation, captured frame by frame on a clock
   plate owns, and encoded as `clip` encodes. Generic: the scene, its

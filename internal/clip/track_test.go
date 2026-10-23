@@ -4,6 +4,8 @@ import (
 	"image"
 	"math"
 	"testing"
+
+	"github.com/lockyc/plate/internal/video"
 )
 
 func rectsLog(evs ...Event) *Log { return &Log{Events: evs, End: 6000} }
@@ -66,7 +68,7 @@ func TestPinAtKeyboardEases(t *testing.T) {
 	if r, s := tr.PinAt("kb", 250); s != 1 || r != *kb {
 		t.Errorf("PinAt(250) = %v, %g", r, s)
 	}
-	if _, s := tr.PinAt("kb", 500); math.Abs(s-(1-easeInOutCubic(1.0/3))) > 1e-9 {
+	if _, s := tr.PinAt("kb", 500); math.Abs(s-(1-video.EaseInOutCubic(1.0/3))) > 1e-9 {
 		t.Errorf("shown(500) = %g", s)
 	}
 	if _, s := tr.PinAt("kb", 1000); s != 0 {
@@ -97,12 +99,12 @@ func TestPinAtNeverUp(t *testing.T) {
 }
 
 func TestEaseInOutCubic(t *testing.T) {
-	if easeInOutCubic(0) != 0 || easeInOutCubic(0.5) != 0.5 || easeInOutCubic(1) != 1 {
+	if video.EaseInOutCubic(0) != 0 || video.EaseInOutCubic(0.5) != 0.5 || video.EaseInOutCubic(1) != 1 {
 		t.Error("endpoints")
 	}
 	prev := 0.0
 	for x := 0.0; x <= 1; x += 0.01 {
-		if v := easeInOutCubic(x); v < prev {
+		if v := video.EaseInOutCubic(x); v < prev {
 			t.Fatalf("not monotonic at %g", x)
 		} else {
 			prev = v
@@ -157,7 +159,7 @@ func TestElementEasesWithKeyboard(t *testing.T) {
 		rs(250, map[string]*Rect{"tb": {0, 498, 402, 62}, "kb": {0, 560, 402, 314}}),
 		rs(500, map[string]*Rect{"tb": {0, 400, 402, 62}, "kb": {0, 560, 402, 314}}),
 	))
-	want := 812 + (498-812)*easeInOutCubic(0.25)
+	want := 812 + (498-812)*video.EaseInOutCubic(0.25)
 	if r, _ := tr.RectAt("tb", 62.5); math.Abs(r.Y-want) > 1e-9 {
 		t.Errorf("RectAt(tb, 62.5).Y = %g, want %g", r.Y, want)
 	}

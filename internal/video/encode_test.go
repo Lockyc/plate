@@ -1,4 +1,4 @@
-package clip
+package video
 
 import (
 	"bytes"
@@ -97,7 +97,7 @@ func TestEncodeArgs(t *testing.T) {
 	}
 }
 
-func TestPosterIsTheFirstFrameTheLoopLeft(t *testing.T) {
+func TestPosterIsTheChosenFramesBytes(t *testing.T) {
 	dir := t.TempDir()
 	var refs []string
 	for k := range 3 {
@@ -105,18 +105,15 @@ func TestPosterIsTheFirstFrameTheLoopLeft(t *testing.T) {
 		writePNG(t, p, solid(4, 2, grey(float64(k)/2)))
 		refs = append(refs, p)
 	}
-	for _, c := range []struct {
-		lc   LoopClose
-		want int
-	}{{LoopClose{}, 0}, {LoopClose{Tail: 2}, 0}, {LoopClose{Head: 1, Tail: 1}, 1}} {
+	for _, i := range []int{0, 1, 2} {
 		out := filepath.Join(t.TempDir(), "c.poster.png")
-		if err := writePoster(refs, c.lc, out); err != nil {
+		if err := Poster(refs, i, out); err != nil {
 			t.Fatal(err)
 		}
-		a, _ := os.ReadFile(refs[c.want])
+		a, _ := os.ReadFile(refs[i])
 		b, _ := os.ReadFile(out)
 		if !bytes.Equal(a, b) {
-			t.Errorf("%+v: the poster is not frame %d's bytes", c.lc, c.want)
+			t.Errorf("the poster is not frame %d's bytes", i)
 		}
 	}
 }
@@ -124,11 +121,11 @@ func TestPosterIsTheFirstFrameTheLoopLeft(t *testing.T) {
 func TestRequireEncoders(t *testing.T) {
 	enginetest.Stub(t, "ffmpeg", `echo " V....D libx264              libx264 H.264"`)
 	ctx := context.Background()
-	err := requireEncoders(ctx, []string{"mp4", "webm"})
-	if err == nil || err.Error() != "ffmpeg lacks encoder libsvtav1 (clip webm)" {
+	err := RequireEncoders(ctx, []string{"mp4", "webm"})
+	if err == nil || err.Error() != "ffmpeg lacks encoder libsvtav1 (video webm)" {
 		t.Fatalf("err = %v", err)
 	}
-	if err := requireEncoders(ctx, []string{"mp4"}); err != nil {
+	if err := RequireEncoders(ctx, []string{"mp4"}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -140,7 +137,7 @@ func TestEncodeMP4MeetsFloor(t *testing.T) {
 	if _, err := engine.Resolve("ffmpeg"); err != nil {
 		t.Skip(err)
 	}
-	if err := requireEncoders(context.Background(), []string{"mp4"}); err != nil {
+	if err := RequireEncoders(context.Background(), []string{"mp4"}); err != nil {
 		t.Skip(err)
 	}
 	refs := t.TempDir()

@@ -1,4 +1,4 @@
-package clip
+package video
 
 import (
 	"context"
@@ -7,9 +7,12 @@ import (
 	"math"
 	"path/filepath"
 	"reflect"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/lockyc/plate/internal/engine"
+	"github.com/lockyc/plate/internal/enginetest"
 	"github.com/lockyc/plate/internal/raster"
 )
 
@@ -169,7 +172,7 @@ func realMP4(t *testing.T) {
 	if _, err := engine.Resolve("ffmpeg"); err != nil {
 		t.Skip("no ffmpeg")
 	}
-	if err := requireEncoders(context.Background(), []string{"mp4"}); err != nil {
+	if err := RequireEncoders(context.Background(), []string{"mp4"}); err != nil {
 		t.Skip("no libx264")
 	}
 }
@@ -179,7 +182,7 @@ func realMP4(t *testing.T) {
 func mp4Encoded(t *testing.T, img *image.RGBA64) *image.RGBA64 {
 	t.Helper()
 	dir := t.TempDir()
-	savePNG(filepath.Join(dir, "r00000.png"), img)
+	SavePNG(filepath.Join(dir, "r00000.png"), img)
 	b := img.Bounds()
 	mp4 := filepath.Join(dir, "c.mp4")
 	if err := Encode(context.Background(), "mp4", dir, 60, b.Dx(), b.Dy(), mp4); err != nil {
@@ -196,7 +199,7 @@ func mp4Encoded(t *testing.T, img *image.RGBA64) *image.RGBA64 {
 func lossless420(t *testing.T, img *image.RGBA64) *image.RGBA64 {
 	t.Helper()
 	dir := t.TempDir()
-	savePNG(filepath.Join(dir, "r00000.png"), img)
+	SavePNG(filepath.Join(dir, "r00000.png"), img)
 	out, err := Lossless420(context.Background(), dir, []int{0}, dir)
 	if err != nil {
 		t.Fatal(err)
@@ -211,7 +214,7 @@ func TestLossless420IsALosslessEncode(t *testing.T) {
 	realMP4(t)
 	ref := neonText(color.RGBA64{0x0000, 0xe5e5, 0xffff, 0xffff})
 	dir := t.TempDir()
-	savePNG(filepath.Join(dir, "r00000.png"), ref)
+	SavePNG(filepath.Join(dir, "r00000.png"), ref)
 	mp4 := filepath.Join(dir, "qp0.mp4")
 	args := append([]string{"-hide_banner", "-loglevel", "error", "-nostdin", "-framerate", "60", "-i", filepath.Join(dir, "r%05d.png"),
 		"-vf", toYUV, "-c:v", "libx264", "-qp", "0", "-pix_fmt", "yuv420p"}, bt709...)
@@ -280,5 +283,66 @@ func TestSharpnessScoresTheEncoderNotTheFormat(t *testing.T) {
 		t.Fatalf("mp4 against the 4:2:0 reference = %.3f, %v; want ≥ MinSharpness", s, err)
 	} else {
 		t.Logf("mp4 against the 4:2:0 reference = %.3f", s)
+	}
+}
+
+func TestSeamRefusesSizeMismatch(t *testing.T) {
+	if _, err := Seam(solid(8, 8, grey(0)), solid(8, 6, grey(0))); err == nil {
+		t.Fatal("no error for 8x8 against 8x6")
+	}
+}
+
+func TestSharpnessScoresEveryVideoEncode(t *testing.T) {
+	meas := Measurement{Formats: map[string]FormatResult{
+		"mp4": {File: "n.mp4"}, "webm": {File: "n.webm"}, "gif": {File: "n.gif"}}}
+	var scored []string
+	err := scoreSharpness(&meas, func(file string) (float64, error) {
+		scored = append(scored, file)
+		return map[string]float64{"n.mp4": 0.9, "n.webm": 0.5}[file], nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(scored, []string{"n.mp4", "n.webm"}) {
+		t.Fatalf("scored %q, want both video encodes", scored)
+	}
+	if meas.Sharpness != 0.5 || meas.Formats["mp4"].Sharpness != 0.9 || meas.Formats["webm"].Sharpness != 0.5 {
+		t.Fatalf("measurement %+v", meas)
+	}
+	want := "webm sharpness 0.500 is below 0.85: the encode loses the frames' fine detail"
+	if err := checkSharpness(meas); err == nil || err.Error() != want {
+		t.Fatalf("checkSharpness = %v, want %q", err, want)
+	}
+	none := Measurement{Formats: map[string]FormatResult{"gif": {File: "n.gif"}}}
+	if err := scoreSharpness(&none, nil); err != nil || none.Sharpness != 1 || checkSharpness(none) != nil {
+		t.Fatalf("no video encode: %+v, %v", none, err)
+	}
+}
+
+func TestExtractEncodedArgs(t *testing.T) {
+	log := enginetest.Stub(t, "ffmpeg", `for a; do pat=$a; done
+for i in 0 1 2; do cp "$RGB" "$(printf "$pat" $i)"; done`)
+	rgb := filepath.Join(t.TempDir(), "c.png")
+	writePNG(t, rgb, solid(4, 6, red))
+	t.Setenv("RGB", rgb)
+	frames, err := ExtractEncoded(context.Background(), "clip.mp4", []int{0, 30, 59}, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(frames) != 3 || frames[2].RGBA64At(1, 1) != red {
+		t.Fatalf("frames = %d", len(frames))
+	}
+	got := enginetest.Calls(t, log)[0]
+	want := []string{"-hide_banner", "-loglevel", "error", "-nostdin",
+		"-i", "clip.mp4",
+		"-vf", `select=eq(n\,0)+eq(n\,30)+eq(n\,59),scale=in_color_matrix=bt709:in_range=auto:flags=accurate_rnd+full_chroma_int+bilinear,format=rgb24`,
+		"-fps_mode", "passthrough", "-start_number", "0", got[len(got)-1]}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("argv = %q\nwant   %q", got, want)
+	}
+	enginetest.Stub(t, "ffmpeg", `for a; do pat=$a; done
+cp "$RGB" "$(printf "$pat" 0)"`)
+	if _, err := ExtractEncoded(context.Background(), "clip.mp4", []int{0, 30}, t.TempDir()); err == nil || !strings.Contains(err.Error(), "decoded 1 of 2 frames") {
+		t.Fatalf("short decode: err = %v", err)
 	}
 }

@@ -3,6 +3,8 @@ package clip
 import (
 	"fmt"
 	"math"
+
+	"github.com/lockyc/plate/internal/video"
 )
 
 // Overlay timing, ms, and sizes, pt. The touch values approximate iOS's own
@@ -400,7 +402,7 @@ func cursorAt(stops []stop, t float64) Point {
 			if t <= prev.leave || math.IsInf(prev.leave, -1) {
 				return prev.p1
 			}
-			return lerpPt(prev.p1, st.p0, easeInOutCubic((t-prev.leave)/(st.arrive-prev.leave)))
+			return lerpPt(prev.p1, st.p0, video.EaseInOutCubic((t-prev.leave)/(st.arrive-prev.leave)))
 		}
 		if t < st.leave {
 			if t < st.start || st.leave == st.start {

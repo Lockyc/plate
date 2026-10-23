@@ -5,6 +5,8 @@ import (
 	"math"
 	"slices"
 	"sort"
+
+	"github.com/lockyc/plate/internal/video"
 )
 
 // Cut is a span of master time a render drops, ms: [Start, End), on the
@@ -154,7 +156,7 @@ func Compress(w Window, cuts []Cut) Window {
 // ApplyCuts drops each cut's frames from frames, the window w decoded at
 // fps (frame k at w.Start + k·1000/fps), and returns the frames kept and
 // the cuts made. A cut is made only if the frames either side of it match
-// within MaxSeam, the jump a loop may show: the dropped span is idle by
+// within video.MaxSeam, the jump a loop may show: the dropped span is idle by
 // Activity, but a slow drift below idleShare a frame can add up across it.
 // Each cut not made is reported to warn, naming its span.
 func ApplyCuts(frames []string, w Window, fps int, cuts []Cut, warn func(string)) ([]string, []Cut, error) {
@@ -167,20 +169,20 @@ func ApplyCuts(frames []string, w Window, fps int, cuts []Cut, warn func(string)
 		if a < 1 || b >= len(frames) {
 			continue
 		}
-		before, err := loadRGBA64(frames[a-1])
+		before, err := video.LoadRGBA64(frames[a-1])
 		if err != nil {
 			return nil, nil, err
 		}
-		after, err := loadRGBA64(frames[b])
+		after, err := video.LoadRGBA64(frames[b])
 		if err != nil {
 			return nil, nil, err
 		}
-		seam, err := Seam(before, after)
+		seam, err := video.Seam(before, after)
 		if err != nil {
 			return nil, nil, err
 		}
-		if seam > MaxSeam {
-			warn(fmt.Sprintf("idle %.1f-%.1f ms kept: the frames either side differ by %.3g%%, above %.3g%%", c.Start, c.End, seam, MaxSeam))
+		if seam > video.MaxSeam {
+			warn(fmt.Sprintf("idle %.1f-%.1f ms kept: the frames either side differ by %.3g%%, above %.3g%%", c.Start, c.End, seam, video.MaxSeam))
 			continue
 		}
 		for k := a; k < b; k++ {

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 
 	"github.com/lockyc/plate/internal/cli"
+	"github.com/lockyc/plate/internal/video"
 )
 
 const usage = "usage: plate clip <check|render> [flags] [args]\n" +
@@ -79,7 +80,7 @@ func renderMain(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	if err != nil {
 		return cli.Fail(stderr, "clip render", err)
 	}
-	for _, f := range Formats {
+	for _, f := range video.Formats {
 		if r, ok := m.Formats[f]; ok {
 			fmt.Fprintf(stdout, "wrote %s (%d bytes)\n", filepath.Join(dir, r.File), r.Bytes)
 		}
