@@ -661,3 +661,23 @@ func TestPNGAlphaRefusesOpaqueResult(t *testing.T) {
 		t.Errorf("err %v, file left: %v", err, exists(e.out("a.png")))
 	}
 }
+
+func TestPixels(t *testing.T) {
+	for _, c := range []struct {
+		w, h   int
+		scale  float64
+		pw, ph int
+	}{{541, 960, 1, 541, 960}, {540, 961, 2, 1080, 1922}, {3, 5, 1.5, 5, 8}} {
+		if pw, ph := Pixels(c.w, c.h, c.scale); pw != c.pw || ph != c.ph {
+			t.Errorf("Pixels(%d, %d, %g) = %dx%d, want %dx%d", c.w, c.h, c.scale, pw, ph, c.pw, c.ph)
+		}
+	}
+	for _, scale := range []float64{2, 1e300} {
+		if err := CheckSize(10000, 10000, scale); err == nil || !strings.Contains(err.Error(), "verified whole") {
+			t.Errorf("CheckSize at scale %g: %v", scale, err)
+		}
+	}
+	if err := CheckSize(16384, 16384, 1); err != nil {
+		t.Error(err)
+	}
+}

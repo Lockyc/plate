@@ -527,19 +527,25 @@ func (j job) base() []string {
 // CheckSize refuses a w×h CSS px capture at scale whose pixels go beyond
 // the largest screenshot verified whole.
 func CheckSize(w, h int, scale float64) error {
-	fw, fh := math.Round(float64(w)*scale), math.Round(float64(h)*scale)
-	if fw > maxSide || fh > maxSide || fw*fh > maxPixels {
-		return fmt.Errorf("render would be %gx%g px (%.1f MP), beyond the %dx%d px verified whole on %s; render smaller or at a lower --scale",
-			fw, fh, fw*fh/1e6, maxSide, maxSide, chrome)
+	pw, ph := Pixels(w, h, scale)
+	// A side past int's range converts to a negative or the largest int.
+	if pw < 0 || ph < 0 || pw > maxSide || ph > maxSide || pw*ph > maxPixels {
+		return fmt.Errorf("render would be %dx%d px (%.1f MP), beyond the %dx%d px verified whole on %s; render smaller or at a lower --scale",
+			pw, ph, float64(pw)*float64(ph)/1e6, maxSide, maxSide, chrome)
 	}
 	return nil
+}
+
+// Pixels is a w×h CSS px capture's size in device px at scale.
+func Pixels(w, h int, scale float64) (int, int) {
+	return int(math.Round(float64(w) * scale)), int(math.Round(float64(h) * scale))
 }
 
 func (j job) screenshot(ctx context.Context) error {
 	if err := CheckSize(j.w, j.h, j.scale); err != nil {
 		return err
 	}
-	pw, ph := int(math.Round(float64(j.w)*j.scale)), int(math.Round(float64(j.h)*j.scale))
+	pw, ph := Pixels(j.w, j.h, j.scale)
 	args := append(j.base(),
 		"--force-device-scale-factor="+strconv.FormatFloat(j.scale, 'f', -1, 64),
 		fmt.Sprintf("--window-size=%d,%d", j.w, j.h),
