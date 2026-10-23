@@ -1,0 +1,9 @@
+<!doctype html>
+<p style="font-family: late">text</p>
+<script>
+  document.fonts.ready.then(() => {
+    const face = new FontFace("late", "url(" + new URLSearchParams(location.search).get("font") + ")");
+    document.fonts.add(face);
+    face.load().catch(() => {});
+  });
+</script>

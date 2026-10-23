@@ -1,0 +1,6 @@
+<!doctype html>
+<script>
+  const f = document.createElement("iframe");
+  f.src = new URLSearchParams(location.search).get("src");
+  document.documentElement.append(f);
+</script>

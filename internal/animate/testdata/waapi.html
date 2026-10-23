@@ -1,0 +1,14 @@
+<!doctype html>
+<style>body { margin: 0; } div { width: 40px; height: 40px; background: #36c; }</style>
+<div id="a"></div><div id="b"></div>
+<script>
+  window.done = false;
+  window.finishEvents = 0;
+  const a = document.getElementById("a").animate([{ opacity: 0 }, { opacity: 1 }], { duration: 500 });
+  a.onfinish = () => window.finishEvents++;
+  a.finished.then(() => {
+    window.done = true;
+    document.getElementById("b").animate([{ transform: "translateX(0)" }, { transform: "translateX(100px)" }],
+      { duration: 1000, fill: "forwards" });
+  });
+</script>

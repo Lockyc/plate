@@ -1,0 +1,12 @@
+<!doctype html>
+<style>body { margin: 0; background: #000; } video { display: block; } #b { width: 40px; height: 40px; background: #fff; }</style>
+<video id="v" src="source.mp4" muted preload="auto"></video>
+<div id="b"></div>
+<script>
+  const v = document.getElementById("v");
+  v.addEventListener("ended", () => {
+    document.getElementById("b").animate([{ transform: "translateX(0)" }, { transform: "translateX(300px)" }],
+      { duration: 1000, fill: "forwards" });
+  });
+  v.play();
+</script>
