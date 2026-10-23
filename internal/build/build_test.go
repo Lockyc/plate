@@ -17,6 +17,7 @@ import (
 	"github.com/lockyc/plate/internal/engine"
 	"github.com/lockyc/plate/internal/enginetest"
 	"github.com/lockyc/plate/internal/pdf"
+	"github.com/lockyc/plate/internal/raster"
 )
 
 // chromeStub writes the fixture as the screenshot and fetches the page
@@ -417,5 +418,57 @@ func TestBuildTwoUpWithoutPDFIsRefused(t *testing.T) {
 	}
 	if len(enginetest.Calls(t, e.chrome)) != 0 {
 		t.Error("chrome ran")
+	}
+}
+
+const slidePage = `<!doctype html>
+<style>
+  body { margin: 0; background: #fff; }
+  #b { width: 40px; height: 40px; background: #c33; animation: slide 2s linear forwards; }
+  @keyframes slide { from { transform: translateX(0); } to { transform: translateX(500px); } }
+</style>
+<div id="b"></div>`
+
+func TestBuildRunsVideoLine(t *testing.T) {
+	for _, e := range []string{"chrome-headless-shell", "ffmpeg"} {
+		if _, err := engine.Resolve(e); err != nil {
+			t.Skip(err)
+		}
+	}
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("SOURCE_DATE_EPOCH", "")
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "css.html"), []byte(slidePage), 0o644)
+	m := filepath.Join(dir, "m.conf")
+	write := func(body string) { os.WriteFile(m, []byte(body), 0o644) }
+	write("still css.html 600x100 2 png\nclip css.html 600x100 2 mp4,png dur=1s\n")
+	e := &env{dir: dir, manifest: m}
+	if code := e.run(m); code != 0 {
+		t.Fatalf("code %d: %s", code, e.stderr.String())
+	}
+	if want := "rendered still\nrendered clip\n2 rendered, 0 unchanged\n"; e.stderr.String() != want {
+		t.Errorf("stderr %q, want %q", e.stderr.String(), want)
+	}
+	dist := filepath.Join(dir, "dist")
+	for _, f := range []string{"clip.mp4", "clip.json", "clip.png"} {
+		if _, err := os.Stat(filepath.Join(dist, f)); err != nil {
+			t.Error(err)
+		}
+	}
+	want, _ := raster.DPI(filepath.Join(dist, "still.png"))
+	if got, _ := raster.DPI(filepath.Join(dist, "clip.png")); want < 191.99 || math.Abs(got-want) > 0.01 {
+		t.Errorf("clip.png is %v dpi, a still line's is %v (want 192)", got, want)
+	}
+	e.run(m)
+	if want := "unchanged still\nunchanged clip\n0 rendered, 2 unchanged\n"; e.stderr.String() != want {
+		t.Errorf("second run stderr %q, want %q", e.stderr.String(), want)
+	}
+	// A run that drops the still removes the earlier one.
+	write("still css.html 600x100 2 png\nclip css.html 600x100 2 mp4 dur=1s\n")
+	if code := e.run(m); code != 0 {
+		t.Fatalf("code %d: %s", code, e.stderr.String())
+	}
+	if _, err := os.Stat(filepath.Join(dist, "clip.png")); err == nil {
+		t.Error("clip.png survived a run that no longer lists png")
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -208,5 +209,80 @@ func TestManifestTwoUpCollidesWithEarlierTarget(t *testing.T) {
 	_, err := ParseManifest(path, t.TempDir(), nil)
 	if err == nil || !strings.Contains(err.Error(), ":2: ") || !strings.Contains(err.Error(), "line 1") {
 		t.Errorf("err %v", err)
+	}
+}
+
+func TestParseVideoLine(t *testing.T) {
+	path, dir := manifest(t, "duck-story print/social.html?m=duck&f=story 1080x1920 1 mp4,png dur=8s fps=30\n")
+	out := filepath.Join(dir, "dist")
+	ts, err := ParseManifest(path, out, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := ts[0].Anim
+	if a == nil {
+		t.Fatal("no Anim on a dur= line")
+	}
+	if a.W != 1080 || a.H != 1920 || a.Scale != 1 || a.DurationS != 8 || a.FPS != 30 || a.Loop != "none" ||
+		!reflect.DeepEqual(a.Formats, []string{"mp4"}) || a.PNG != filepath.Join(out, "duck-story.png") || a.JPEG != "" ||
+		a.Out != out || a.Name != "duck-story" || a.Budget != 5000 || !strings.HasSuffix(a.Page, "print/social.html?m=duck&f=story") {
+		t.Errorf("anim %+v", *a)
+	}
+	want := []string{filepath.Join(out, "duck-story.mp4"), filepath.Join(out, "duck-story.json"), filepath.Join(out, "duck-story.png")}
+	if got := ts[0].Outputs(); !reflect.DeepEqual(got, want) {
+		t.Errorf("outputs %v, want %v", got, want)
+	}
+}
+
+func TestParseVideoOptions(t *testing.T) {
+	path, _ := manifest(t, "a a.html 100x50 2 webm,gif,poster,webp,jpeg dur=2.5 loop=dip budget-kb=300 budget=800\n")
+	ts, err := ParseManifest(path, t.TempDir(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := ts[0].Anim
+	if a.DurationS != 2.5 || a.FPS != 30 || a.Loop != "dip" || a.BudgetKB != 300 || a.Budget != 800 || a.JPEG == "" ||
+		!reflect.DeepEqual(a.Formats, []string{"webm", "gif", "poster", "webp"}) {
+		t.Errorf("anim %+v", *a)
+	}
+}
+
+func TestParseVideoRefusals(t *testing.T) {
+	for _, c := range []struct{ line, want string }{
+		{"a a.html 100x50 1 mp4", "mp4 needs dur=S"},
+		{"a a.html 100x50 1 png dur=2s", "dur= needs a video output (mp4, webm, gif, webp or poster)"},
+		{"a a.html 100x50 1 mp4,pdf dur=2s", "pdf reads a settled page; a video line has one only at its end"},
+		{"a a.html 100x50 1 mp4,html dur=2s", "html reads a settled page"},
+		{"a a.html 100x50 1 mp4 dur=2s transparent", "transparent reads a settled page"},
+		{"a a.html 100x50 1 mp4 dur=2s blank-margin=4", "blank-margin reads a settled page"},
+		{"a a.html 100x50 1 mp4 dur=2s 2up", "2up reads a settled page"},
+		{"a a.html 100x50 1 mp4 dur=2s marks", "marks reads a settled page"},
+		{"a a.html 100x50 1 png fps=30", "fps needs dur=S"},
+		{"a a.html 100x50 1 png loop=dip", "loop needs dur=S"},
+		{"a a.html 100x50 1 png budget-kb=9", "budget-kb needs dur=S"},
+		{"a a.html 100x50 1 mp4,mp4 dur=2s", "mp4 is listed twice"},
+		{"a a.html 100x50 1 mp4 dur=0", `dur="0": want seconds, e.g. dur=8s`},
+		{"a a.html 100x50 1 mp4 dur=-2", `dur="-2": want seconds, e.g. dur=8s`},
+		{"a a.html 100x50 1 mp4 dur=s", `dur="s": want seconds, e.g. dur=8s`},
+		{"a a.html 100x50 1 mp4 dur=8ms", `dur="8ms": want seconds, e.g. dur=8s`},
+		{"a a.html 100x50 1 mp4 dur", `dur="": want seconds, e.g. dur=8s`},
+		{"a a.html 101x50 1 mp4 dur=2s", "even pixel sides"},
+	} {
+		path, _ := manifest(t, c.line+"\n")
+		_, err := ParseManifest(path, t.TempDir(), nil)
+		var le *LineError
+		if !errors.As(err, &le) || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%q: %v, want a line error with %q", c.line, err, c.want)
+		}
+	}
+}
+
+// A video line's outputs include its poster and sidecar, so another target's
+// file of the same name is a duplicate.
+func TestParseVideoOutputsCollide(t *testing.T) {
+	path, _ := manifest(t, "a a.html 100x50 1 poster dur=2s\na.poster b.html 100x50 1 png\n")
+	_, err := ParseManifest(path, t.TempDir(), nil)
+	if err == nil || !strings.Contains(err.Error(), "a.poster.png is also written by") {
+		t.Fatalf("err %v, want a duplicate-output refusal", err)
 	}
 }
