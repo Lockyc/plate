@@ -130,8 +130,8 @@ func (d exceptionDetails) String() string {
 
 // Seek moves the page's clock to ms and returns once every video shows its
 // frame. It refuses a page that threw since the last seek, a video that
-// cannot play or shows no frame within the budget, and a cross-origin
-// iframe, whose clock plate cannot drive.
+// cannot play or shows no frame within the budget, a cross-origin iframe,
+// whose clock plate cannot drive, and timers or page code that never stop.
 func (c *Capture) Seek(ctx context.Context, ms float64) error {
 	var r struct {
 		Errors []struct {
@@ -141,6 +141,7 @@ func (c *Capture) Seek(ctx context.Context, ms float64) error {
 		Stalled     []string `json:"stalled"`
 		CrossOrigin []string `json:"crossOrigin"`
 		Restless    int      `json:"restless"`
+		Overrun     int      `json:"overrun"`
 	}
 	c.at = ms
 	err := c.Eval(ctx, fmt.Sprintf("__plate.seek(%s)", jsNumber(ms)), &r)
@@ -156,6 +157,8 @@ func (c *Capture) Seek(ctx context.Context, ms float64) error {
 		return fmt.Errorf("video %s cannot play: MediaError %d", r.Errors[0].Src, r.Errors[0].Code)
 	case len(r.Stalled) > 0:
 		return fmt.Errorf("video %s not ready after %d ms at %.0f ms", r.Stalled[0], c.budget.Milliseconds(), ms)
+	case r.Overrun > 0:
+		return fmt.Errorf("page timers still due after %d runs at %.0f ms", r.Overrun, ms)
 	case r.Restless > 0:
 		return fmt.Errorf("page still starting animations, media seeks or timers after %d passes at %.0f ms", r.Restless, ms)
 	}

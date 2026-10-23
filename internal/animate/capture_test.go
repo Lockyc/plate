@@ -751,3 +751,80 @@ func TestClockRejectedTimeWriteKeepsTime(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestClockVideoEvents(t *testing.T) {
+	page := sourceVideo(t, "videoevents.html")
+	type st struct {
+		P, A   []string
+		Held   bool
+		HeldAt float64
+	}
+	expr := `(() => { const h = document.getElementById("h"); return {P: window.events.p, A: window.events.a, Held: h.paused, HeldAt: h.currentTime}; })()`
+	err := withCapture(t, page, 320, 240, testBudget, func(ctx context.Context, c *Capture) error {
+		check := func(p, a []string) func(st) {
+			return func(s st) {
+				if fmt.Sprint(s.P) != fmt.Sprint(p) || fmt.Sprint(s.A) != fmt.Sprint(a) {
+					t.Errorf("events: play() %v, autoplay %v; want %v, %v", s.P, s.A, p, a)
+				}
+				if !s.Held || s.HeldAt != 0 {
+					t.Errorf("an autoplay video paused before it was seen: paused %v at %v, want paused at 0", s.Held, s.HeldAt)
+				}
+			}
+		}
+		started := []string{"play", "playing"}
+		ended := []string{"play", "playing", "pause", "ended"}
+		return evalAt(t, c, ctx, 100, expr, map[int]func(st){
+			30:  check(started, started),
+			91:  check(started, ended),
+			100: check(ended, ended),
+		})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestClockCancelsQueuedFrame(t *testing.T) {
+	err := withCapture(t, "testdata/rafcancel.html", 100, 100, testBudget, func(ctx context.Context, c *Capture) error {
+		return evalAt(t, c, ctx, 2, `window.ran`, map[int]func(bool){2: func(ran bool) {
+			if ran {
+				t.Error("a frame callback cancelled by an earlier one in the same batch ran")
+			}
+		}})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCaptureRefusesStringTimer(t *testing.T) {
+	err := withCapture(t, "testdata/stringtimer.html", 100, 100, testBudget, func(ctx context.Context, c *Capture) error {
+		return c.Seek(ctx, 0)
+	})
+	if err == nil || !strings.Contains(err.Error(), "page threw at 0 ms") || !strings.Contains(err.Error(), "setTimeout with a code string") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestClockClampsNestedTimers(t *testing.T) {
+	err := withCapture(t, "testdata/nestedtimer.html", 100, 100, testBudget, func(ctx context.Context, c *Capture) error {
+		// The script's call and four nested runs at 0 ms; the fifth waits 4 ms.
+		return evalAt(t, c, ctx, 30, `window.n`, map[int]func(int){0: func(n int) {
+			if n != 5 {
+				t.Errorf("at 0 ms the self-rescheduling timer ran %d times, want 5", n)
+			}
+		}})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCaptureRefusesTimerOverrun(t *testing.T) {
+	err := withCapture(t, "testdata/interval.html", 100, 100, testBudget, func(ctx context.Context, c *Capture) error {
+		return c.Seek(ctx, 200000)
+	})
+	if err == nil || !strings.Contains(err.Error(), "timers still due after 100000 runs at 200000 ms") || strings.Contains(err.Error(), "__plate") {
+		t.Fatalf("err = %v", err)
+	}
+}
