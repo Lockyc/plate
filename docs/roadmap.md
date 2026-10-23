@@ -20,7 +20,7 @@ Phases in build order. Each ships when its acceptance gate passes.
 | 5 | Not started | Regression check against the pipelines plate replaces, then each project's cutover | no measured regression; each cutover approved by its owner |
 | 6 | Shipped | Documents and PDFs: a PDF inspect command (metadata with a text-layer check, text, page renders, embedded images) and markdown to PDF with a neutral default document stylesheet, pandoc pinned | unit tests with stub engines; a rendered document checked page by page |
 | 7 | Shipped | Demo clips: `clip check` (the clip-script schema a runner reads) and `clip render` (trim, idle compression, camera, overlays, a crossfaded or dipped loop, MP4/WebM/poster/WebP/GIF, measured checks), ffmpeg pinned | unit tests; `clip-*` quality cases at their recorded thresholds |
-| 8 | Next | Motion: `animate` (a page's animation captured on plate's clock, embedded video seeked with it), `internal/cdp`, clip's encode and checks moved to `internal/video`, video outputs and `dur=`/`fps=` in `plate build` | unit tests; `animate-*` quality cases: two captures frame-identical, thin moving text at clip's sharpness floor, embedded videos frame-matched to their sources, one started late, from partway in and looping |
+| 8 | Shipped | Motion: `animate` (a page's animation captured on plate's clock, embedded video seeked with it), `internal/cdp`, clip's encode and checks moved to `internal/video`, video outputs and `dur=`/`fps=` in `plate build` | unit tests; `animate-*` quality cases: two captures frame-identical, thin moving text at clip's sharpness floor, embedded videos frame-matched to their sources, one started late, from partway in and looping, and a page whose animation never ran refused |
 
 **Phase 5 changes nothing in a consuming project until its owner approves
 that project's cutover.** The check runs plate beside the existing pipeline,
@@ -52,9 +52,9 @@ independently of phase 5. Within a phase, order is open.
 - **render --png captures the viewport, not the whole page.** The PNG is
   exactly `--size`; content below it is cut off. Full-page capture needs the
   DevTools protocol (`Page.captureScreenshot` with `captureBeyondViewport`),
-  which a command-line Chrome call cannot reach. Deferred because no caller
-  has needed a long page. Unlock: such a caller, then a CDP driver behind a
-  `--full-page` flag.
+  which a command-line Chrome call cannot reach and `render` does not drive.
+  Deferred because no caller has needed a long page. Unlock: such a caller,
+  then `internal/cdp` behind a `--full-page` flag.
 
 - **fonts --subset embeds TTF or OTF, not woff2.** hb-subset writes only
   the input's sfnt format, so a subset face is about twice the size of the

@@ -7,7 +7,7 @@
 
 Image, render and document operations for print and web pipelines, as one
 command: lift a subject out of a photo, fill, enlarge or shrink artwork, render HTML to
-PNG, JPEG, PDF or its settled DOM, cut a screen recording into a short looping demo clip, preview a Google Slides deck, turn markdown into a
+PNG, JPEG, PDF or its settled DOM, cut a screen recording into a short looping demo clip, animate a page into a short video, preview a Google Slides deck, turn markdown into a
 PDF, look inside a PDF, make a press-ready PDF, put an A5 flyer two-up on
 an A4 sheet to print and cut, match a colour grade. Each
 operation wraps an engine at a pinned version, and its output is checked
@@ -246,8 +246,8 @@ plate doctor --install
 ```
 
 Run `plate doctor --install` first. It downloads the engine plate manages
-itself, chrome-headless-shell for `render`, then checks every other engine
-against its pin (for ffmpeg, the encoders `clip` needs too) and prints the install command for any that is missing or too
+itself, chrome-headless-shell for `render` and `animate`, then checks every other engine
+against its pin (for ffmpeg, the encoders `clip` and `animate` need too) and prints the install command for any that is missing or too
 old, naming the commands that will not run until it is fixed.
 
 `uv` is the only Python tool to install. The ML commands (`cutout`, `inpaint`,
@@ -263,13 +263,13 @@ chooses the PyTorch device instead.
 
 ### Platforms
 
-- **macOS 14 or later on Apple Silicon**: every command; `clip` needs ffmpeg at
-  its pinned minimum.
+- **macOS 14 or later on Apple Silicon**: every command; `clip` and `animate` need
+  ffmpeg at its pinned minimum.
 - **Linux with glibc 2.28 or later, x86_64 or arm64**: every command except
-  `cutout --coarse vision`, which needs Apple Vision (`clip` runs wherever
-  ffmpeg at its pinned minimum is present); `cutout` uses
+  `cutout --coarse vision`, which needs Apple Vision (`clip` and `animate` run
+  wherever ffmpeg at its pinned minimum is present); `cutout` uses
   `--coarse birefnet` there. On arm64, Chrome for Testing publishes no
-  chrome-headless-shell build, so `render` needs one supplied through
+  chrome-headless-shell build, so `render` and `animate` need one supplied through
   `PLATE_ENGINE_CHROME_HEADLESS_SHELL`. chrome-headless-shell needs the usual
   Chrome shared libraries (libnss3 and the like) from the distribution.
 - **Intel Macs**: `cutout` and `upscale` refuse to run, because PyTorch and
