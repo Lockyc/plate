@@ -724,3 +724,30 @@ func TestClockTimerFromFinishHandler(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestClockCancelledAnimationRestarts(t *testing.T) {
+	err := withCapture(t, "testdata/cancel.html", 100, 100, testBudget, func(ctx context.Context, c *Capture) error {
+		ct := func(want float64) func(float64) {
+			return func(v float64) { wantNear(t, "currentTime", v, want, 1e-6) }
+		}
+		return evalAt(t, c, ctx, 24, `window.anim.currentTime ?? -1`,
+			map[int]func(float64){9: ct(-1), 18: ct(0), 24: ct(200)})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestClockRejectedTimeWriteKeepsTime(t *testing.T) {
+	err := withCapture(t, "testdata/scrub.html", 100, 100, testBudget, func(ctx context.Context, c *Capture) error {
+		ct := func(want float64) func(float64) {
+			return func(v float64) { wantNear(t, "currentTime", v, want, 1e-6) }
+		}
+		return evalAt(t, c, ctx, 15,
+			`(() => { try { window.running.currentTime = null; } catch {} return window.running.currentTime; })()`,
+			map[int]func(float64){3: ct(at(3)), 12: ct(at(12))})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}

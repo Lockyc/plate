@@ -1,0 +1,7 @@
+<!doctype html>
+<div id="a"></div>
+<script>
+  window.anim = document.getElementById("a").animate([{ opacity: 0 }, { opacity: 1 }], { duration: 5000 });
+  setTimeout(() => window.anim.cancel(), 300);
+  setTimeout(() => window.anim.play(), 600);
+</script>
