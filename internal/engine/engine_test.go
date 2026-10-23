@@ -363,3 +363,35 @@ func TestStartReportsEarlyExit(t *testing.T) {
 		t.Fatalf("Close = %v, want a RunError with stderr boom", err)
 	}
 }
+
+func TestStartCancelAfterCleanExitIsNotAnError(t *testing.T) {
+	enginetest.Stub(t, "magick", `exit 0`)
+	cctx, cancel := context.WithCancel(ctx)
+	p, err := engine.Start(cctx, engine.Cmd{Engine: "magick"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	io.ReadAll(p.Out) // EOF: the engine has exited
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+	if err := p.Close(); err != nil {
+		t.Fatalf("Close = %v, want nil: the engine exited before the cancel", err)
+	}
+}
+
+func TestStartChromeCleanCloseIsNil(t *testing.T) {
+	e, _ := pins.Lookup("chrome-headless-shell")
+	path, err := engine.Find(e)
+	if err != nil {
+		t.Skip(err)
+	}
+	p, err := engine.Start(ctx, engine.Cmd{Path: path, Engine: e.Name,
+		Args: []string{"--remote-debugging-pipe", "--headless", "--no-sandbox", "about:blank"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(time.Second)
+	if err := p.Close(); err != nil {
+		t.Fatalf("Close = %v, want nil after pipe EOF", err)
+	}
+}

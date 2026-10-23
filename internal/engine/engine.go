@@ -417,11 +417,11 @@ type Proc struct {
 	engine  string
 	cmd     *exec.Cmd
 	stderr  *os.File
-	ctx     context.Context
 	cancel  context.CancelFunc
 	timeout time.Duration
 	done    chan struct{} // closed once the engine has exited and its group is killed
 	waitErr error
+	ctxErr  error // ctx.Err() as the engine exited, so a later cancel is not blamed
 }
 
 // Start launches c with pipes on fd 3 and 4 and returns at once. The timeout
@@ -468,9 +468,10 @@ func Start(ctx context.Context, c Cmd) (*Proc, error) {
 		r4.Close()
 		return nil, err
 	}
-	p := &Proc{In: w3, Out: r4, engine: c.Engine, cmd: cmd, stderr: stderr, ctx: ctx, cancel: cancel, timeout: timeout, done: make(chan struct{})}
+	p := &Proc{In: w3, Out: r4, engine: c.Engine, cmd: cmd, stderr: stderr, cancel: cancel, timeout: timeout, done: make(chan struct{})}
 	go func() {
 		p.waitErr = cmd.Wait()
+		p.ctxErr = ctx.Err()
 		killGroup(cmd)
 		close(p.done)
 	}()
@@ -498,9 +499,9 @@ func (p *Proc) Close() error {
 		return &RunError{Engine: p.engine, Reason: reason, Stderr: string(readAll(p.stderr))}
 	}
 	switch {
-	case errors.Is(p.ctx.Err(), context.DeadlineExceeded):
+	case errors.Is(p.ctxErr, context.DeadlineExceeded):
 		return fail("timed out after " + p.timeout.String())
-	case p.ctx.Err() != nil:
+	case p.ctxErr != nil:
 		return fail("cancelled")
 	case p.waitErr != nil && !killed:
 		return fail(p.waitErr.Error())
