@@ -493,7 +493,7 @@ func TestCacheKeyQualityDefaultEqualsExplicit(t *testing.T) {
 	enginetest.Stub(t, "magick", magickStub)
 	o := Options{Page: e.page, JPEG: e.out("p.jpg"), W: 100, H: 50, Scale: 2, Budget: DefaultBudget}
 	e.render(t, o)
-	o.Quality = ptr(defaultQuality)
+	o.Quality = ptr(DefaultQuality)
 	if !e.render(t, o) {
 		t.Error("an explicit default --quality missed the record of the implicit one")
 	}
