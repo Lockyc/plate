@@ -158,7 +158,9 @@ func TestRunWritesSet(t *testing.T) {
 	}
 	// The PNG is the poster with a still line's density tag.
 	tagged := filepath.Join(t.TempDir(), "tagged.png")
-	os.WriteFile(tagged, poster, 0o644)
+	if err := os.WriteFile(tagged, poster, 0o644); err != nil {
+		t.Fatal(err)
+	}
 	if err := raster.SetDPI(tagged, 96*o.Scale); err != nil {
 		t.Fatal(err)
 	}

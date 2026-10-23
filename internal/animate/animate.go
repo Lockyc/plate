@@ -53,6 +53,7 @@ type Options struct {
 	Budget    int    // render's settle wait in ms, spent before frame 0
 	Out, Name string // Name defaults to the page's base name without extension
 	PNG, JPEG string
+	Quality   *int // the JPEG still's quality, 1–100; nil is render.DefaultQuality
 	FailIf    []string
 	Force     bool // capture even when the cache says nothing changed
 }
@@ -135,6 +136,12 @@ func (o Options) Validate() error {
 	}
 	if n := o.name(); strings.ContainsAny(n, `/\`) || strings.HasPrefix(n, ".") {
 		return usageError(fmt.Sprintf("--name %q: want a file name, not a path or a dot file", n))
+	}
+	if o.JPEG == "" && o.Quality != nil {
+		return usageError("quality needs a JPEG still")
+	}
+	if o.Quality != nil && (*o.Quality < 1 || *o.Quality > 100) {
+		return usageError("quality must be between 1 and 100")
 	}
 	if o.PNG != "" && o.JPEG != "" && engine.SameFile(o.PNG, o.JPEG) {
 		return usageError("the PNG and the JPEG name the same file")
@@ -311,8 +318,12 @@ func (o Options) capture(ctx context.Context, l render.Load) (_ video.Measuremen
 		stillFrom[o.PNG] = p
 	}
 	if o.JPEG != "" {
+		quality := render.DefaultQuality
+		if o.Quality != nil {
+			quality = *o.Quality
+		}
 		p := filepath.Join(tmp, "still.jpg")
-		if err := render.JPEG(ctx, last, p, render.DefaultQuality); err != nil {
+		if err := render.JPEG(ctx, last, p, quality); err != nil {
 			return none, nil, err
 		}
 		stillFrom[o.JPEG] = p

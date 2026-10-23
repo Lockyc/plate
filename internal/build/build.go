@@ -22,6 +22,7 @@ import (
 	"github.com/lockyc/plate/internal/impose"
 	"github.com/lockyc/plate/internal/marks"
 	"github.com/lockyc/plate/internal/render"
+	"github.com/lockyc/plate/internal/video"
 )
 
 const usage = "build [--out DIR] [--jobs N] [--force] [--fail-if TEXT]... <manifest> [NAME...]"
@@ -104,6 +105,23 @@ func runVideo(ctx context.Context, t Target, force bool, warn io.Writer) (render
 	return res, err
 }
 
+// removeVideoSet removes the video set an earlier run of the still line t
+// left under its name, except files another target writes.
+func removeVideoSet(t Target, dir string, all []Target) error {
+	for _, n := range video.Outputs(t.Name) {
+		p := filepath.Join(dir, n)
+		if slices.ContainsFunc(all, func(o Target) bool {
+			return o.Name != t.Name && slices.ContainsFunc(o.Outputs(), func(f string) bool { return engine.SameFile(f, p) })
+		}) {
+			continue
+		}
+		if err := os.Remove(p); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
+	}
+	return nil
+}
+
 // Main runs `plate build`. A target that fails does not stop the others;
 // the log is in manifest order whatever order the renders finish in.
 func Main(ctx context.Context, args []string, _, stderr io.Writer) int {
@@ -165,7 +183,7 @@ func Main(ctx context.Context, args []string, _, stderr io.Writer) int {
 			defer func() { <-sem }()
 			if t.Anim != nil {
 				r.res, r.err = runVideo(ctx, t, *force, &r.warn)
-			} else {
+			} else if r.err = removeVideoSet(t, dir, all); r.err == nil {
 				r.res, r.err = render.Run(ctx, t.Opts, &r.warn)
 			}
 			// Once one fails, the rest see its error and remove their files.

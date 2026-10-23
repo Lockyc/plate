@@ -267,6 +267,9 @@ func TestParseVideoRefusals(t *testing.T) {
 		{"a a.html 100x50 1 mp4 dur=8ms", `dur="8ms": want seconds, e.g. dur=8s`},
 		{"a a.html 100x50 1 mp4 dur", `dur="": want seconds, e.g. dur=8s`},
 		{"a a.html 101x50 1 mp4 dur=2s", "even pixel sides"},
+		{"a a.html 100x50 1 mp4,jpeg dur=2s quality=500", "quality must be between 1 and 100"},
+		{"a a.html 100x50 1 mp4,png dur=2s quality=80", "quality needs the jpeg output"},
+		{"a a.html 100x50 1 mp4 dur=0.03", `dur="0.03" gives fewer than 2 frames at fps=30`},
 	} {
 		path, _ := manifest(t, c.line+"\n")
 		_, err := ParseManifest(path, t.TempDir(), nil)
@@ -284,5 +287,16 @@ func TestParseVideoOutputsCollide(t *testing.T) {
 	_, err := ParseManifest(path, t.TempDir(), nil)
 	if err == nil || !strings.Contains(err.Error(), "a.poster.png is also written by") {
 		t.Fatalf("err %v, want a duplicate-output refusal", err)
+	}
+}
+
+func TestParseVideoQuality(t *testing.T) {
+	path, _ := manifest(t, "a a.html 100x50 1 mp4,jpeg dur=2s quality=80\n")
+	ts, err := ParseManifest(path, t.TempDir(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if q := ts[0].Anim.Quality; q == nil || *q != 80 {
+		t.Errorf("Anim.Quality %v, want 80", q)
 	}
 }
