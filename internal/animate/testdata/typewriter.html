@@ -1,0 +1,9 @@
+<!doctype html>
+<script>
+  window.log = [];
+  function type() {
+    window.log.push(performance.now());
+    if (window.log.length < 40) setTimeout(type, 50);
+  }
+  setTimeout(type, 50);
+</script>
