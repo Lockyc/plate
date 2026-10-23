@@ -70,7 +70,7 @@ ahead of the data directory and `PATH`; tests use it to stand in sh stubs.
 | ImageMagick 7 | minimum version |
 | chrome-headless-shell | exact version and sha256, installed by `doctor --install` under `$XDG_DATA_HOME/plate/` |
 | Ghostscript, poppler, qpdf, qrencode, pandoc, hb-subset | minimum version |
-| ffmpeg, ffprobe | minimum version; each encoder clip needs is a pins.Capability doctor checks |
+| ffmpeg, ffprobe | minimum version; each encoder clip and animate need is a pins.Capability doctor checks |
 | Apple Vision | the OS; macOS 14 or later, plus `swiftc` as a minimum-version engine |
 | Python ML scripts (ViTMatte, BiRefNet, DAT, grade fit) | PEP 723 header with `exclude-newer`, and a committed `uv lock --script` lockfile run with `--locked`; ViTMatte and DAT weights pinned by Hugging Face commit in `internal/pins`, BiRefNet's by the pinned `rembg` version |
 | LaMa | the `iopaint` CLI, run through `uv tool run` at a pinned version and `exclude-newer` (`pins.IOPaint`) |
@@ -214,13 +214,13 @@ colours, or renders what it is given.
     so `clip render` itself is unchanged.
   - *Transport.* `internal/cdp` speaks the protocol over
     `--remote-debugging-pipe` (fds 3 and 4, NUL-delimited JSON), standard
-    library only. Chrome is started through `internal/engine`, which gains a
-    long-lived process with those pipes, killed with its context. A local
+    library only. Chrome is started through `internal/engine` (`engine.Start`),
+    a long-lived process with those pipes, killed with its context. A local
     page loads through render's proxy, so its loads are recorded and the
     render cache can skip an unchanged animation.
   - *Encode and checks.* Frames go to `internal/video`, the encode, the
     sharpness, budget and MP4 checks, the loop closing and the whole-set
-    publish that `clip` uses now, moved out of internal/clip, not copied.
+    publish that `clip` and `animate` share.
     `animate` also refuses a capture whose frames are all one colour or
     all identical, which is a page whose animation never ran on plate's
     clock. Its JSON is clip's measurement shape.
