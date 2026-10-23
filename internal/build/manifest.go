@@ -3,6 +3,7 @@ package build
 import (
 	"errors"
 	"fmt"
+	"math"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -56,7 +57,7 @@ var kinds = map[string]struct {
 // impose` does, and marks, which writes it to outDir/name-marks.pdf with
 // bleed and crop marks as `plate marks` does.
 //
-// A line with dur=S (seconds, 8 or 8s) is a video line, captured as `plate
+// A line with dur=S (seconds, e.g. 8s or 2.5) is a video line, captured as `plate
 // animate` does: its outputs are mp4, webm, gif, webp and poster (poster
 // is name.poster.png), with png and jpeg the last frame, and name.json
 // beside them; fps=N, loop=none|crossfade|dip and budget-kb=N tune it, and
@@ -173,7 +174,7 @@ func parseLine(fields []string, dir, outDir string, failIf []string) (Target, er
 		}
 		k, ok := kinds[kind]
 		if !ok {
-			return Target{}, fmt.Errorf("output %q: want pdf, png, jpeg, html, %s", kind, strings.Join(video.Formats, ", "))
+			return Target{}, fmt.Errorf("output %q: want pdf, png, jpeg, html, mp4, webm, gif, webp or poster", kind)
 		}
 		slot := k.slot(&o)
 		if *slot != "" {
@@ -316,8 +317,14 @@ func videoLine(t Target, o render.Options, formats []string, dur float64, fps in
 			return Target{}, fmt.Errorf("%s reads a settled page; a video line has one only at its end", r.opt)
 		}
 	}
+	if o.JPEG == "" && o.Quality != nil {
+		return Target{}, errors.New("quality needs the jpeg output")
+	}
+	if n := int(math.Round(dur * float64(fps))); n < 2 {
+		return Target{}, fmt.Errorf("dur=%q gives fewer than 2 frames at fps=%d", strconv.FormatFloat(dur, 'g', -1, 64), fps)
+	}
 	a := animate.Options{Page: o.Page, W: o.W, H: o.H, Scale: o.Scale, DurationS: dur, FPS: fps, Formats: formats,
-		Loop: loop, BudgetKB: budgetKB, Budget: o.Budget, Out: outDir, Name: name, PNG: o.PNG, JPEG: o.JPEG, FailIf: o.FailIf}
+		Loop: loop, BudgetKB: budgetKB, Budget: o.Budget, Out: outDir, Name: name, PNG: o.PNG, JPEG: o.JPEG, FailIf: o.FailIf, Quality: o.Quality}
 	if err := a.Validate(); err != nil {
 		return Target{}, err
 	}

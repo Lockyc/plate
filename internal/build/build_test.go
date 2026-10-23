@@ -438,9 +438,15 @@ func TestBuildRunsVideoLine(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	t.Setenv("SOURCE_DATE_EPOCH", "")
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "css.html"), []byte(slidePage), 0o644)
+	if err := os.WriteFile(filepath.Join(dir, "css.html"), []byte(slidePage), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	m := filepath.Join(dir, "m.conf")
-	write := func(body string) { os.WriteFile(m, []byte(body), 0o644) }
+	write := func(body string) {
+		if err := os.WriteFile(m, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
 	write("still css.html 600x100 2 png\nclip css.html 600x100 2 mp4,png dur=1s\n")
 	e := &env{dir: dir, manifest: m}
 	if code := e.run(m); code != 0 {
@@ -470,5 +476,18 @@ func TestBuildRunsVideoLine(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dist, "clip.png")); err == nil {
 		t.Error("clip.png survived a run that no longer lists png")
+	}
+	// A line switched back to a still removes the video set.
+	write("still css.html 600x100 2 png\nclip css.html 600x100 2 png\n")
+	if code := e.run(m); code != 0 {
+		t.Fatalf("code %d: %s", code, e.stderr.String())
+	}
+	for _, f := range []string{"clip.mp4", "clip.json"} {
+		if _, err := os.Stat(filepath.Join(dist, f)); err == nil {
+			t.Errorf("%s survived the line becoming a still", f)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dist, "clip.png")); err != nil {
+		t.Error(err)
 	}
 }
