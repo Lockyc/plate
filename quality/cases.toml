@@ -1333,7 +1333,7 @@ target = { xy = [340, 800] }
 
 # clip loop: a pale square slides 300 px/s across the dark ground for the
 # whole 3 s master, so its last frame is far from its first. Its body sets
-# clip.MaxSeam (the derivation is MaxSeam's docblock), and the seam bound
+# video.MaxSeam (the derivation is MaxSeam's docblock), and the seam bound
 # below is that bound rounded toward failing.
 
 [[case]]

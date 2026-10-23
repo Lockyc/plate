@@ -24,7 +24,8 @@ func EaseInOutCubic(x float64) float64 {
 	return 1 - math.Pow(-2*x+2, 3)/2
 }
 
-func clamp16(v float64) uint16 { return uint16(math.Max(0, math.Min(0xffff, math.Round(v)))) }
+// Clamp16 rounds v to the nearest 16-bit sample, clamped to 0..0xffff.
+func Clamp16(v float64) uint16 { return uint16(math.Max(0, math.Min(0xffff, math.Round(v)))) }
 
 // LoopClose is what CloseLoop altered: how many of the clip's first (Head)
 // and last (Tail) frames. Both are 0 for a clip that loops as it is.
@@ -87,7 +88,7 @@ func CloseLoop(refs []string, fps int, loop string) (LoopClose, error) {
 		}
 		return lc, nil
 	}
-	return LoopClose{}, fmt.Errorf("compose: unknown loop %q (want one of %v)", loop, Loops)
+	return LoopClose{}, fmt.Errorf("unknown loop %q (want one of %v)", loop, Loops)
 }
 
 // mixInto rewrites the frame at path as itself at weight 1-w over to's
@@ -99,7 +100,7 @@ func mixInto(path string, w float64, to func(j int) uint16) error {
 	}
 	for j := 0; j < len(img.Pix); j += 2 {
 		a := float64(uint16(img.Pix[j])<<8 | uint16(img.Pix[j+1]))
-		v := clamp16(a*(1-w) + float64(to(j))*w)
+		v := Clamp16(a*(1-w) + float64(to(j))*w)
 		img.Pix[j], img.Pix[j+1] = uint8(v>>8), uint8(v)
 	}
 	return SavePNG(path, img)
@@ -173,5 +174,5 @@ func ground(img *image.RGBA64) color.RGBA64 {
 		}
 		return true
 	})
-	return color.RGBA64{clamp16(g[0]), clamp16(g[1]), clamp16(g[2]), 0xffff}
+	return color.RGBA64{Clamp16(g[0]), Clamp16(g[1]), Clamp16(g[2]), 0xffff}
 }

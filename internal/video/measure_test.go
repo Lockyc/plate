@@ -51,7 +51,7 @@ func subsample(img *image.RGBA64, n int) *image.RGBA64 {
 				r := y[p] + 1.5748*mr
 				bl := y[p] + 1.8556*mb
 				g := (y[p] - 0.2126*r - 0.0722*bl) / 0.7152
-				out.SetRGBA64(p%w, p/w, color.RGBA64{clamp16(r * 65535), clamp16(g * 65535), clamp16(bl * 65535), 0xffff})
+				out.SetRGBA64(p%w, p/w, color.RGBA64{Clamp16(r * 65535), Clamp16(g * 65535), Clamp16(bl * 65535), 0xffff})
 			}
 		}
 	}

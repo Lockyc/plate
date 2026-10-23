@@ -130,6 +130,30 @@ func TestMeasurementJSONShape(t *testing.T) {
 	}
 }
 
+// TestMeasurementJSONKeepsVideoFields guards MarshalJSON's field list: a
+// field video.Measurement gains must reach clip's sidecar too.
+func TestMeasurementJSONKeepsVideoFields(t *testing.T) {
+	var m Measurement
+	keys := func(v any) map[string]json.RawMessage {
+		t.Helper()
+		b, err := json.Marshal(v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out map[string]json.RawMessage
+		if err := json.Unmarshal(b, &out); err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	clip := keys(m)
+	for k := range keys(m.Measurement) {
+		if _, ok := clip[k]; !ok {
+			t.Errorf("video.Measurement's %q is missing from clip's sidecar", k)
+		}
+	}
+}
+
 func TestRenderRefusesTruncatedMaster(t *testing.T) {
 	dir := t.TempDir()
 	script := writeFile(t, filepath.Join(dir, "clip.toml"), contractExample)
