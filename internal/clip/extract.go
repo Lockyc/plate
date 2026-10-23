@@ -7,12 +7,9 @@ import (
 	"image"
 	"image/draw"
 	"math"
-	"os"
-	"path/filepath"
 	"strconv"
-	"strings"
 
-	"github.com/lockyc/plate/internal/engine"
+	"github.com/lockyc/plate/internal/video"
 )
 
 // errEmptyWindow refuses a trim window with no frame in it.
@@ -22,72 +19,23 @@ var errEmptyWindow = errors.New("the trim window is empty: nothing to render")
 // range to 8-bit RGB.
 const toRGB = "scale=in_color_matrix=bt709:in_range=auto,format=rgb24"
 
-// toViewerRGB decodes an encode the way Chromium draws it: 4:2:0 chroma
-// interpolated bilinearly at every pixel. Chromium's frame matches it to
-// RMSE 0.0001, and swscale's default bicubic chroma to only 0.03, so a
-// measure on the default decode scores colour fringes no viewer sees.
-const toViewerRGB = "scale=in_color_matrix=bt709:in_range=auto:flags=accurate_rnd+full_chroma_int+bilinear,format=rgb24"
-
 // seconds formats a master time in ms as ffmpeg seconds, to the µs.
 func seconds(ms float64) string {
 	return strconv.FormatFloat(math.Round(ms*1000)/1e6, 'f', -1, 64)
-}
-
-// decode has ffmpeg write src through vf and then outArgs as
-// prefix%05d.png. It decodes into a temporary directory and moves the
-// frames into dir only once there are want of them (any number when want
-// is 0), so dir never holds a partial set; short names what a short decode
-// means.
-func decode(ctx context.Context, src, vf string, outArgs []string, want int, short, prefix, dir string) ([]string, error) {
-	tmp, err := os.MkdirTemp(dir, ".decode-")
-	if err != nil {
-		return nil, err
-	}
-	defer os.RemoveAll(tmp)
-	args := append([]string{"-hide_banner", "-loglevel", "error", "-nostdin", "-i", src, "-vf", vf}, outArgs...)
-	args = append(args, "-start_number", "0", filepath.Join(tmp, prefix+"%05d.png"))
-	if _, err := engine.Run(ctx, engine.Cmd{Engine: "ffmpeg", Args: args, Inputs: []string{src}}); err != nil {
-		return nil, err
-	}
-	var names []string
-	for i := 0; ; i++ {
-		n := fmt.Sprintf("%s%05d.png", prefix, i)
-		if _, err := os.Stat(filepath.Join(tmp, n)); err != nil {
-			break
-		}
-		names = append(names, n)
-	}
-	if want > 0 && len(names) < want {
-		return nil, fmt.Errorf("%s: decoded %d of %d frames", short, len(names), want)
-	}
-	if len(names) == 0 {
-		return nil, fmt.Errorf("%s: no frame decoded", src)
-	}
-	paths := make([]string, len(names))
-	for i, n := range names {
-		paths[i] = filepath.Join(dir, n)
-		if err := os.Rename(filepath.Join(tmp, n), paths[i]); err != nil {
-			for _, p := range paths[:i] {
-				os.Remove(p)
-			}
-			return nil, err
-		}
-	}
-	return paths, nil
 }
 
 // ExtractActivity decodes the whole master small and grey, a%05d.png in
 // dir, for motion detection: frame i sits at i·1000/fps ms from the
 // master's first frame, where ffmpeg's output timeline starts.
 func ExtractActivity(ctx context.Context, master string, fps int, dir string) ([]*image.Gray, error) {
-	paths, err := decode(ctx, master, fmt.Sprintf("fps=%d:round=down,scale=200:-2,format=gray", fps),
+	paths, err := video.Decode(ctx, master, fmt.Sprintf("fps=%d:round=down,scale=200:-2,format=gray", fps),
 		[]string{"-fps_mode", "cfr"}, 0, master, "a", dir)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]*image.Gray, len(paths))
 	for i, p := range paths {
-		img, err := loadImage(p)
+		img, err := video.LoadImage(p)
 		if err != nil {
 			return nil, err
 		}
@@ -140,44 +88,6 @@ func ExtractFrames(ctx context.Context, master string, c Colour, w Window, fps i
 		return nil, errEmptyWindow
 	}
 	vf := fmt.Sprintf("%stpad=stop_mode=clone:stop_duration=%s,fps=%d:round=down,%s", toBT709(c), seconds(w.End), fps, toRGB)
-	return decode(ctx, master, vf, []string{"-fps_mode", "cfr", "-ss", seconds(w.Start), "-frames:v", strconv.Itoa(n)},
+	return video.Decode(ctx, master, vf, []string{"-fps_mode", "cfr", "-ss", seconds(w.Start), "-frames:v", strconv.Itoa(n)},
 		n, master, "m", dir)
-}
-
-// ExtractEncoded decodes frames indices (ascending) of an encoded clip to
-// RGB as a viewer sees them (toViewerRGB), e%05d.png in dir, in the order
-// given.
-func ExtractEncoded(ctx context.Context, file string, indices []int, dir string) ([]*image.RGBA64, error) {
-	return extractSelected(ctx, file, "", indices, "e", dir)
-}
-
-// Lossless420 is frames indices (ascending) of the composed frames, the
-// r%05d.png sequence in refDir, through the encodes' own 4:2:0 conversion
-// (toYUV) and back as ExtractEncoded reads an encode, l%05d.png in dir:
-// pixel for pixel what a lossless encode decodes to. It is Sharpness's
-// reference, so Sharpness scores what the encoder loses and not what 4:2:0,
-// the format the clip must ship in, loses before any encoder runs.
-func Lossless420(ctx context.Context, refDir string, indices []int, dir string) ([]*image.RGBA64, error) {
-	return extractSelected(ctx, filepath.Join(refDir, "r%05d.png"), toYUV+",", indices, "l", dir)
-}
-
-// extractSelected decodes frames indices of src through pre and then
-// toViewerRGB, prefix%05d.png in dir.
-func extractSelected(ctx context.Context, src, pre string, indices []int, prefix, dir string) ([]*image.RGBA64, error) {
-	terms := make([]string, len(indices))
-	for i, k := range indices {
-		terms[i] = fmt.Sprintf(`eq(n\,%d)`, k)
-	}
-	vf := "select=" + strings.Join(terms, "+") + "," + pre + toViewerRGB
-	paths, err := decode(ctx, src, vf, []string{"-fps_mode", "passthrough"}, len(indices), src, prefix, dir)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]*image.RGBA64, len(indices))
-	for i := range out {
-		if out[i], err = loadRGBA64(paths[i]); err != nil {
-			return nil, err
-		}
-	}
-	return out, nil
 }

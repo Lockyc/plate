@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/lockyc/plate/internal/video"
 )
 
 // Follow-camera timing, ms, and the padding a goal keeps around its target, pt.
@@ -15,9 +17,6 @@ const (
 	lead      = 250.0 // a move arrives this long before its action
 	move      = 700.0 // a move's full length
 	minMove   = 300.0 // the shortest move; closer goals merge
-	// loopMS is the loop close's length (closeLoop); the return move to R0
-	// lands as it starts.
-	loopMS = 300.0
 )
 
 // FollowHead is the trim head a follow clip needs: a full move and its
@@ -548,7 +547,8 @@ func (c *camera) follow(l *Log, w Window, keys []key) []key {
 		}
 	}
 	if last := keys[len(keys)-1]; len(keys) > 1 {
-		arrive := w.End - loopMS
+		// The return move to R0 lands as the loop close (video.LoopMS) starts.
+		arrive := w.End - video.LoopMS
 		if arrive-last.arrive >= minMove+400 {
 			// Home is where the clip opens, so the loop seam matches.
 			keys = append(keys, key{math.Max(last.arrive, arrive-move), arrive, keys[0].g})
@@ -566,7 +566,7 @@ func stateAt(keys []key, t float64) camState {
 			return cur
 		}
 		if t < k.arrive {
-			e := easeInOutCubic((t - k.depart) / (k.arrive - k.depart))
+			e := video.EaseInOutCubic((t - k.depart) / (k.arrive - k.depart))
 			return camState{
 				cx: cur.cx + (k.g.cx-cur.cx)*e,
 				cy: cur.cy + (k.g.cy-cur.cy)*e,

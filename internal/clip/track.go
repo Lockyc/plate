@@ -4,6 +4,8 @@ import (
 	"image"
 	"math"
 	"sort"
+
+	"github.com/lockyc/plate/internal/video"
 )
 
 // idleLuma is the luma step a pixel must exceed to count as moved;
@@ -16,14 +18,6 @@ const (
 	idleLuma  = 8
 	idleShare = 0.001
 )
-
-// easeInOutCubic maps 0..1 to 0..1, slow at both ends.
-func easeInOutCubic(x float64) float64 {
-	if x < 0.5 {
-		return 4 * x * x * x
-	}
-	return 1 - math.Pow(-2*x+2, 3)/2
-}
 
 type sample struct {
 	t   float64
@@ -96,7 +90,7 @@ func (tr *Track) ease(a, b sample, t float64) float64 {
 	if m, ok := tr.motions[a.idx]; ok {
 		return m.at(t)
 	}
-	return easeInOutCubic((t - a.t) / (b.t - a.t))
+	return video.EaseInOutCubic((t - a.t) / (b.t - a.t))
 }
 
 // RectAt is the rect of name at t, interpolated between two consecutive

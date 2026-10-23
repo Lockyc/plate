@@ -141,8 +141,8 @@ var Engines = []Engine{
 		Install: map[string]string{"darwin": "xcode-select --install"},
 		UsedBy:  []string{"cutout"},
 	},
-	ffmpegTool("ffmpeg", Capability{Args: []string{"-hide_banner", "-encoders"}, Token: "libx264", For: "clip mp4"},
-		Capability{Args: []string{"-hide_banner", "-encoders"}, Token: "libsvtav1", For: "clip webm"}),
+	ffmpegTool("ffmpeg", Capability{Args: []string{"-hide_banner", "-encoders"}, Token: "libx264", For: "video mp4"},
+		Capability{Args: []string{"-hide_banner", "-encoders"}, Token: "libsvtav1", For: "video webm"}),
 	ffmpegTool("ffprobe"),
 	{
 		Name: "chrome-headless-shell", Kind: Managed,
