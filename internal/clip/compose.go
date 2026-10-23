@@ -85,7 +85,7 @@ func (s *sprite) draw(dst *image.RGBA64, op Op) {
 			}
 			dc := dst.RGBA64At(xx, yy)
 			keep := 1 - float64(sc.A)*o/0xffff
-			over := func(s, d uint16) uint16 { return clamp16(float64(s)*o + float64(d)*keep) }
+			over := func(s, d uint16) uint16 { return video.Clamp16(float64(s)*o + float64(d)*keep) }
 			dst.SetRGBA64(xx, yy, color.RGBA64{over(sc.R, dc.R), over(sc.G, dc.G), over(sc.B, dc.B), over(sc.A, dc.A)})
 		}
 	}

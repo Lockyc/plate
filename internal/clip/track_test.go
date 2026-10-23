@@ -98,20 +98,6 @@ func TestPinAtNeverUp(t *testing.T) {
 	}
 }
 
-func TestEaseInOutCubic(t *testing.T) {
-	if video.EaseInOutCubic(0) != 0 || video.EaseInOutCubic(0.5) != 0.5 || video.EaseInOutCubic(1) != 1 {
-		t.Error("endpoints")
-	}
-	prev := 0.0
-	for x := 0.0; x <= 1; x += 0.01 {
-		if v := video.EaseInOutCubic(x); v < prev {
-			t.Fatalf("not monotonic at %g", x)
-		} else {
-			prev = v
-		}
-	}
-}
-
 func TestActivity(t *testing.T) {
 	mk := func() *image.Gray {
 		g := image.NewGray(image.Rect(0, 0, 10, 10))

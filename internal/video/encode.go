@@ -78,7 +78,7 @@ func Encode(ctx context.Context, format, refsDir string, fps, w, h int, out stri
 		enc = []string{"-vf", "fps=50,split[a][b];[a]palettegen=stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=4",
 			"-loop", "0"}
 	default:
-		return fmt.Errorf("unknown clip format %q", format)
+		return fmt.Errorf("unknown video format %q", format)
 	}
 	args := append(append(in, enc...), out)
 	_, err := engine.Run(ctx, engine.Cmd{Engine: "ffmpeg", Args: args, Inputs: []string{first}, Outputs: []string{out}})

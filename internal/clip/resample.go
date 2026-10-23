@@ -3,6 +3,8 @@ package clip
 import (
 	"image"
 	"math"
+
+	"github.com/lockyc/plate/internal/video"
 )
 
 // Kernel names the filter Resample applies, so a measurement can name the
@@ -65,8 +67,6 @@ func weights(n int, start, length float64, lo, hi int) [][]kernelTap {
 	return out
 }
 
-func clamp16(v float64) uint16 { return uint16(math.Max(0, math.Min(0xffff, math.Round(v)))) }
-
 // Resample draws the src rect sr (px, fractional) into dst's dr: separable
 // Catmull-Rom on the stored (sRGB, premultiplied) values, horizontal pass
 // first into 16-bit rows. Taps clamp to sr's pixels, so a strip cut from
@@ -95,7 +95,7 @@ func Resample(dst *image.RGBA64, dr image.Rectangle, src *image.RGBA64, sr Rect)
 				}
 			}
 			for c := range 4 {
-				row[i*4+c] = clamp16(acc[c])
+				row[i*4+c] = video.Clamp16(acc[c])
 			}
 		}
 	}
@@ -109,9 +109,9 @@ func Resample(dst *image.RGBA64, dr image.Rectangle, src *image.RGBA64, sr Rect)
 					acc[c] += t.w * float64(row[c])
 				}
 			}
-			a := clamp16(acc[3])
+			a := video.Clamp16(acc[3])
 			for c := range 4 {
-				v := clamp16(acc[c])
+				v := video.Clamp16(acc[c])
 				if c < 3 {
 					v = min(v, a) // overshoot must not leave a colour past its alpha
 				} else {
