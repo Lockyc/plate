@@ -21,6 +21,7 @@ import (
 	"github.com/lockyc/plate/internal/cli"
 	"github.com/lockyc/plate/internal/engine"
 	"github.com/lockyc/plate/internal/outdir"
+	"github.com/lockyc/plate/internal/raster"
 	"github.com/lockyc/plate/internal/render"
 	"github.com/lockyc/plate/internal/video"
 )
@@ -295,7 +296,19 @@ func (o Options) capture(ctx context.Context, l render.Load) (_ video.Measuremen
 	}
 	stillFrom := map[string]string{} // still destination → its file in tmp
 	if o.PNG != "" {
-		stillFrom[o.PNG] = last
+		// A still line's PNG carries its density; the screenshot bytes do not.
+		p := filepath.Join(tmp, "still.png")
+		b, err := os.ReadFile(last)
+		if err != nil {
+			return none, nil, err
+		}
+		if err := os.WriteFile(p, b, 0o644); err != nil {
+			return none, nil, err
+		}
+		if err := raster.SetDPI(p, 96*o.Scale); err != nil {
+			return none, nil, err
+		}
+		stillFrom[o.PNG] = p
 	}
 	if o.JPEG != "" {
 		p := filepath.Join(tmp, "still.jpg")

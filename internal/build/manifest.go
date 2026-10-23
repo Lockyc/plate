@@ -6,11 +6,14 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
+	"github.com/lockyc/plate/internal/animate"
 	"github.com/lockyc/plate/internal/cli"
 	"github.com/lockyc/plate/internal/render"
+	"github.com/lockyc/plate/internal/video"
 )
 
 // Target is one manifest line: the name its outputs are called by, the line
@@ -19,6 +22,9 @@ type Target struct {
 	Name string
 	Line int
 	Opts render.Options
+	// Anim is the capture a video line (one with dur=) asks for, in place of
+	// Opts.
+	Anim *animate.Options
 	// TwoUp is the A4 sheet the 2up option imposes Opts.PDF onto, or "".
 	TwoUp string
 	// Marks is the print shop's copy of Opts.PDF the marks option writes,
@@ -48,8 +54,17 @@ var kinds = map[string]struct {
 // the options are blank-margin=PX, transparent, budget=MS, quality=Q, 2up,
 // which imposes the target's PDF onto outDir/name-2up-a4.pdf as `plate
 // impose` does, and marks, which writes it to outDir/name-marks.pdf with
-// bleed and crop marks as `plate marks` does. No two targets may write the same file. Every target gets
-// failIf. Each target is checked by render.Validate here,
+// bleed and crop marks as `plate marks` does.
+//
+// A line with dur=S (seconds, 8 or 8s) is a video line, captured as `plate
+// animate` does: its outputs are mp4, webm, gif, webp and poster (poster
+// is name.poster.png), with png and jpeg the last frame, and name.json
+// beside them; fps=N, loop=none|crossfade|dip and budget-kb=N tune it, and
+// budget=MS is the settle wait. A video output needs dur=, dur= needs a
+// video output, and pdf, html, transparent, blank-margin, 2up and marks
+// are refused on a video line. No two targets may write the same file.
+// Every target gets failIf. Each target is checked by render.Validate (a
+// video line by animate's Validate) here,
 // so a manifest with one bad target is refused before anything renders.
 // A bad line is a *LineError; any other error is the manifest's file
 // failing to read.
@@ -147,10 +162,18 @@ func parseLine(fields []string, dir, outDir string, failIf []string) (Target, er
 		return Target{}, fmt.Errorf("scale %q: want a number", scale)
 	}
 	o.Scale = s
+	var formats []string
 	for _, kind := range strings.Split(outputs, ",") {
+		if slices.Contains(video.Formats, kind) {
+			if slices.Contains(formats, kind) {
+				return Target{}, fmt.Errorf("output %s is listed twice", kind)
+			}
+			formats = append(formats, kind)
+			continue
+		}
 		k, ok := kinds[kind]
 		if !ok {
-			return Target{}, fmt.Errorf("output %q: want pdf, png, jpeg or html", kind)
+			return Target{}, fmt.Errorf("output %q: want pdf, png, jpeg, html, %s", kind, strings.Join(video.Formats, ", "))
 		}
 		slot := k.slot(&o)
 		if *slot != "" {
@@ -159,6 +182,12 @@ func parseLine(fields []string, dir, outDir string, failIf []string) (Target, er
 		*slot = filepath.Join(outDir, name+k.ext)
 	}
 	t := Target{Name: name}
+	var (
+		dur      float64
+		loop     = "none"
+		fps      = animate.DefaultFPS
+		budgetKB int
+	)
 	seen := map[string]bool{}
 	for _, opt := range fields[5:] {
 		key, val, hasVal := strings.Cut(opt, "=")
@@ -168,6 +197,23 @@ func parseLine(fields []string, dir, outDir string, failIf []string) (Target, er
 		seen[key] = true
 		var num *int
 		switch key {
+		case "dur":
+			d, err := parseDur(val)
+			if err != nil || !hasVal {
+				return Target{}, fmt.Errorf("dur=%q: want seconds, e.g. dur=8s", val)
+			}
+			dur = d
+			continue
+		case "loop":
+			if !hasVal {
+				return Target{}, fmt.Errorf("option %q: want loop=none, crossfade or dip", opt)
+			}
+			loop = val
+			continue
+		case "fps":
+			num = &fps
+		case "budget-kb":
+			num = &budgetKB
 		case "transparent", "2up", "marks":
 			if hasVal {
 				return Target{}, fmt.Errorf("%s takes no value", key)
@@ -189,13 +235,29 @@ func parseLine(fields []string, dir, outDir string, failIf []string) (Target, er
 			o.Quality = new(int)
 			num = o.Quality
 		default:
-			return Target{}, fmt.Errorf("option %q: want blank-margin=PX, transparent, budget=MS, quality=Q, 2up or marks", opt)
+			return Target{}, fmt.Errorf("option %q: want blank-margin=PX, transparent, budget=MS, quality=Q, 2up, marks, dur=S, fps=N, loop=L or budget-kb=N", opt)
 		}
 		v, err := strconv.ParseInt(val, 10, strconv.IntSize)
 		if !hasVal || err != nil {
 			return Target{}, fmt.Errorf("option %q: want %s=N, a whole number", opt, key)
 		}
 		*num = int(v)
+	}
+	if len(formats) > 0 && !seen["dur"] {
+		return Target{}, fmt.Errorf("%s needs dur=S", formats[0])
+	}
+	if seen["dur"] && len(formats) == 0 {
+		return Target{}, errors.New("dur= needs a video output (mp4, webm, gif, webp or poster)")
+	}
+	if !seen["dur"] {
+		for _, k := range []string{"fps", "loop", "budget-kb"} {
+			if seen[k] {
+				return Target{}, fmt.Errorf("%s needs dur=S", k)
+			}
+		}
+	}
+	if seen["dur"] {
+		return videoLine(t, o, formats, dur, fps, loop, budgetKB, outDir, name, seen)
 	}
 	if t.TwoUp != "" && o.PDF == "" {
 		return Target{}, errors.New("2up needs the pdf output: it imposes the target's PDF")
@@ -220,6 +282,9 @@ const (
 // Outputs lists every file t writes: its render's outputs, then the 2up
 // sheet and the marked copy.
 func (t Target) Outputs() []string {
+	if t.Anim != nil {
+		return t.Anim.Outputs()
+	}
 	out := t.Opts.Outputs()
 	for _, d := range []string{t.TwoUp, t.Marks} {
 		if d != "" {
@@ -227,4 +292,35 @@ func (t Target) Outputs() []string {
 		}
 	}
 	return out
+}
+
+// parseDur reads dur=S: seconds above 0, with an optional trailing "s".
+func parseDur(val string) (float64, error) {
+	d, ok := cli.Finite(strings.TrimSuffix(val, "s"))
+	if !ok || d <= 0 {
+		return 0, errors.New("not seconds")
+	}
+	return d, nil
+}
+
+// videoLine is the target a line with dur= asks for: a capture of o's page
+// into outDir. png and jpeg are the capture's stills; the options and
+// outputs that read a settled page are refused.
+func videoLine(t Target, o render.Options, formats []string, dur float64, fps int, loop string, budgetKB int, outDir, name string, seen map[string]bool) (Target, error) {
+	for _, r := range []struct {
+		opt string
+		set bool
+	}{{"pdf", o.PDF != ""}, {"html", o.HTML != ""}, {"transparent", o.Transparent}, {"blank-margin", seen["blank-margin"]},
+		{"2up", t.TwoUp != ""}, {"marks", t.Marks != ""}} {
+		if r.set {
+			return Target{}, fmt.Errorf("%s reads a settled page; a video line has one only at its end", r.opt)
+		}
+	}
+	a := animate.Options{Page: o.Page, W: o.W, H: o.H, Scale: o.Scale, DurationS: dur, FPS: fps, Formats: formats,
+		Loop: loop, BudgetKB: budgetKB, Budget: o.Budget, Out: outDir, Name: name, PNG: o.PNG, JPEG: o.JPEG, FailIf: o.FailIf}
+	if err := a.Validate(); err != nil {
+		return Target{}, err
+	}
+	t.Anim = &a
+	return t, nil
 }

@@ -94,7 +94,13 @@ manifest, as `name.pdf`, `name.png`, `name.jpg` or `name.html`. The options
 are `blank-margin=PX`, `transparent`, `budget=MS`, `quality=Q`, `2up`,
 which imposes the target's PDF onto `name-2up-a4.pdf` as `impose --force`
 does (the PDF must be an A5 front and back), and `marks`, which writes it to
-`name-marks.pdf` as `marks --force` does. Naming targets renders only
+`name-marks.pdf` as `marks --force` does. A line with `dur=S` (`8` or `8s`)
+is captured as `animate` does: its outputs are `mp4`, `webm`, `gif`, `webp`
+and `poster` (`name.poster.png`), with `png` and `jpeg` the last frame and
+`name.json` beside them, and `fps=N`, `loop=none|crossfade|dip` and
+`budget-kb=N` tune it. A video output needs `dur=`, and `fps=`, `loop=` and
+`budget-kb=` need it too; `pdf`, `html`, `transparent`, `blank-margin`, `2up`
+and `marks` are refused on a video line. Naming targets renders only
 those. It logs `rendered NAME`, `rendered NAME (not cached: REASON)`,
 `unchanged NAME` or `failed NAME: ERROR` for each target in manifest order,
 with `imposed NAME-2up-a4.pdf` and `marked NAME-marks.pdf` after a target

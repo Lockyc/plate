@@ -13,6 +13,7 @@ import (
 
 	"github.com/lockyc/plate/internal/engine"
 	"github.com/lockyc/plate/internal/enginetest"
+	"github.com/lockyc/plate/internal/raster"
 	"github.com/lockyc/plate/internal/render"
 	"github.com/lockyc/plate/internal/video"
 )
@@ -155,8 +156,14 @@ func TestRunWritesSet(t *testing.T) {
 	if len(want) == 0 || !bytes.Equal(poster, want) {
 		t.Error("the poster is not the last frame")
 	}
-	if !bytes.Equal(still, poster) {
-		t.Error("the PNG is not the poster's bytes")
+	// The PNG is the poster with a still line's density tag.
+	tagged := filepath.Join(t.TempDir(), "tagged.png")
+	os.WriteFile(tagged, poster, 0o644)
+	if err := raster.SetDPI(tagged, 96*o.Scale); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(tagged); !bytes.Equal(still, b) {
+		t.Error("the PNG is not the poster's pixels tagged at 96 × scale dpi")
 	}
 }
 

@@ -13,8 +13,10 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 
+	"github.com/lockyc/plate/internal/animate"
 	"github.com/lockyc/plate/internal/cli"
 	"github.com/lockyc/plate/internal/engine"
 	"github.com/lockyc/plate/internal/impose"
@@ -82,6 +84,26 @@ func derive(ctx context.Context, t Target, d derivation, res render.Result, rend
 	return true, nil
 }
 
+// runVideo captures a video line. A still the line no longer lists is
+// removed first: the cache claims only listed files, so it would sit beside
+// the new video looking current.
+func runVideo(ctx context.Context, t Target, force bool, warn io.Writer) (render.Result, error) {
+	a := *t.Anim
+	a.Force = force
+	listed := t.Outputs()
+	for _, ext := range []string{".png", ".jpg"} {
+		p := filepath.Join(a.Out, a.Name+ext)
+		if slices.ContainsFunc(listed, func(o string) bool { return engine.SameFile(o, p) }) {
+			continue
+		}
+		if err := os.Remove(p); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return render.Result{}, err
+		}
+	}
+	res, _, err := animate.Run(ctx, a, warn)
+	return res, err
+}
+
 // Main runs `plate build`. A target that fails does not stop the others;
 // the log is in manifest order whatever order the renders finish in.
 func Main(ctx context.Context, args []string, _, stderr io.Writer) int {
@@ -141,7 +163,11 @@ func Main(ctx context.Context, args []string, _, stderr io.Writer) int {
 				return
 			}
 			defer func() { <-sem }()
-			r.res, r.err = render.Run(ctx, t.Opts, &r.warn)
+			if t.Anim != nil {
+				r.res, r.err = runVideo(ctx, t, *force, &r.warn)
+			} else {
+				r.res, r.err = render.Run(ctx, t.Opts, &r.warn)
+			}
 			// Once one fails, the rest see its error and remove their files.
 			for _, d := range t.derivations() {
 				var wrote bool
