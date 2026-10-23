@@ -1,0 +1,11 @@
+<!doctype html>
+<style>body { margin: 0; background: #000; } video { display: block; width: 320px; height: 240px; }</style>
+<video id="v" src="source.mp4" muted playsinline preload="auto"></video>
+<script>
+  setTimeout(() => {
+    const v = document.getElementById("v");
+    v.currentTime = 0.5;
+    v.loop = true;
+    v.play();
+  }, 1000);
+</script>
