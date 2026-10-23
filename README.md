@@ -212,20 +212,21 @@ CSS, Web Animations, requestAnimationFrame, timers, SVG and video,
 frame-exact. Frame n is the page at n/`--fps` s (default 30, up to 120),
 for `--duration` × `--fps` frames, at `--size` × `--scale` px. The last
 frame, the poster, is the page at `--duration` − 1/`--fps` s, so an ending
-meant for the poster holds for at least a frame. `--budget` (default 5000 ms) is how long the page may
-take to settle before the first frame. `--loop` defaults to `none`;
-`crossfade` and `dip` close the loop as `clip render`'s do. Encodes,
-sharpness and `--budget-kb` are as `clip render`'s.
+meant for the poster holds for at least a frame. `--budget` (default 5000
+ms) is how long the page may take to settle before the first frame.
+`--loop` defaults to `none`; `crossfade` and `dip` close the loop as `clip
+render`'s do. Encodes, sharpness and `--budget-kb` are as `clip render`'s.
 
 `animate` refuses before Chrome starts an MP4 or WebM with an odd pixel
 side, an fps outside 1 to 120, or a duration under two frames. It refuses
 a page that does not settle within `--budget` (naming what is pending), a
-page that does not open within `--budget` plus 5 s, a page that throws, a video that cannot play, a cross-origin iframe, a frame
-that does not finish within `--budget` plus 5 s, a page whose every frame
-is one colour, a page where no frame differs from the first, and a last
-frame whose markup contains a `--fail-if` string. A refusal before Chrome
-starts leaves an earlier run's files in place; a capture that fails leaves
-none of its files for that name.
+page that does not open within `--budget` plus 5 s, a page that throws, a
+video that cannot play, a cross-origin iframe, a frame that does not
+finish within `--budget` plus 5 s, a page whose every frame is one colour,
+a page where no frame differs from the first, and a last frame whose
+markup contains a `--fail-if` string. A refusal before Chrome starts
+leaves an earlier run's files in place; a capture that fails leaves none
+of its files for that name.
 
 `render` and `animate` run the page outside Chrome's sandbox with open
 network access. A local page, and any script it runs, including one loaded
@@ -246,8 +247,9 @@ plate doctor --install
 ```
 
 Run `plate doctor --install` first. It downloads the engine plate manages
-itself, chrome-headless-shell for `render` and `animate`, then checks every other engine
-against its pin (for ffmpeg, the encoders `clip` and `animate` need too) and prints the install command for any that is missing or too
+itself, chrome-headless-shell for `render` and `animate`, then checks every
+other engine against its pin (for ffmpeg, the encoders `clip` and `animate`
+need too) and prints the install command for any that is missing or too
 old, naming the commands that will not run until it is fixed.
 
 `uv` is the only Python tool to install. The ML commands (`cutout`, `inpaint`,
@@ -263,15 +265,16 @@ chooses the PyTorch device instead.
 
 ### Platforms
 
-- **macOS 14 or later on Apple Silicon**: every command; `clip` and `animate` need
-  ffmpeg at its pinned minimum.
+- **macOS 14 or later on Apple Silicon**: every command; `clip` and
+  `animate` need ffmpeg at its pinned minimum.
 - **Linux with glibc 2.28 or later, x86_64 or arm64**: every command except
   `cutout --coarse vision`, which needs Apple Vision (`clip` and `animate` run
   wherever ffmpeg at its pinned minimum is present); `cutout` uses
   `--coarse birefnet` there. On arm64, Chrome for Testing publishes no
-  chrome-headless-shell build, so `render` and `animate` need one supplied through
-  `PLATE_ENGINE_CHROME_HEADLESS_SHELL`. chrome-headless-shell needs the usual
-  Chrome shared libraries (libnss3 and the like) from the distribution.
+  chrome-headless-shell build, so `render` and `animate` need one supplied
+  through `PLATE_ENGINE_CHROME_HEADLESS_SHELL`. chrome-headless-shell needs
+  the usual Chrome shared libraries (libnss3 and the like) from the
+  distribution.
 - **Intel Macs**: `cutout` and `upscale` refuse to run, because PyTorch and
   ONNX Runtime publish no build for them; `grade fit` needs macOS 14 or later;
   `inpaint` is untested. The other commands work.

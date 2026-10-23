@@ -171,19 +171,18 @@ colours, or renders what it is given.
   included, by the `clip-text-*` and `clip-caption-sharp` quality cases;
   the render's own sharpness check scores the encoder alone, against a
   lossless 4:2:0 copy (`video.Lossless420`). `video.MaxSeam` is measured by
-  `clip-loop-crossfade`, and the dip held by `clip-loop-dip`. The codec settings are documented at `mp4CRF`, the colour tagging at
-  `bt709` (both internal/video/encode.go), the hold of a static tail at
+  `clip-loop-crossfade`, and the dip held by `clip-loop-dip`. The codec
+  settings are documented at `mp4CRF`, the colour tagging at `bt709` (both
+  internal/video/encode.go), the hold of a static tail at
   `clip.ExtractFrames`, and the target refusals at `validateRef`.
 - **animate** — a page's own animation, captured frame by frame on a clock
   plate owns, and encoded as `clip` encodes. Generic: the scene, its
   styles and its copy are the consuming project's HTML, CSS and JS; plate
-  ships no animation styles. `plate animate --size WxH [--scale F]
-  --duration S [--fps N] [--format mp4,webm,poster,webp,gif] [--budget-kb N] [--loop
-  none|crossfade|dip] [--budget MS] --out DIR [--name N] <page>`; `--fps`
-  defaults to 30, `--loop` to `none`, since an ad has an end; the poster is
-  the last frame. `--scale` is the device scale factor, as in `render`: the
-  video is WxH × scale pixels. `--budget` is render's settle wait, spent
-  once, before frame 0.
+  ships no animation styles. Its flags are in the README's command table;
+  `--fps` defaults to 30, `--loop` to `none`, since an ad has an end; the
+  poster is the last frame. `--scale` is the device scale factor, as in
+  `render`: the video is WxH × scale pixels. `--budget` is render's settle
+  wait, spent once, before frame 0.
   - *The clock.* Before any page script runs
     (`Page.addScriptToEvaluateOnNewDocument`, every frame of the page),
     plate replaces `performance.now`, `Date`, `requestAnimationFrame`,
@@ -196,10 +195,10 @@ colours, or renders what it is given.
     seeked to its own media time, the frame waiting on each `seeked`; then
     `Page.captureScreenshot`. The clock keeps each video's media time as a
     browser would: the shim takes over `play()`, `pause()`, `currentTime`,
-    `loop`, `playbackRate` and `autoplay`, so a video the page starts at
-    4 s, from partway in, looping or hidden and shown by its own script,
-    captures as it plays in a browser, and a page needs no plate-specific
-    markup.
+    `loop`, `playbackRate` and `autoplay`, and their events, so a video the
+    page starts at 4 s, from partway in, looping or hidden and shown by its
+    own script, captures as it plays in a browser, and a page needs no
+    plate-specific markup.
     Frame 0 waits for the load event, `document.fonts.ready` and no pending
     loads. This is the one route that is exact on macOS: Chrome refuses
     `HeadlessExperimental.beginFrame` there ("BeginFrameControl is not

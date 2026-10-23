@@ -41,6 +41,20 @@ independently of phase 5. Within a phase, order is open.
 - **animate's clock does not reach workers.** A Web Worker, and an
   OffscreenCanvas drawn from one, keeps real time. Deferred because no scene
   needs one. Unlock: such a scene, then the clock injected into the worker.
+- **animate waits only for videos after frame 0.** A font, `<img>` or
+  iframe that first appears mid-capture is not awaited, so its frame may
+  show it unloaded. Deferred because scene assets are local and load in
+  milliseconds. Unlock: a scene with a remote or slow mid-capture asset,
+  then the settle checks folded into each seek under the budget.
+- **animate never loads a `preload="none"` video.** The clock never plays
+  a video natively, so such a video stays without a frame and the capture
+  is refused after the budget. Deferred because scenes load their videos
+  eagerly. Unlock: a page that needs a lazy video, then a native load on
+  its first play.
+- **animate's video paint wait is two native frames, not a signal.** After
+  a video's `seeked`, a seek waits two `requestAnimationFrame`s for the
+  frame to reach the compositor. Deferred because the quality cases pass.
+  Unlock: a flake, then `requestVideoFrameCallback`.
 
 - **doctor runs no managed engine.** `doctor` reports chrome-headless-shell
   ok once its pinned build is unpacked, without starting it, so a Linux host
