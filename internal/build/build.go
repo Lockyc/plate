@@ -6,6 +6,7 @@ package build
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -106,9 +107,29 @@ func runVideo(ctx context.Context, t Target, force bool, warn io.Writer) (render
 }
 
 // removeVideoSet removes the video set an earlier run of the still line t
-// left under its name, except files another target writes.
+// left under its name: when <name>.json is a capture's sidecar for t, the
+// files its formats name and the sidecar, except files another target
+// writes. Files under the name that no capture of t wrote are left.
 func removeVideoSet(t Target, dir string, all []Target) error {
-	for _, n := range video.Outputs(t.Name) {
+	sidecar := filepath.Join(dir, t.Name+".json")
+	b, err := os.ReadFile(sidecar)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	var m video.Measurement
+	if json.Unmarshal(b, &m) != nil || m.Name != t.Name {
+		return nil
+	}
+	var set []string
+	for _, f := range video.Formats {
+		if _, ok := m.Formats[f]; ok {
+			set = append(set, t.Name+"."+video.Ext(f))
+		}
+	}
+	for _, n := range append(set, t.Name+".json") {
 		p := filepath.Join(dir, n)
 		if slices.ContainsFunc(all, func(o Target) bool {
 			return o.Name != t.Name && slices.ContainsFunc(o.Outputs(), func(f string) bool { return engine.SameFile(f, p) })

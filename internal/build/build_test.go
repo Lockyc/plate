@@ -18,6 +18,7 @@ import (
 	"github.com/lockyc/plate/internal/enginetest"
 	"github.com/lockyc/plate/internal/pdf"
 	"github.com/lockyc/plate/internal/raster"
+	"github.com/lockyc/plate/internal/render"
 )
 
 // chromeStub writes the fixture as the screenshot and fetches the page
@@ -490,4 +491,68 @@ func TestBuildRunsVideoLine(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dist, "clip.png")); err != nil {
 		t.Error(err)
 	}
+}
+
+func TestRemoveVideoSetRemovesOnlyACaptureOfTheLine(t *testing.T) {
+	write := func(t *testing.T, dir string, files map[string]string) {
+		t.Helper()
+		for n, body := range files {
+			if err := os.WriteFile(filepath.Join(dir, n), []byte(body), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	exists := func(dir, n string) bool {
+		_, err := os.Stat(filepath.Join(dir, n))
+		return err == nil
+	}
+	still := func(dir string) Target {
+		return Target{Name: "social", Opts: render.Options{PNG: filepath.Join(dir, "social.png")}}
+	}
+
+	t.Run("files no capture of the line wrote", func(t *testing.T) {
+		dir := t.TempDir()
+		write(t, dir, map[string]string{"social.png": "p", "social.webp": "w", "social.json": `{"tool":"shrink","bytes":3}`})
+		if err := removeVideoSet(still(dir), dir, []Target{still(dir)}); err != nil {
+			t.Fatal(err)
+		}
+		for _, n := range []string{"social.png", "social.webp", "social.json"} {
+			if !exists(dir, n) {
+				t.Errorf("%s removed", n)
+			}
+		}
+	})
+
+	t.Run("an earlier capture's set", func(t *testing.T) {
+		dir := t.TempDir()
+		write(t, dir, map[string]string{"social.mp4": "m", "social.poster.png": "p", "social.webp": "w",
+			"social.json": `{"name":"social","formats":{"mp4":{"file":"social.mp4"},"poster":{"file":"social.poster.png"}}}`})
+		if err := removeVideoSet(still(dir), dir, []Target{still(dir)}); err != nil {
+			t.Fatal(err)
+		}
+		for _, n := range []string{"social.mp4", "social.poster.png", "social.json"} {
+			if exists(dir, n) {
+				t.Errorf("%s survived", n)
+			}
+		}
+		if !exists(dir, "social.webp") {
+			t.Error("social.webp, which the sidecar does not name, removed")
+		}
+	})
+
+	t.Run("a file another target writes", func(t *testing.T) {
+		dir := t.TempDir()
+		write(t, dir, map[string]string{"social.mp4": "m", "social.gif": "g",
+			"social.json": `{"name":"social","formats":{"mp4":{"file":"social.mp4"},"gif":{"file":"social.gif"}}}`})
+		other := Target{Name: "other", Opts: render.Options{PNG: filepath.Join(dir, "social.gif")}}
+		if err := removeVideoSet(still(dir), dir, []Target{still(dir), other}); err != nil {
+			t.Fatal(err)
+		}
+		if exists(dir, "social.mp4") {
+			t.Error("social.mp4 survived")
+		}
+		if !exists(dir, "social.gif") {
+			t.Error("social.gif, which another target writes, removed")
+		}
+	})
 }
