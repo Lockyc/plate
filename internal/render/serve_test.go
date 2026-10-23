@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -71,40 +72,73 @@ func sumOf(s string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// A file served twice with different bytes in one run has no one hash that
-// says what was rendered.
-func TestServerUnstable(t *testing.T) {
+// A path keeps what its first request found for the server's lifetime: a
+// file edited afterwards is served as first read, and a path first missing
+// stays missing after it appears, so one set of bytes describes the run.
+func TestServerKeepsFirstRead(t *testing.T) {
 	tmp := t.TempDir()
 	p := filepath.Join(tmp, "a.css")
 	gone := filepath.Join(tmp, "b.css")
 	srv := startServer(t)
 	c := proxied(t, srv)
-	get := func(p string) {
+	get := func(p string) (int, string) {
 		resp, err := c.Get(PlateURL(p, ""))
 		if err != nil {
 			t.Fatal(err)
 		}
-		resp.Body.Close()
+		defer resp.Body.Close()
+		body, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(body)
 	}
 	os.WriteFile(p, []byte("one"), 0o644)
 	get(p)
-	get(p)
-	if srv.loads().Unstable {
-		t.Fatal("the same bytes twice marked unstable")
-	}
 	os.WriteFile(p, []byte("two"), 0o644)
-	get(p)
-	if l := srv.loads(); !l.Unstable || l.Files[p] != sumOf("two") {
-		t.Errorf("loads = %+v, want unstable", l)
+	if code, body := get(p); code != 200 || body != "one" {
+		t.Errorf("after an edit got %d %q, want the first read", code, body)
 	}
-
-	srv = startServer(t)
-	c = proxied(t, srv)
 	get(gone)
 	os.WriteFile(gone, []byte("now"), 0o644)
-	get(gone)
-	if !srv.loads().Unstable {
-		t.Error("a path both missing and served not marked unstable")
+	if code, _ := get(gone); code != 404 {
+		t.Errorf("a path first missing served %d after it appeared", code)
+	}
+	l := srv.loads()
+	if !reflect.DeepEqual(l.Files, map[string]string{p: sumOf("one")}) || !reflect.DeepEqual(l.Missing, []string{gone}) {
+		t.Errorf("loads = %+v", l)
+	}
+}
+
+// Range requests for one path read and hash it once, and each gets its own
+// slice of the bytes.
+func TestServerReadsAFileOnce(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "clip.mp4")
+	if err := os.WriteFile(p, []byte("0123456789"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	srv := startServer(t)
+	var reads atomic.Int32
+	srv.read = func(p string) ([]byte, time.Time, bool) {
+		reads.Add(1)
+		return readRegular(p)
+	}
+	c := proxied(t, srv)
+	for _, tc := range []struct{ rng, want string }{{"bytes=0-3", "0123"}, {"bytes=6-", "6789"}} {
+		req, _ := http.NewRequest(http.MethodGet, PlateURL(p, ""), nil)
+		req.Header.Set("Range", tc.rng)
+		resp, err := c.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusPartialContent || string(body) != tc.want {
+			t.Errorf("%s: got %d %q, want 206 %q", tc.rng, resp.StatusCode, body, tc.want)
+		}
+	}
+	if n := reads.Load(); n != 1 {
+		t.Errorf("read from disk %d times, want 1", n)
+	}
+	if got := srv.loads().Files; !reflect.DeepEqual(got, map[string]string{p: sumOf("0123456789")}) {
+		t.Errorf("Files = %v", got)
 	}
 }
 

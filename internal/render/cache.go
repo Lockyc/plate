@@ -2,6 +2,7 @@ package render
 
 import (
 	"cmp"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -20,11 +21,91 @@ import (
 	"github.com/lockyc/plate/internal/pins"
 )
 
-// fileHash is one file in a record: its absolute path and the sha256 of its
+// FileHash is one file in a record: its absolute path and the sha256 of its
 // bytes, "" for a file that was absent.
-type fileHash struct {
+type FileHash struct {
 	Path   string
 	SHA256 string
+}
+
+// Load is a page as Chrome loads it: its URL (PlateURL for a local page) and
+// every Chrome call's base flags, the proxy's included for a local page. The
+// virtual-time budget is the caller's to add.
+type Load struct {
+	URL        string
+	ChromeArgs []string
+}
+
+// Cached runs do through the render cache, keyed on kind, key and the page.
+// When the record of the last success still matches every file the page
+// loaded and every file in outputs (absolute paths), do is skipped and the
+// Result is Unchanged. force runs do regardless and still records. A remote
+// page, a page that reached another host, or a key that cannot be made
+// leaves no record, so do runs every time. The old record goes before do
+// runs, so a run that fails or is killed never leaves one behind.
+//
+// do loads l and returns the hash of every output it published, each hashed
+// under a temporary name before it was renamed into place (job.run says
+// why). key is the caller's, normalised so that equal runs marshal equally;
+// warn receives cache warnings, named for kind.
+func Cached(ctx context.Context, kind, page string, key any, outputs []string, force bool, warn io.Writer,
+	do func(ctx context.Context, l Load) ([]FileHash, error)) (Result, error) {
+	u, local, query, err := pageURL(page)
+	if err != nil {
+		return Result{}, err
+	}
+	cacheWarn := func(err error) { fmt.Fprintf(warn, "plate %s: warning: render cache: %v\n", kind, err) }
+	k, err := cacheKey(kind, key, address(u, local, query))
+	if err != nil {
+		// No key, no record to trust or keep: run uncached.
+		cacheWarn(err)
+		loads, _, runErr := loadPage(ctx, u, local, query, do)
+		if runErr != nil {
+			return Result{}, runErr
+		}
+		return Result{Outcome: Uncacheable, Reason: "no cache key: " + err.Error(), Inputs: loads.paths()}, nil
+	}
+	if local != "" && !force {
+		if r, ok := loadRecord(k); ok && r.writes(outputs) && r.current() {
+			return Result{Outcome: Unchanged, Inputs: r.inputPaths()}, nil
+		}
+	}
+	if err := dropRecord(k); err != nil {
+		cacheWarn(err)
+	}
+	loads, hashes, err := loadPage(ctx, u, local, query, do)
+	if err != nil {
+		return Result{}, err
+	}
+	if local == "" {
+		return Result{Outcome: Uncacheable, Reason: "remote page"}, nil
+	}
+	r, why := newRecord(loads, local, hashes)
+	if why != "" {
+		return Result{Outcome: Uncacheable, Reason: why, Inputs: loads.paths()}, nil
+	}
+	if err := saveRecord(k, r); err != nil {
+		cacheWarn(err)
+	}
+	return Result{Outcome: Rendered, Inputs: r.inputPaths()}, nil
+}
+
+// Outcome is what Cached did with a run that succeeded.
+type Outcome int
+
+const (
+	Rendered    Outcome = iota // rendered, and recorded for next time
+	Unchanged                  // skipped: nothing it loaded or wrote has changed
+	Uncacheable                // rendered, but no record can vouch for it; Result.Reason says why
+)
+
+// Result is Cached's outcome, with the reason when it is Uncacheable.
+type Result struct {
+	Outcome Outcome
+	Reason  string
+	// Inputs is every local file the page loaded or asked for and found
+	// missing, from the record on a skip; nil for a remote page.
+	Inputs []string
 }
 
 // record is what one successful render read and wrote. It certifies itself:
@@ -32,8 +113,8 @@ type fileHash struct {
 // with its recorded hash, the outputs on disk are the ones that render made
 // from the inputs on disk, so the render can be skipped.
 type record struct {
-	Inputs  []fileHash
-	Outputs []fileHash
+	Inputs  []FileHash
+	Outputs []FileHash
 }
 
 // current reports whether every input and output still matches. A record
@@ -43,12 +124,12 @@ func (r record) current() bool {
 		return false
 	}
 	for _, f := range r.Inputs {
-		if f.Path == "" || hashFile(f.Path) != f.SHA256 {
+		if f.Path == "" || HashFile(f.Path) != f.SHA256 {
 			return false
 		}
 	}
 	for _, f := range r.Outputs {
-		if f.SHA256 == "" || hashFile(f.Path) != f.SHA256 {
+		if f.SHA256 == "" || HashFile(f.Path) != f.SHA256 {
 			return false
 		}
 	}
@@ -81,9 +162,9 @@ func (r record) writes(paths []string) bool {
 	return slices.Equal(got, want)
 }
 
-// hashFile is the sha256 of p, or "" when p is absent, not a regular file or
+// HashFile is the sha256 of p, or "" when p is absent, not a regular file or
 // unreadable: the same judgement the proxy makes when it serves p.
-func hashFile(p string) string {
+func HashFile(p string) string {
 	data, _, ok := readRegular(p)
 	if !ok {
 		return ""
@@ -112,14 +193,14 @@ var exeHash = sync.OnceValues(func() (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 })
 
-// cacheKey names the record for o, with page the canonical page address
-// (its absolute path and query, or the remote URL). It covers everything
-// besides the loaded files that shapes the outputs: plate's own build, the
-// pinned Chrome, every option with outputs made absolute, and the
-// environment the render reads — SOURCE_DATE_EPOCH, which stamps a PDF, and
-// the engine override, which swaps the Chrome that runs. Force only says
-// whether to look, so it is left out.
-func cacheKey(o Options, page string) (string, error) {
+// cacheKey names the record for a kind of run with the caller's key, with
+// page the canonical page address (PlateURL of its absolute path and query,
+// or the remote URL). It covers everything besides the loaded files that
+// shapes the outputs: the kind, plate's own build, the pinned Chrome, the
+// caller's options, and the environment a run reads — SOURCE_DATE_EPOCH,
+// which stamps a PDF, and the engine override, which swaps the Chrome that
+// runs.
+func cacheKey(kind string, key any, page string) (string, error) {
 	exe, err := exeHash()
 	if err != nil {
 		return "", err
@@ -128,23 +209,17 @@ func cacheKey(o Options, page string) (string, error) {
 	if !ok || e.Download == nil {
 		return "", fmt.Errorf("%s has no pinned download", chrome)
 	}
-	o.Page, o.Force = page, false
-	for _, p := range []*string{&o.PNG, &o.PDF, &o.HTML, &o.JPEG} {
-		if *p != "" {
-			if *p, err = filepath.Abs(*p); err != nil {
-				return "", err
-			}
-		}
-	}
 	b, err := json.Marshal(struct {
+		Kind   string            `json:"kind"`
 		Exe    string            `json:"exe"`
 		Chrome string            `json:"chrome"`
 		Env    map[string]string `json:"env"`
-		Opts   Options           `json:"opts"`
-	}{exe, e.Download.Version, map[string]string{
+		Page   string            `json:"page"`
+		Opts   any               `json:"opts"`
+	}{kind, exe, e.Download.Version, map[string]string{
 		"SOURCE_DATE_EPOCH":        os.Getenv("SOURCE_DATE_EPOCH"),
 		engine.EnvOverride(chrome): os.Getenv(engine.EnvOverride(chrome)),
-	}, o})
+	}, page, key})
 	if err != nil {
 		return "", err
 	}
@@ -213,26 +288,23 @@ func dropRecord(key string) error {
 // newRecord builds the record for a successful render of the local page
 // that loaded l and wrote outputs, hashed by the render itself. When the
 // render cannot be cached it returns why instead: it reached another host,
-// a file changed while it was served, or the page itself was never served,
-// so nothing says which bytes it rendered.
-func newRecord(l loadSet, page string, outputs []fileHash) (record, string) {
+// or the page itself was never served, so nothing says which bytes it
+// rendered.
+func newRecord(l loadSet, page string, outputs []FileHash) (record, string) {
 	if len(l.External) > 0 {
 		return record{}, "loads " + strings.Join(l.External, ", ")
-	}
-	if l.Unstable {
-		return record{}, "a file changed while it rendered"
 	}
 	if _, ok := l.Files[page]; !ok {
 		return record{}, "the page was never served"
 	}
 	var r record
 	for p, sum := range l.Files {
-		r.Inputs = append(r.Inputs, fileHash{p, sum})
+		r.Inputs = append(r.Inputs, FileHash{p, sum})
 	}
 	for _, p := range l.Missing {
-		r.Inputs = append(r.Inputs, fileHash{p, ""})
+		r.Inputs = append(r.Inputs, FileHash{p, ""})
 	}
-	slices.SortFunc(r.Inputs, func(a, b fileHash) int { return cmp.Compare(a.Path, b.Path) })
+	slices.SortFunc(r.Inputs, func(a, b FileHash) int { return cmp.Compare(a.Path, b.Path) })
 	r.Outputs = outputs
 	return r, ""
 }

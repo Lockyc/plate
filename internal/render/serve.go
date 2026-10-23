@@ -2,6 +2,7 @@ package render
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"io"
@@ -32,15 +33,12 @@ func PlateURL(local, query string) string {
 
 // loadSet is everything a page asked for, each list sorted and deduplicated.
 // Files maps each local file that was served to the sha256 of the bytes
-// served, hashed as they went out: a file edited after Chrome read it is
-// recorded as Chrome saw it, not as it ended up. Missing are paths that were
-// not there (or were directories), External are hosts the page reached out
-// to. Unstable is set when one path was served with two contents, or was both
-// served and missing, so no single set of bytes describes what was rendered.
+// served: a file edited after Chrome read it is recorded as Chrome saw it,
+// not as it ended up. Missing are paths that were not there (or were
+// directories), External are hosts the page reached out to.
 type loadSet struct {
 	Files             map[string]string
 	Missing, External []string
-	Unstable          bool
 }
 
 // server is a loopback HTTP proxy that Chrome is pointed at for the length
@@ -51,16 +49,50 @@ type loadSet struct {
 // It never redirects and never lists a directory. http.ServeFile would turn
 // /index.html into ./, so a page's own address would stop being the file
 // that was recorded.
+//
+// Each path is read and hashed on its first request and answered from
+// memory after that, missing included, for the server's lifetime. Every
+// load in one run therefore sees one set of bytes, the set recorded, and a
+// recording seeked through with range requests is read once, not once per
+// seek.
 type server struct {
-	ln  net.Listener
-	srv *http.Server
+	ln   net.Listener
+	srv  *http.Server
+	read func(p string) ([]byte, time.Time, bool) // readRegular; a test counts through it
 
 	mu           sync.Mutex
+	content      map[string]*content
 	files        map[string]string // path → sha256 of the bytes served
 	missing, ext map[string]bool
-	unstable     bool
 	tunnels      map[net.Conn]bool // hijacked CONNECT conns, which http.Server.Close leaves open
 	closed       bool
+}
+
+// content is one path as its first request found it; ok is false for a path
+// that was missing.
+type content struct {
+	once sync.Once
+	data []byte
+	mod  time.Time
+	ok   bool
+}
+
+// loadPage runs do on the page pageURL resolved to and returns everything it
+// loaded. A local page is served through a proxy for the length of do, so
+// each load is recorded; a remote page goes to Chrome directly and loads
+// nothing local.
+func loadPage(ctx context.Context, u, local, query string, do func(context.Context, Load) ([]FileHash, error)) (loadSet, []FileHash, error) {
+	if local == "" {
+		hashes, err := do(ctx, Load{URL: u, ChromeArgs: baseArgs("")})
+		return loadSet{}, hashes, err
+	}
+	srv, err := serve()
+	if err != nil {
+		return loadSet{}, nil, err
+	}
+	defer srv.Close()
+	hashes, err := do(ctx, Load{URL: PlateURL(local, query), ChromeArgs: baseArgs(srv.proxyFlag())})
+	return srv.loads(), hashes, err
 }
 
 // serve starts the proxy on an ephemeral loopback port.
@@ -71,6 +103,8 @@ func serve() (*server, error) {
 	}
 	s := &server{
 		ln:      ln,
+		read:    readRegular,
+		content: map[string]*content{},
 		files:   map[string]string{},
 		missing: map[string]bool{},
 		ext:     map[string]bool{},
@@ -112,7 +146,7 @@ func (s *server) untrack(c net.Conn) {
 }
 
 // proxyFlag is the Chrome flag that routes the page through the proxy. The
-// matching --proxy-bypass-list=<-loopback> is the caller's: without it Chrome
+// matching --proxy-bypass-list=<-loopback> is baseArgs': without it Chrome
 // skips the proxy for loopback hosts.
 func (s *server) proxyFlag() string {
 	return "--proxy-server=http://" + s.ln.Addr().String()
@@ -130,7 +164,7 @@ func (s *server) loads() loadSet {
 		sort.Strings(out)
 		return out
 	}
-	return loadSet{Files: maps.Clone(s.files), Missing: keys(s.missing), External: keys(s.ext), Unstable: s.unstable}
+	return loadSet{Files: maps.Clone(s.files), Missing: keys(s.missing), External: keys(s.ext)}
 }
 
 func (s *server) note(m map[string]bool, k string) {
@@ -139,24 +173,32 @@ func (s *server) note(m map[string]bool, k string) {
 	s.mu.Unlock()
 }
 
-// served records that p went out with sha256 sum.
-func (s *server) served(p, sum string) {
+// lookup is p as its first request found it, reading, hashing and recording
+// it on that request. Concurrent first requests share the one read.
+func (s *server) lookup(p string) *content {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	if old, ok := s.files[p]; (ok && old != sum) || s.missing[p] {
-		s.unstable = true
+	c := s.content[p]
+	if c == nil {
+		c = &content{}
+		s.content[p] = c
 	}
-	s.files[p] = sum
-}
-
-// absent records that p was asked for and not there.
-func (s *server) absent(p string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, ok := s.files[p]; ok {
-		s.unstable = true
-	}
-	s.missing[p] = true
+	s.mu.Unlock()
+	c.once.Do(func() {
+		c.data, c.mod, c.ok = s.read(p)
+		var sum string
+		if c.ok {
+			h := sha256.Sum256(c.data)
+			sum = hex.EncodeToString(h[:])
+		}
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if c.ok {
+			s.files[p] = sum
+		} else {
+			s.missing[p] = true
+		}
+	})
+	return c
 }
 
 func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -179,22 +221,19 @@ func (s *server) file(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p := filepath.Clean(r.URL.Path)
-	data, mod, ok := readRegular(p)
-	if !ok {
-		s.absent(p)
+	c := s.lookup(p)
+	if !c.ok {
 		http.NotFound(w, r)
 		return
 	}
-	sum := sha256.Sum256(data)
-	s.served(p, hex.EncodeToString(sum[:]))
 	ct := mime.TypeByExtension(filepath.Ext(p))
 	if ct == "" {
-		ct = http.DetectContentType(data)
+		ct = http.DetectContentType(c.data)
 	}
 	w.Header().Set("Content-Type", ct)
 	// The bytes hashed are the bytes served. ServeContent adds Last-Modified
 	// and ranges; with Content-Type set it never sniffs and never redirects.
-	http.ServeContent(w, r, "", mod, bytes.NewReader(data))
+	http.ServeContent(w, r, "", c.mod, bytes.NewReader(c.data))
 }
 
 // readRegular reads p whole when it is a regular file; false when it is

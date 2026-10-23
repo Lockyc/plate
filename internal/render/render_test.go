@@ -449,8 +449,8 @@ func TestRenderLoadsRecorded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	j := job{url: u, local: local, query: query, pdf: e.out("p.pdf"), scale: 1, budget: DefaultBudget, warn: &e.stderr}
-	got, _, err := j.run(context.Background())
+	j := job{local: local, pdf: e.out("p.pdf"), scale: 1, budget: DefaultBudget, warn: &e.stderr}
+	got, _, err := loadPage(context.Background(), u, local, query, j.run)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -472,8 +472,8 @@ func TestRenderLoadsRealPathOfAwkwardDir(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	j := job{url: u, local: local, query: query, pdf: e.out("p.pdf"), scale: 1, budget: DefaultBudget, warn: &e.stderr}
-	got, _, err := j.run(context.Background())
+	j := job{local: local, pdf: e.out("p.pdf"), scale: 1, budget: DefaultBudget, warn: &e.stderr}
+	got, _, err := loadPage(context.Background(), u, local, query, j.run)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -529,8 +529,8 @@ func TestRenderPageURLIsPlateOrigin(t *testing.T) {
 
 func TestRenderRemotePageSkipsProxy(t *testing.T) {
 	e := setup(t, 1, 1)
-	j := job{url: "https://example.org/x", pdf: e.out("p.pdf"), scale: 1, budget: DefaultBudget, warn: &e.stderr}
-	got, _, err := j.run(context.Background())
+	j := job{pdf: e.out("p.pdf"), scale: 1, budget: DefaultBudget, warn: &e.stderr}
+	got, _, err := loadPage(context.Background(), "https://example.org/x", "", "", j.run)
 	if err != nil {
 		t.Fatal(err)
 	}
