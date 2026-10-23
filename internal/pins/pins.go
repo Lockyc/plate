@@ -82,7 +82,7 @@ func ffmpegTool(name string, caps ...Capability) Engine {
 		Name: name, Kind: Minimum,
 		VersionArgs: []string{"-hide_banner", "-version"}, VersionRe: name + ` version n?(\d+\.\d+(?:\.\d+)?)`, Min: "7.1",
 		Install: map[string]string{"darwin": "brew install ffmpeg", "linux": "install ffmpeg 7.1 or later from https://ffmpeg.org/download.html (distribution packages are often too old)"},
-		UsedBy:  []string{"clip"}, Capabilities: caps,
+		UsedBy:  []string{"clip", "animate", "build"}, Capabilities: caps,
 	}
 }
 
@@ -92,7 +92,7 @@ var Engines = []Engine{
 		Name: "magick", Kind: Minimum,
 		VersionArgs: []string{"-version"}, VersionRe: `Version: ImageMagick (\d+\.\d+\.\d+(?:-\d+)?)`, Min: "7.1.0",
 		Install: map[string]string{"darwin": "brew install imagemagick", "linux": "install ImageMagick from https://imagemagick.org/script/download.php (distribution packages are often too old)"},
-		UsedBy:  []string{"cutout", "infill", "inpaint", "grade", "upscale", "shrink", "render", "build", "clip"},
+		UsedBy:  []string{"cutout", "infill", "inpaint", "grade", "upscale", "shrink", "render", "build", "clip", "animate"},
 	},
 	{
 		Name: "gs", Kind: Minimum,
@@ -151,7 +151,7 @@ var Engines = []Engine{
 			"darwin/amd64": chs("mac-x64", "a54292aaacbb77f76f6ef47558e7c51ab884044e0adacca315567f83c060bcc4"),
 			"linux/amd64":  chs("linux64", "636aa5c79f2693632e9921b8bbb050038ba11672e02346c06c20f991aed096f9"),
 		}},
-		UsedBy: []string{"render", "build", "doc", "slides", "clip"},
+		UsedBy: []string{"render", "build", "doc", "slides", "clip", "animate"},
 	},
 }
 

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
@@ -171,5 +172,26 @@ func TestManagedMissingPointsAtInstall(t *testing.T) {
 	run(ctx, []pins.Engine{e}, false, nil, &out)
 	if !strings.Contains(out.String(), "plate doctor --install") {
 		t.Errorf("report:\n%s", out.String())
+	}
+}
+
+// TestEnginesListAnimate pins the commands doctor names for the engines a
+// video capture runs, through animate and build's video lines.
+func TestEnginesListAnimate(t *testing.T) {
+	for name, cmds := range map[string][]string{
+		"chrome-headless-shell": {"animate", "build"},
+		"ffmpeg":                {"animate", "build", "clip"},
+		"ffprobe":               {"animate", "build", "clip"},
+		"magick":                {"animate", "build", "clip"},
+	} {
+		e, ok := pins.Lookup(name)
+		if !ok {
+			t.Fatalf("no engine %s", name)
+		}
+		for _, c := range cmds {
+			if !slices.Contains(e.UsedBy, c) {
+				t.Errorf("%s: UsedBy %v lacks %s", name, e.UsedBy, c)
+			}
+		}
 	}
 }
