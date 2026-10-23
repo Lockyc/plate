@@ -107,7 +107,8 @@ func runVideo(ctx context.Context, t Target, force bool, warn io.Writer) (render
 }
 
 // removeVideoSet removes the video set an earlier run of the still line t
-// left under its name: when <name>.json is a capture's sidecar for t, the
+// left under its name: when <name>.json is a capture's sidecar for t (its
+// name, and the formats it wrote), the
 // files its formats name and the sidecar, except files another target
 // writes. Files under the name that no capture of t wrote are left.
 func removeVideoSet(t Target, dir string, all []Target) error {
@@ -120,7 +121,7 @@ func removeVideoSet(t Target, dir string, all []Target) error {
 		return err
 	}
 	var m video.Measurement
-	if json.Unmarshal(b, &m) != nil || m.Name != t.Name {
+	if json.Unmarshal(b, &m) != nil || m.Name != t.Name || len(m.Formats) == 0 {
 		return nil
 	}
 	var set []string
