@@ -20,6 +20,7 @@ Phases in build order. Each ships when its acceptance gate passes.
 | 5 | Not started | Regression check against the pipelines plate replaces, then each project's cutover | no measured regression; each cutover approved by its owner |
 | 6 | Shipped | Documents and PDFs: a PDF inspect command (metadata with a text-layer check, text, page renders, embedded images) and markdown to PDF with a neutral default document stylesheet, pandoc pinned | unit tests with stub engines; a rendered document checked page by page |
 | 7 | Shipped | Demo clips: `clip check` (the clip-script schema a runner reads) and `clip render` (trim, idle compression, camera, overlays, a crossfaded or dipped loop, MP4/WebM/poster/WebP/GIF, measured checks), ffmpeg pinned | unit tests; `clip-*` quality cases at their recorded thresholds |
+| 8 | Next | Motion: `animate` (a page's animation captured on plate's clock, embedded video seeked with it), `internal/cdp`, clip's encode and checks moved to `internal/video`, video outputs and `dur=`/`fps=` in `plate build` | unit tests; `animate-*` quality cases: two captures frame-identical, thin moving text at clip's sharpness floor, embedded video frame-matched to its source |
 
 **Phase 5 changes nothing in a consuming project until its owner approves
 that project's cutover.** The check runs plate beside the existing pipeline,
@@ -28,10 +29,18 @@ reading the project's assets without writing to its tree.
 ## Sequencing
 
 Phases run in order, except where one needs nothing from the phase before
-it: phases 6 and 7 add commands and cut no project over, so they run
+it: phases 6, 7 and 8 add commands and cut no project over, so they run
 independently of phase 5. Within a phase, order is open.
 
 ## Deferred
+
+- **animate has no sound.** Every video plate writes is muted. Deferred
+  because the first ads are captioned and silent. Unlock: an optional
+  `--audio FILE` (and an `audio=` build option) muxed under the frames,
+  trimmed and faded to the duration, AAC in the MP4 and Opus in the WebM.
+- **animate's clock does not reach workers.** A Web Worker, and an
+  OffscreenCanvas drawn from one, keeps real time. Deferred because no scene
+  needs one. Unlock: such a scene, then the clock injected into the worker.
 
 - **doctor runs no managed engine.** `doctor` reports chrome-headless-shell
   ok once its pinned build is unpacked, without starting it, so a Linux host

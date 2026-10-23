@@ -24,7 +24,9 @@ wrapping it would add nothing; a resize down for the web goes through
 main.go              dispatch
 internal/<op>/       one package per command (cutout, inpaint, infill, upscale,
                      grade, render, build, press, pdf, impose, marks, doc,
-                     slides, shrink, diff, clip, fonts, qr, doctor)
+                     slides, shrink, diff, clip, animate, fonts, qr, doctor)
+internal/cdp/        a DevTools-protocol session with Chrome over --remote-debugging-pipe
+internal/video/      the encode, checks and whole-set publish clip and animate share
 internal/sheet/      a PDF's pages redrawn as forms on new sheets (impose, marks)
 internal/cli/        flag, exit-code and error conventions every command shares
 internal/engine/     the one way an external tool is run
@@ -171,6 +173,51 @@ colours, or renders what it is given.
   `clip-loop-crossfade`, and the dip held by `clip-loop-dip`. The codec settings are documented at `mp4CRF`, the colour tagging at
   `bt709` (both internal/clip/encode.go), the hold of a static tail at
   `clip.ExtractFrames`, and the target refusals at `validateRef`.
+- **animate** — a page's own animation, captured frame by frame on a clock
+  plate owns, and encoded as `clip` encodes. Generic: the scene, its
+  styles and its copy are the consuming project's HTML, CSS and JS; plate
+  ships no animation styles. `plate animate --size WxH --duration S
+  [--fps N] [--format mp4,webm,poster,webp,gif] [--budget-kb N] [--loop
+  none|crossfade|dip] --out DIR [--name N] <page>`; `--fps` defaults to 30,
+  `--loop` to `none`, since an ad has an end; the poster is the last frame.
+  - *The clock.* Before any page script runs
+    (`Page.addScriptToEvaluateOnNewDocument`, every frame of the page),
+    plate replaces `performance.now`, `Date`, `requestAnimationFrame`,
+    `setTimeout` and `setInterval` with a clock that moves only when plate
+    seeks it, and seeds `Math.random`. Each frame, plate seeks to `n/fps`:
+    due timers fire, queued animation-frame callbacks run, every
+    `document.getAnimations()` entry (CSS animations and transitions, the
+    Web Animations API, pseudo-elements included) is paused at that time,
+    SVG documents get `setCurrentTime`, and every `<video>` is paused and
+    seeked, the frame waiting on each `seeked`; then `Page.captureScreenshot`.
+    Frame 0 waits for the load event, `document.fonts.ready` and no pending
+    loads. This is the one route that is exact on macOS: Chrome refuses
+    `HeadlessExperimental.beginFrame` there ("BeginFrameControl is not
+    supported on MacOS yet", chrome-headless-shell 154), and its virtual
+    time advanced a 33.3 ms budget by about 50 ms a frame, while the clock
+    put a CSS animation and a requestAnimationFrame loop at their exact
+    positions on every frame, at about 40 ms a frame for a 600×300 page.
+  - *Footage.* A recording, or a `clip render` output, goes in the page as
+    a muted `<video>`; the clock seeks it to the frame (page frame 42 of a
+    30 fps H.264 source matched source frame 42, RMSE 0.0029 against 0.0075
+    for its neighbours). Composing a promo from recordings is page layout,
+    so `clip render` itself is unchanged.
+  - *Transport.* `internal/cdp` speaks the protocol over
+    `--remote-debugging-pipe` (fds 3 and 4, NUL-delimited JSON), standard
+    library only. Chrome is started through `internal/engine`, which gains a
+    long-lived process with those pipes, killed with its context. A local
+    page loads through render's proxy, so its loads are recorded and the
+    render cache can skip an unchanged animation.
+  - *Encode and checks.* Frames go to `internal/video`, the encode, the
+    sharpness, budget and MP4 checks, the loop closing and the whole-set
+    publish that `clip` uses now, moved out of internal/clip, not copied.
+    `animate` also refuses a capture whose frames are all one colour or
+    all identical, which is a page whose animation never ran on plate's
+    clock. Its JSON is clip's measurement shape.
+  - *Build.* A `plate build` manifest line takes `mp4`, `webm`, `gif`,
+    `webp` and `poster` outputs beside `png`, with options `dur=S` and
+    `fps=N`. On such a line `png` is the last frame of the same capture, so
+    an ad's still and its video always end alike.
 - **inpaint, fonts, qr, pdf, impose, marks, doc, slides** — as the README table and each package's
   doc comment describe.
 
