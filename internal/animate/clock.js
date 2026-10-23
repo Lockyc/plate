@@ -171,9 +171,19 @@
     return out;
   };
   proto.finish = function () {
+    const out = nativeFinish.call(this);
     const r = recs.get(this);
     if (r) r.done = true;
-    return nativeFinish.call(this);
+    return out;
+  };
+  // A cancelled animation is idle: a later play() starts it afresh.
+  const nativeCancel = proto.cancel;
+  proto.cancel = function () {
+    const out = nativeCancel.call(this);
+    recs.delete(this);
+    known.delete(this);
+    pagePaused.delete(this);
+    return out;
   };
   proto.reverse = function () {
     const r = recs.get(this);
@@ -208,10 +218,11 @@
     enumerable: true,
     get: nativeCurrent.get,
     set(v) {
+      setCurrent(this, v); // first: a write Chrome refuses throws here
+      if (v === null) return;
       const r = recs.get(this);
       if (r) reanchor(this, r, Number(v));
-      else if (v !== null) record(this, now, Number(v));
-      setCurrent(this, v);
+      else record(this, now, Number(v));
     },
   });
   Object.defineProperty(proto, "playbackRate", {
