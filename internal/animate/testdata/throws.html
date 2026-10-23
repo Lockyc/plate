@@ -1,0 +1,8 @@
+<!doctype html>
+<script>
+  function step(ts) {
+    if (ts >= 500) throw new Error("scene broke");
+    requestAnimationFrame(step);
+  }
+  requestAnimationFrame(step);
+</script>

@@ -1,0 +1,7 @@
+<!doctype html>
+<style>
+  #t { width: 40px; height: 40px; background: #3a3; opacity: 0; transition: opacity 1s linear; }
+  #t.on { opacity: 1; }
+</style>
+<div id="t"></div>
+<script>setTimeout(() => document.getElementById("t").classList.add("on"), 500);</script>

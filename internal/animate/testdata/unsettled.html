@@ -1,0 +1,6 @@
+<!doctype html>
+<script>
+  const img = document.createElement("img");
+  img.src = new URLSearchParams(location.search).get("img");
+  document.documentElement.append(img);
+</script>

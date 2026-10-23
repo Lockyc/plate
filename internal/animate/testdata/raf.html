@@ -1,0 +1,13 @@
+<!doctype html>
+<style>body { margin: 0; } #j { position: absolute; top: 0; width: 40px; height: 40px; background: #36c; }</style>
+<div id="j"></div>
+<script>
+  const j = document.getElementById("j");
+  let start;
+  function step(ts) {
+    if (start === undefined) start = ts;
+    j.style.left = (ts - start) * 0.25 + "px";
+    requestAnimationFrame(step);
+  }
+  requestAnimationFrame(step);
+</script>
