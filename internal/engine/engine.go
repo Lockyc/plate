@@ -214,13 +214,9 @@ func Run(ctx context.Context, c Cmd) (Result, error) {
 			return Result{}, err
 		}
 	}
-	path := c.Path
-	if path == "" {
-		p, err := Resolve(c.Engine)
-		if err != nil {
-			return Result{}, err
-		}
-		path = p
+	path, err := executablePath(c)
+	if err != nil {
+		return Result{}, err
 	}
 	res, err := run(ctx, path, c)
 	if err != nil {
@@ -229,6 +225,22 @@ func Run(ctx context.Context, c Cmd) (Result, error) {
 		}
 	}
 	return res, err
+}
+
+// executablePath is c.Path, else the resolved engine.
+func executablePath(c Cmd) (string, error) {
+	if c.Path != "" {
+		return c.Path, nil
+	}
+	return Resolve(c.Engine)
+}
+
+// timeoutOf is c.Timeout, or DefaultTimeout when it sets none.
+func timeoutOf(c Cmd) time.Duration {
+	if c.Timeout == 0 {
+		return DefaultTimeout
+	}
+	return c.Timeout
 }
 
 // SameFile reports whether a and b name one file: the same inode when both
@@ -249,10 +261,7 @@ func SameFile(a, b string) bool {
 // holding its output closes it; then it kills the engine's process group,
 // so nothing the engine left behind outlives the call.
 func run(ctx context.Context, path string, c Cmd) (Result, error) {
-	timeout := c.Timeout
-	if timeout == 0 {
-		timeout = DefaultTimeout
-	}
+	timeout := timeoutOf(c)
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, path, pathArgs(c)...)
@@ -397,4 +406,104 @@ func lastLines(s string, n int) string {
 		lines = lines[len(lines)-n:]
 	}
 	return strings.Join(lines, "\n")
+}
+
+// Proc is an engine kept running behind two pipes: In is its fd 3 and Out its
+// fd 4, the channel Chrome's --remote-debugging-pipe speaks.
+type Proc struct {
+	In  io.WriteCloser
+	Out io.ReadCloser
+
+	engine  string
+	cmd     *exec.Cmd
+	stderr  *os.File
+	ctx     context.Context
+	cancel  context.CancelFunc
+	timeout time.Duration
+	done    chan struct{} // closed once the engine has exited and its group is killed
+	waitErr error
+}
+
+// Start launches c with pipes on fd 3 and 4 and returns at once. The timeout
+// (0 is DefaultTimeout) covers the whole session, the engine runs in its own
+// process group, and the group is killed when ctx ends or Close gives up.
+// Outputs and Inputs are not checked: the caller owns the session.
+func Start(ctx context.Context, c Cmd) (*Proc, error) {
+	path, err := executablePath(c)
+	if err != nil {
+		return nil, err
+	}
+	timeout := timeoutOf(c)
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	stderr, err := scratch()
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	r3, w3, err := os.Pipe()
+	if err != nil {
+		cancel()
+		stderr.Close()
+		return nil, err
+	}
+	r4, w4, err := os.Pipe()
+	if err != nil {
+		cancel()
+		stderr.Close()
+		r3.Close()
+		w3.Close()
+		return nil, err
+	}
+	cmd := exec.CommandContext(ctx, path, pathArgs(c)...)
+	cmd.Stderr = stderr
+	cmd.ExtraFiles = []*os.File{r3, w4}
+	killGroupOnCancel(cmd)
+	err = cmd.Start()
+	r3.Close()
+	w4.Close()
+	if err != nil {
+		cancel()
+		stderr.Close()
+		w3.Close()
+		r4.Close()
+		return nil, err
+	}
+	p := &Proc{In: w3, Out: r4, engine: c.Engine, cmd: cmd, stderr: stderr, ctx: ctx, cancel: cancel, timeout: timeout, done: make(chan struct{})}
+	go func() {
+		p.waitErr = cmd.Wait()
+		killGroup(cmd)
+		close(p.done)
+	}()
+	return p, nil
+}
+
+// Close closes both pipes, waits up to 5 s for the engine to exit, then kills
+// its group. It returns nil after a clean session and a *RunError carrying the
+// stderr tail when the session timed out, was cancelled, or the engine failed
+// without being killed by Close.
+func (p *Proc) Close() error {
+	p.In.Close()
+	p.Out.Close()
+	killed := false
+	select {
+	case <-p.done:
+	case <-time.After(5 * time.Second):
+		killed = true
+		killGroup(p.cmd)
+		<-p.done
+	}
+	defer p.stderr.Close()
+	defer p.cancel()
+	fail := func(reason string) error {
+		return &RunError{Engine: p.engine, Reason: reason, Stderr: string(readAll(p.stderr))}
+	}
+	switch {
+	case errors.Is(p.ctx.Err(), context.DeadlineExceeded):
+		return fail("timed out after " + p.timeout.String())
+	case p.ctx.Err() != nil:
+		return fail("cancelled")
+	case p.waitErr != nil && !killed:
+		return fail(p.waitErr.Error())
+	}
+	return nil
 }

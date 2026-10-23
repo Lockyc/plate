@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -302,5 +303,63 @@ func TestCapableTimeoutIsAnError(t *testing.T) {
 	got, err := engine.Capable(tctx, e, pins.Capability{Args: []string{"-encoders"}, Token: "libx264", For: "x"})
 	if err == nil || !strings.Contains(err.Error(), "timed out") {
 		t.Fatalf("Capable = %v, %v; want a timed-out error, not a missing capability", got, err)
+	}
+}
+
+func TestStartEchoesOverPipes(t *testing.T) {
+	enginetest.Stub(t, "magick", `cat <&3 >&4`)
+	p, err := engine.Start(ctx, engine.Cmd{Engine: "magick"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.In.Write([]byte("ping\x00")); err != nil {
+		t.Fatal(err)
+	}
+	got := make([]byte, 5)
+	if _, err := io.ReadFull(p.Out, got); err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "ping\x00" {
+		t.Fatalf("read %q, want %q", got, "ping\x00")
+	}
+	if err := p.Close(); err != nil {
+		t.Fatalf("Close = %v, want nil after a clean session", err)
+	}
+}
+
+func TestStartKillsGroupOnCancel(t *testing.T) {
+	pidfile := filepath.Join(t.TempDir(), "child.pid")
+	enginetest.Stub(t, "magick", `sleep 60 & echo $! > "$1"; wait`)
+	cctx, cancel := context.WithCancel(ctx)
+	p, err := engine.Start(cctx, engine.Cmd{Engine: "magick", Args: []string{pidfile}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 100; i++ {
+		if b, err := os.ReadFile(pidfile); err == nil && strings.Contains(string(b), "\n") {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	pid := readPid(t, pidfile)
+	cancel()
+	start := time.Now()
+	p.Close()
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Fatalf("Close took %v after cancel", elapsed)
+	}
+	waitGone(t, pid)
+}
+
+func TestStartReportsEarlyExit(t *testing.T) {
+	enginetest.Stub(t, "magick", `echo boom >&2; exit 3`)
+	p, err := engine.Start(ctx, engine.Cmd{Engine: "magick"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(200 * time.Millisecond)
+	var re *engine.RunError
+	if err := p.Close(); !errors.As(err, &re) || !strings.Contains(re.Stderr, "boom") {
+		t.Fatalf("Close = %v, want a RunError with stderr boom", err)
 	}
 }
