@@ -1,0 +1,14 @@
+<!doctype html>
+<video id="p" src="source.mp4" muted preload="auto"></video>
+<video id="a" src="source.mp4" muted autoplay preload="auto"></video>
+<video id="h" src="source.mp4" muted autoplay preload="auto"></video>
+<script>
+  window.events = { p: [], a: [] };
+  for (const id of ["p", "a"]) {
+    for (const e of ["play", "playing", "pause", "ended"]) {
+      document.getElementById(id).addEventListener(e, () => window.events[id].push(e));
+    }
+  }
+  document.getElementById("h").pause();
+  setTimeout(() => document.getElementById("p").play(), 100);
+</script>

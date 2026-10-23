@@ -1,0 +1,7 @@
+<!doctype html>
+<script>
+  window.ran = false;
+  let second;
+  requestAnimationFrame(() => cancelAnimationFrame(second));
+  second = requestAnimationFrame(() => { window.ran = true; });
+</script>

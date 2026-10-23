@@ -41,17 +41,20 @@
   };
 
   // Animation frames.
-  let frames = new Map();
+  const frames = new Map();
   let frameID = 0;
   window.requestAnimationFrame = (cb) => {
     frames.set(++frameID, cb);
     return frameID;
   };
   window.cancelAnimationFrame = (id) => frames.delete(id);
+  // The frames queued when the batch starts run, less any cancelled on the
+  // way; one queued during the batch waits for the next.
   const runFrames = () => {
-    const due = frames;
-    frames = new Map();
-    for (const cb of due.values()) {
+    for (const id of [...frames.keys()]) {
+      const cb = frames.get(id);
+      if (!cb) continue;
+      frames.delete(id);
       try {
         cb(now);
       } catch (e) {
@@ -60,19 +63,29 @@
     }
   };
 
-  // Timers, fired in due order (ties in creation order).
+  // Timers, fired in due order (ties in creation order). As in a browser, a
+  // timer set from a timer nested 4 deep waits at least 4 ms.
   const timers = new Map();
   let timerID = 0;
-  const addTimer = (cb, ms, args, repeat) => {
+  let nesting = 0; // the running timer's nesting level, 0 outside one
+  const addTimer = (name, cb, ms, args, repeat) => {
+    if (typeof cb === "string") {
+      report(new Error(`${name} with a code string: pass a function`));
+      return 0;
+    }
     const id = ++timerID;
-    const delay = Math.max(0, Number(ms) || 0);
-    timers.set(id, { id, at: now + delay, cb, args, every: repeat ? Math.max(1, delay) : 0 });
+    const level = nesting + 1;
+    let delay = Math.max(0, Number(ms) || 0);
+    if (level >= 5) delay = Math.max(4, delay);
+    timers.set(id, { id, at: now + delay, cb, args, level, every: repeat ? Math.max(1, delay) : 0 });
     return id;
   };
-  window.setTimeout = (cb, ms, ...args) => addTimer(cb, ms, args, false);
-  window.setInterval = (cb, ms, ...args) => addTimer(cb, ms, args, true);
+  window.setTimeout = (cb, ms, ...args) => addTimer("setTimeout", cb, ms, args, false);
+  window.setInterval = (cb, ms, ...args) => addTimer("setInterval", cb, ms, args, true);
   window.clearTimeout = window.clearInterval = (id) => timers.delete(id);
   const maxTimerRuns = 100000;
+  // fireTimers runs every due timer and reports whether any ran, or
+  // "overrun" when timers are still due after maxTimerRuns.
   const fireTimers = () => {
     for (let runs = 0; ; runs++) {
       let next;
@@ -80,13 +93,16 @@
         if (t.at <= now && (!next || t.at < next.at || (t.at === next.at && t.id < next.id))) next = t;
       }
       if (!next) return runs > 0;
-      if (runs === maxTimerRuns) throw new Error(`timers still due after ${maxTimerRuns} runs at ${now} ms`);
+      if (runs === maxTimerRuns) return "overrun";
       if (next.every) next.at += next.every;
       else timers.delete(next.id);
+      nesting = next.level;
       try {
         if (typeof next.cb === "function") next.cb(...next.args);
       } catch (e) {
         report(e);
+      } finally {
+        nesting = 0;
       }
     }
   };
@@ -338,6 +354,10 @@
     s.anchorMedia = mediaTime(el);
     s.anchorClock = now;
   };
+  const started = (el) => {
+    el.dispatchEvent(new Event("play"));
+    el.dispatchEvent(new Event("playing"));
+  };
   media.play = function () {
     const s = state(this);
     if (!s.playing) {
@@ -346,12 +366,14 @@
       if (!this.loop && Number.isFinite(d) && s.anchorMedia >= d) s.anchorMedia = 0;
       s.playing = true;
       s.ended = false;
-      this.dispatchEvent(new Event("play"));
+      started(this);
     }
     return Promise.resolve();
   };
+  // pause() also cancels autoplay, as in a browser.
   media.pause = function () {
     const s = state(this);
+    s.autoplayed = true;
     if (s.playing) {
       anchor(this);
       s.playing = false;
@@ -435,6 +457,7 @@
       if (!s.playing) {
         s.anchorClock = now;
         s.playing = true;
+        started(el);
       }
     }
     const d = el.duration;
@@ -443,6 +466,7 @@
       s.anchorMedia = d;
       s.anchorClock = now;
       s.playing = false;
+      el.dispatchEvent(new Event("pause"));
       el.dispatchEvent(new Event("ended"));
     }
   };
@@ -502,22 +526,24 @@
   const maxPasses = 20;
   const seekFrame = async (t, first) => {
     now = t;
-    fireTimers();
+    let overrun = fireTimers() === "overrun";
     runFrames();
     const stalled = new Set();
     let restless = true;
-    for (let pass = 0; pass < maxPasses; pass++) {
+    for (let pass = 0; pass < maxPasses && !overrun; pass++) {
       const moved = await syncMedia(stalled);
       syncSVGs(first);
       const began = await holdAnimations(first);
       const fired = fireTimers();
+      overrun = fired === "overrun";
       if (!moved && !began && !fired) {
         restless = false;
         break;
       }
     }
     const out = {
-      restless: restless ? maxPasses : 0, // the passes run, when restless
+      restless: restless && !overrun ? maxPasses : 0, // the passes run, when restless
+      overrun: overrun ? maxTimerRuns : 0, // the timer runs, when timers are still due
       errors: [...document.querySelectorAll("video")]
         .filter((v) => v.error)
         .map((v) => ({ src: srcOf(v), code: v.error.code })),
@@ -538,6 +564,7 @@
       out.stalled.push(...r.stalled);
       out.crossOrigin.push(...r.crossOrigin);
       out.restless = Math.max(out.restless, r.restless);
+      out.overrun = Math.max(out.overrun, r.overrun);
     }
     return out;
   };
