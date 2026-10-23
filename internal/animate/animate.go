@@ -67,6 +67,19 @@ func (e usageError) Error() string { return string(e) }
 // frames is the capture's frame count.
 func (o Options) frames() int { return int(math.Round(o.DurationS * float64(o.FPS))) }
 
+// stepWait is how long shoot gives opening the page, each frame, and the
+// FailIf read.
+func (o Options) stepWait() time.Duration {
+	return time.Duration(o.Budget)*time.Millisecond + frameSlack
+}
+
+// session bounds Chrome's whole session: every step shoot waits on, each at
+// its longest, so a capture is refused at the step that overran and never
+// cut short by the engine's own timeout.
+func (o Options) session() time.Duration {
+	return time.Duration(o.frames()+2) * o.stepWait()
+}
+
 // name is Name, or the page's base name without its extension.
 func (o Options) name() string {
 	if o.Name != "" {
@@ -377,17 +390,17 @@ func (o Options) capture(ctx context.Context, l render.Load) (_ video.Measuremen
 // shoot opens the page on plate's clock and writes frame n, at n/fps, to
 // r%05d.png in dir, then holds the last frame's markup to FailIf. Opening
 // the page, and each frame's seek and capture, get the budget and
-// frameSlack: a page can keep
-// Chrome itself busy, which no wait inside the page can see.
+// frameSlack: a page can keep Chrome itself busy, which no wait inside the
+// page can see.
 func (o Options) shoot(ctx context.Context, l render.Load, dir string) ([]string, error) {
 	budget := time.Duration(o.Budget) * time.Millisecond
-	wait := budget + frameSlack
+	wait := o.stepWait()
 	// Chrome lives as long as the context it starts with, so Open's bound
 	// cancels that context only when the bound passes, never once Open is done.
 	cctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	late := time.AfterFunc(wait, cancel)
-	c, err := Open(cctx, l, o.W, o.H, o.Scale, budget)
+	c, err := Open(cctx, l, o.W, o.H, o.Scale, budget, o.session())
 	if !late.Stop() && ctx.Err() == nil {
 		if err == nil {
 			c.Close()

@@ -267,3 +267,14 @@ func TestMainRequiresSize(t *testing.T) {
 		t.Errorf("exit %d, stderr %q; want 2 naming --size", code, stderr.String())
 	}
 }
+
+func TestSessionOutlastsEveryStep(t *testing.T) {
+	o := opts(t, "p.html")
+	o.DurationS, o.FPS = 60, MaxFPS
+	if want := time.Duration(o.frames()+2) * (time.Duration(o.Budget)*time.Millisecond + frameSlack); o.session() != want {
+		t.Errorf("session %v, want %v: the open, every frame and the FailIf read at their longest", o.session(), want)
+	}
+	if o.session() <= engine.DefaultTimeout {
+		t.Errorf("a %v s capture at %d fps is bounded by %v, no more than the engine's default %v", o.DurationS, o.FPS, o.session(), engine.DefaultTimeout)
+	}
+}
