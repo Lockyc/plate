@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/lockyc/plate/internal/engine"
 )
@@ -67,10 +68,11 @@ type Conn struct {
 	closeOne sync.Once
 }
 
-// Launch starts Chrome with args, --remote-debugging-pipe and about:blank.
-func Launch(ctx context.Context, args []string) (*Conn, error) {
+// Launch starts Chrome with args, --remote-debugging-pipe and about:blank,
+// for a session of at most timeout (0 is engine.DefaultTimeout).
+func Launch(ctx context.Context, args []string, timeout time.Duration) (*Conn, error) {
 	all := append(append([]string{}, args...), "--remote-debugging-pipe", "about:blank")
-	p, err := engine.Start(ctx, engine.Cmd{Engine: "chrome-headless-shell", Args: all})
+	p, err := engine.Start(ctx, engine.Cmd{Engine: "chrome-headless-shell", Args: all, Timeout: timeout})
 	if err != nil {
 		return nil, err
 	}

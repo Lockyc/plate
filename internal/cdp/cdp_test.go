@@ -70,9 +70,15 @@ func fakeChrome() {
 
 func launch(t *testing.T) *Conn {
 	t.Helper()
+	return launchFor(t, 0)
+}
+
+// launchFor starts the fake Chrome for a session of at most timeout.
+func launchFor(t *testing.T, timeout time.Duration) *Conn {
+	t.Helper()
 	t.Setenv("PLATE_FAKE_CHROME", "1")
 	t.Setenv(engine.EnvOverride("chrome-headless-shell"), os.Args[0])
-	c, err := Launch(context.Background(), nil)
+	c, err := Launch(context.Background(), nil, timeout)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,5 +179,17 @@ func TestCloseIsClean(t *testing.T) {
 	c := launch(t)
 	if err := c.Close(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestLaunchEndsSessionAtTimeout(t *testing.T) {
+	c := launchFor(t, 300*time.Millisecond)
+	select {
+	case <-c.dead:
+	case <-time.After(10 * time.Second):
+		t.Fatal("chrome outlived its session timeout")
+	}
+	if err := c.Call(context.Background(), "", "Echo", nil, nil); err == nil {
+		t.Fatal("a call after the session timeout succeeded")
 	}
 }

@@ -41,12 +41,13 @@ type Capture struct {
 // Open loads l's page at w×h CSS px and scale, on plate's clock, and waits
 // up to budget for it to settle: the load event, fonts loaded, every img
 // complete and every video with a frame to show, in every same-origin
-// frame. A seek waits up to budget for a video's frame too.
-func Open(ctx context.Context, l render.Load, w, h int, scale float64, budget time.Duration) (_ *Capture, err error) {
+// frame. A seek waits up to budget for a video's frame too. Chrome is ended
+// after session (0 is engine.DefaultTimeout).
+func Open(ctx context.Context, l render.Load, w, h int, scale float64, budget, session time.Duration) (_ *Capture, err error) {
 	if err := render.CheckSize(w, h, scale); err != nil {
 		return nil, err
 	}
-	conn, err := cdp.Launch(ctx, l.ChromeArgs)
+	conn, err := cdp.Launch(ctx, l.ChromeArgs, session)
 	if err != nil {
 		return nil, err
 	}

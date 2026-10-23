@@ -38,7 +38,7 @@ func withCapture(t *testing.T, page string, w, h int, budget time.Duration, fn f
 	defer cancel()
 	_, err := render.Cached(ctx, "animate-test", page, page, nil, true, io.Discard,
 		func(ctx context.Context, l render.Load) ([]render.FileHash, error) {
-			c, err := Open(ctx, l, w, h, 1, budget)
+			c, err := Open(ctx, l, w, h, 1, budget, 0)
 			if err != nil {
 				return nil, err
 			}
@@ -825,6 +825,15 @@ func TestCaptureRefusesTimerOverrun(t *testing.T) {
 		return c.Seek(ctx, 200000)
 	})
 	if err == nil || !strings.Contains(err.Error(), "timers still due after 100000 runs at 200000 ms") || strings.Contains(err.Error(), "__plate") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestCaptureRefusalNamesPreloadNone(t *testing.T) {
+	err := withCapture(t, "testdata/videopreload.html", 100, 100, 300*time.Millisecond, func(ctx context.Context, c *Capture) error {
+		return c.Seek(ctx, 0)
+	})
+	if err == nil || !strings.Contains(err.Error(), "source.mp4") || !strings.Contains(err.Error(), `preload="none"`) {
 		t.Fatalf("err = %v", err)
 	}
 }
