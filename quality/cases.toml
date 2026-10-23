@@ -1760,3 +1760,110 @@ target = { xy = [200, 450] }
 {"type":"tap","t":1000,"step":0,"at":[200,450],"target":[150,400,100,100]}
 {"type":"end","t":1990}
 '''
+
+# animate: a page's own animation, captured on plate's clock. Each case's
+# page is written into the case directory.
+
+[[case]]
+name   = "animate-deterministic"
+why    = "two captures of one CSS-animated page must be the same frame for frame: the clock, not wall time, drives the page"
+run    = ["animate", "--size", "320x240", "--duration", "2", "--format", "mp4", "--out", "{tmp:out1}", "--name", "a", "{tmp:page.html}"]
+post   = [
+  ["plate", "animate", "--size", "320x240", "--duration", "2", "--format", "mp4", "--out", "{tmp:out2}", "--name", "a", "{tmp:page.html}"],
+  ["ffmpeg", "-i", "{tmp:out1/a.mp4}", "-vf", 'select=eq(n\,45)', "-frames:v", "1", "{tmp:f1.png}"],
+  ["ffmpeg", "-i", "{tmp:out2/a.mp4}", "-vf", 'select=eq(n\,45)', "-frames:v", "1", "{tmp:f2.png}"],
+]
+metric = "rmse"
+params = { a = "{tmp:f1.png}", b = "{tmp:f2.png}" }
+max    = 0
+
+[case.files]
+"page.html" = '''
+<!doctype html>
+<meta charset="utf-8">
+<style>
+html, body { margin: 0; background: #101830; overflow: hidden; }
+.b { position: absolute; top: 80px; left: 0; width: 80px; height: 80px; background: #ffd400;
+     animation: go 2s linear infinite, spin 1.3s linear infinite; }
+@keyframes go { from { left: 0 } to { left: 240px } }
+@keyframes spin { from { transform: rotate(0) } to { transform: rotate(360deg) } }
+</style>
+<div class="b"></div>
+'''
+
+[[case]]
+name   = "animate-text-sharp"
+why    = "thin coloured text scrolling at 120 px/s must keep its strokes through the mp4 and webm encodes of a 1080x1920 capture (sharpness 0.995944)"
+run    = ["animate", "--size", "1080x1920", "--duration", "4", "--format", "mp4,webm", "--out", "{tmp:out}", "--name", "text", "{tmp:page.html}"]
+metric = "json"
+params = { file = "{tmp:out/text.json}", field = "sharpness" }
+min    = 0.995
+
+[case.files]
+"page.html" = '''
+<!doctype html>
+<meta charset="utf-8">
+<style>
+html, body { margin: 0; background: #0a0a12; overflow: hidden; }
+#s { animation: scroll 4s linear forwards; font: 300 14px/20px sans-serif; padding: 20px; white-space: nowrap; }
+@keyframes scroll { from { transform: translateY(0) } to { transform: translateY(-480px) } }
+.c { color: #00e5ff; } .m { color: #ff2bd6; } .g { color: #39ff14; } .y { color: #ffd400; }
+</style>
+<div id="s"></div>
+<script>
+const cls = ["c", "m", "g", "y"];
+let h = "";
+for (let i = 0; i < 100; i++) {
+  h += '<div><span class="' + cls[i % 4] + '">Plan garden seeds tasks done ' + i + '</span> <span class="' + cls[(i + 1) % 4] + '">thin text keeps its strokes</span> <span class="' + cls[(i + 2) % 4] + '">legible</span></div>';
+}
+document.getElementById("s").innerHTML = h;
+</script>
+'''
+
+[[case]]
+name   = "animate-video-late"
+why    = "a muted video the page starts late, from an offset, looping, must show the source frame its media time names, not its neighbours (rmse 0.00280 against source frame 15, 0.00768 against 14, 0.00757 against 16)"
+setup  = [
+  ["ffmpeg", "-f", "lavfi", "-i", "testsrc=size=320x240:rate=30", "-t", "1", "-c:v", "libx264", "-pix_fmt", "yuv420p", "{tmp:src.mp4}"],
+]
+run    = ["animate", "--size", "400x320", "--duration", "2.0333", "--format", "poster", "--out", "{tmp:out}", "--name", "late", "{tmp:page.html}"]
+post   = [
+  ["magick", "{tmp:out/late.poster.png}", "-crop", "320x240+40+40", "+repage", "{tmp:p.png}"],
+  ["ffmpeg", "-i", "{tmp:src.mp4}", "-vf", 'select=eq(n\,14)', "-frames:v", "1", "{tmp:s14.png}"],
+  ["ffmpeg", "-i", "{tmp:src.mp4}", "-vf", 'select=eq(n\,15)', "-frames:v", "1", "{tmp:s15.png}"],
+  ["ffmpeg", "-i", "{tmp:src.mp4}", "-vf", 'select=eq(n\,16)', "-frames:v", "1", "{tmp:s16.png}"],
+]
+metric = "rmse"
+params = { a = "{tmp:p.png}", b = "{tmp:s15.png}" }
+max    = 0.003
+
+[case.files]
+"page.html" = '''
+<!doctype html>
+<meta charset="utf-8">
+<style>
+html, body { margin: 0; background: #000; overflow: hidden; }
+video { position: absolute; left: 40px; top: 40px; width: 320px; height: 240px; }
+</style>
+<video id="v" src="src.mp4" muted playsinline></video>
+<script>
+const v = document.getElementById("v");
+v.loop = true;
+setTimeout(() => { v.currentTime = 0.5; v.play(); }, 1000);
+</script>
+'''
+
+[[case]]
+name   = "animate-refuses-still"
+why    = "a page that never ran on plate's clock must be refused, not encoded as a still video"
+run    = ["animate", "--size", "320x240", "--duration", "1", "--format", "mp4,poster", "--out", "{tmp:out}", "--name", "still", "{tmp:page.html}"]
+exit   = 1
+stderr = "never ran on plate's clock"
+absent = ["{tmp:out/still.mp4}", "{tmp:out/still.poster.png}", "{tmp:out/still.json}"]
+
+[case.files]
+"page.html" = '''
+<!doctype html>
+<meta charset="utf-8">
+<body style="margin:0;background:#224"><h1 style="color:#fff">Still</h1></body>
+'''
