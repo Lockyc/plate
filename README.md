@@ -43,6 +43,7 @@ the exceptions listed under [Platforms](#platforms). What comes next is in
 | `diff` | Compares two images after lining them up, so a small shift doesn't fail everything | `plate diff [--tolerance N] [--max-shift PX] [--step PX] [--threshold PCT] [--out diff.png] <a> <b>` |
 | `clip check` | Validates a demo-clip script and prints it normalised, the form a runner reads | `plate clip check [--json] <clip.toml>` |
 | `clip render` | Turns a screen recording and its event log into a short looping clip: trimmed, framed by a fixed or following camera, with captions and touch, click, key or cursor overlays; MP4, WebM, poster, WebP or GIF, with a JSON of its measurements | `plate clip render --script clip.toml --master raw.mov --events events.jsonl --out DIR [--caption-css FILE]` |
+| `animate` | Captures a page's own animation frame by frame as a muted MP4, WebM, poster, WebP or GIF, with a JSON of its measurements, skipped when nothing changed | `plate animate --size WxH [--scale F] --duration S [--fps N] [--format mp4,webm,poster,webp,gif] [--loop none\|crossfade\|dip] [--budget-kb N] [--budget MS] --out DIR [--name N] [--fail-if TEXT]... [--force] <page.html\|http(s) or file URL>` |
 | `fonts` | Embeds web fonts, from files or from Google Fonts by family name, into a CSS file so a page renders from the filesystem, optionally cut to the characters a language uses | `plate fonts [--display block] [--subset latin] [--google FAMILY:WEIGHT:STYLE]... -o fonts.css [FILE:FAMILY:WEIGHT:STYLE]...` |
 | `qr` | Makes a QR code SVG that any phone camera decodes | `plate qr [--ec L\|M\|Q\|H] [--fg RRGGBB] [--bg RRGGBB] -o out.svg <text>` |
 | `doctor` | Checks every engine against its pin, installs the ones plate manages, and prints the install command for the rest | `plate doctor [--install]` |
@@ -193,12 +194,37 @@ recording leaves an earlier run's files in place; any later failure leaves
 none for that name, and new files are moved in only once every check has
 passed.
 
-`render` runs the page outside Chrome's sandbox with open network access. A
-local page, and any script it runs, including one loaded from the network,
-can read any file you can by absolute path through plate's proxy; a remote
-page cannot. The proxy listens on loopback for the render's duration, so
-another account on the machine could reach it too. Give it only pages you
-trust.
+`animate` writes `<name>.<ext>` into `--out` for each `--format` (default
+`mp4`), named for the page unless `--name` says otherwise, plus
+`<name>.json` in `clip render`'s shape without the trim: size, frame rate,
+frame count and duration, each file's size, its sharpness and loop-seam
+scores, and how many frames at each end closing the loop changed. It prints
+`wrote <path> (<bytes> bytes)` for each file, or `unchanged <name>` when
+nothing the page loaded and no output has changed since its last success
+(`--force` captures anyway). The page's animation runs on plate's clock:
+CSS, Web Animations, requestAnimationFrame, timers, SVG and video,
+frame-exact. Frame n is the page at n/`--fps` s (default 30, up to 120),
+for `--duration` × `--fps` frames, at `--size` × `--scale` px; the poster
+is the last frame. `--budget` (default 5000 ms) is how long the page may
+take to settle before the first frame. `--loop` defaults to `none`;
+`crossfade` and `dip` close the loop as `clip render`'s do. Encodes,
+sharpness and `--budget-kb` are as `clip render`'s.
+
+`animate` refuses before Chrome starts an MP4 or WebM with an odd pixel
+side, an fps outside 1 to 120, or a duration under two frames. It refuses
+a page that does not settle within `--budget` (naming what is pending), a
+page that throws, a video that cannot play, a cross-origin iframe, a frame
+that does not finish within `--budget` plus 5 s, a page whose every frame
+is one colour, a page where no frame differs from the first, and a last
+frame whose markup contains a `--fail-if` string. Any failure leaves none
+of its files for that name.
+
+`render` and `animate` run the page outside Chrome's sandbox with open
+network access. A local page, and any script it runs, including one loaded
+from the network, can read any file you can by absolute path through
+plate's proxy; a remote page cannot. The proxy listens on loopback for the
+render's duration, so another account on the machine could reach it too.
+Give them only pages you trust.
 
 ⚠ These commands create pixels the source never had. A project that forbids
 this puts `synthesis = "forbid"` in a `plate.toml`, and they refuse to run.

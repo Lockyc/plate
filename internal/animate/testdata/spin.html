@@ -1,0 +1,14 @@
+<!doctype html>
+<style>body { margin: 0; } #b { width: 40px; height: 40px; background: #c33; animation: slide 2s linear forwards; }
+@keyframes slide { to { transform: translateX(500px); } }</style>
+<div id="b"></div>
+<script>
+  // From 500 ms, two zero-length animations restart each other as each finishes.
+  setTimeout(() => {
+    const el = document.getElementById("b");
+    const a = el.animate([{ opacity: 1 }, { opacity: 1 }], { duration: 0 });
+    const b = el.animate([{ opacity: 1 }, { opacity: 1 }], { duration: 0 });
+    const again = (x, y) => x.finished.then(() => { y.play(); again(y, x); });
+    again(a, b);
+  }, 500);
+</script>

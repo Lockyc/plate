@@ -49,8 +49,8 @@ const (
 // 0, so a caller without its own value passes this.
 const DefaultBudget = 5000
 
-// defaultQuality is --quality's default.
-const defaultQuality = 90
+// DefaultQuality is --quality's default.
+const DefaultQuality = 90
 
 // pdfQuantum is how far, in pt, Chrome's PDF page may sit from the size
 // asked for: it rounds page sizes to multiples of 8 CSS px (6 pt).
@@ -78,7 +78,7 @@ type Options struct {
 	Page           string
 	PNG, PDF, HTML string
 	JPEG           string // the PNG screenshot converted by ImageMagick; needs a size
-	Quality        *int   // the JPEG's quality, 1–100; nil is defaultQuality
+	Quality        *int   // the JPEG's quality, 1–100; nil is DefaultQuality
 	W, H           int
 	Scale          float64
 	Budget         int
@@ -165,7 +165,7 @@ func Run(ctx context.Context, o Options, warn io.Writer) (Result, error) {
 		return Result{}, err
 	}
 	if o.JPEG != "" && o.Quality == nil {
-		q := defaultQuality
+		q := DefaultQuality
 		o.Quality = &q
 	}
 	u, local, query, err := pageURL(o.Page)
@@ -193,7 +193,7 @@ func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	pdfOut := fs.String("pdf", "", "write a PDF here")
 	htmlOut := fs.String("html", "", "write the page's DOM here once scripts settle (a static copy with every script's work done)")
 	jpegOut := fs.String("jpeg", "", "write the screenshot as a JPEG here (needs --size); the PNG is kept only with --png")
-	quality := cli.Int(fs, "quality", defaultQuality, "JPEG quality, 1–100 (needs --jpeg)")
+	quality := cli.Int(fs, "quality", DefaultQuality, "JPEG quality, 1–100 (needs --jpeg)")
 	transparent := fs.Bool("transparent", false, "give the PNG an alpha channel, with the page's transparent areas left transparent rather than white")
 	size := fs.String("size", "", "viewport and expected page size in CSS px, WxH (required with --png)")
 	scale := cli.Float(fs, "scale", 1, "device scale factor; the PNG is size × scale px at 96 × scale dpi")
@@ -313,6 +313,16 @@ func pageURL(arg string) (string, string, string, error) {
 		return "", "", "", err
 	}
 	return (&url.URL{Scheme: "file", Path: abs}).String(), abs, "", nil
+}
+
+// PageAddress is page's canonical address, as a cache key names it: PlateURL
+// of a local page's absolute path and query, or the remote URL.
+func PageAddress(page string) (string, error) {
+	u, local, query, err := pageURL(page)
+	if err != nil {
+		return "", err
+	}
+	return address(u, local, query), nil
 }
 
 // address is the canonical address of what pageURL returned: PlateURL of a
@@ -547,7 +557,7 @@ func (j job) screenshot(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := sentinel(string(res.Stdout), j.failIf); err != nil {
+	if err := Sentinel(string(res.Stdout), j.failIf); err != nil {
 		return err
 	}
 	f, err := os.Open(j.png)
@@ -572,10 +582,14 @@ func (j job) screenshot(ctx context.Context) error {
 
 // convert writes the checked screenshot j.png as the JPEG j.jpeg, stripped
 // of metadata, at j.quality.
-func (j job) convert(ctx context.Context) error {
+func (j job) convert(ctx context.Context) error { return JPEG(ctx, j.png, j.jpeg, j.quality) }
+
+// JPEG converts the PNG png to the JPEG jpeg at quality, stripped of
+// metadata.
+func JPEG(ctx context.Context, png, jpeg string, quality int) error {
 	_, err := engine.Run(ctx, engine.Cmd{Engine: "magick",
-		Args:   []string{j.png, "-strip", "-quality", strconv.Itoa(j.quality), j.jpeg},
-		Inputs: []string{j.png}, Outputs: []string{j.jpeg}, Timeout: 15 * time.Minute})
+		Args:   []string{png, "-strip", "-quality", strconv.Itoa(quality), jpeg},
+		Inputs: []string{png}, Outputs: []string{jpeg}, Timeout: 15 * time.Minute})
 	return err
 }
 
@@ -602,14 +616,14 @@ func (j job) print(ctx context.Context) error {
 		return err
 	}
 	if len(j.failIf) > 0 {
-		if err := sentinel(string(res.Stdout), j.failIf); err != nil {
+		if err := Sentinel(string(res.Stdout), j.failIf); err != nil {
 			return err
 		}
 		text, err := pdf.Text(ctx, j.pdf)
 		if err != nil {
 			return err
 		}
-		if err := sentinel(text, j.failIf); err != nil {
+		if err := Sentinel(text, j.failIf); err != nil {
 			return err
 		}
 	}
@@ -652,7 +666,7 @@ func (j job) dump(ctx context.Context) error {
 	if !strings.HasSuffix(dom, "</html>") {
 		return fmt.Errorf("Chrome produced no complete page (%d bytes, no closing </html>)", len(dom))
 	}
-	if err := sentinel(dom, j.failIf); err != nil {
+	if err := Sentinel(dom, j.failIf); err != nil {
 		return err
 	}
 	return os.WriteFile(j.html, []byte(dom), 0o644)
@@ -683,7 +697,8 @@ func (j job) chromeRun(ctx context.Context, c engine.Cmd) (engine.Result, error)
 	return res, nil
 }
 
-func sentinel(text string, failIf []string) error {
+// Sentinel refuses text that contains any of the --fail-if strings.
+func Sentinel(text string, failIf []string) error {
 	for _, s := range failIf {
 		if strings.Contains(text, s) {
 			return fmt.Errorf("the rendered page contains %q", s)
