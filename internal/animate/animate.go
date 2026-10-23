@@ -129,7 +129,10 @@ func (o Options) Validate() error {
 	if o.Out == "" {
 		return usageError("--out is required")
 	}
-	if n := o.name(); n == "" || strings.ContainsAny(n, `/\`) || strings.HasPrefix(n, ".") {
+	if o.name() == "" {
+		return usageError("the page gives no file name; pass --name")
+	}
+	if n := o.name(); strings.ContainsAny(n, `/\`) || strings.HasPrefix(n, ".") {
 		return usageError(fmt.Sprintf("--name %q: want a file name, not a path or a dot file", n))
 	}
 	if o.PNG != "" && o.JPEG != "" && engine.SameFile(o.PNG, o.JPEG) {
@@ -269,13 +272,14 @@ func (o Options) capture(ctx context.Context, l render.Load) (_ video.Measuremen
 		DurationMS: float64(len(refs)) * 1000 / float64(o.FPS), Formats: map[string]video.FormatResult{},
 		LoopHeadFrames: lc.Head, LoopTailFrames: lc.Tail}
 	// The last frame the loop close left as it was: the poster and the stills.
-	last := refs[len(refs)-1-lc.Tail]
+	poster := len(refs) - 1 - lc.Tail
+	last := refs[poster]
 	var files []string
 	for _, f := range o.Formats {
 		file := name + "." + video.Ext(f)
 		p := filepath.Join(tmp, file)
 		if f == "poster" {
-			err = video.Poster(refs, len(refs)-1-lc.Tail, p)
+			err = video.Poster(refs, poster, p)
 		} else {
 			err = video.Encode(ctx, f, refDir, o.FPS, pw, ph, p)
 		}
@@ -352,17 +356,29 @@ func (o Options) capture(ctx context.Context, l render.Load) (_ video.Measuremen
 }
 
 // shoot opens the page on plate's clock and writes frame n, at n/fps, to
-// r%05d.png in dir, then holds the last frame's markup to FailIf. A frame
-// gets the budget and frameSlack to seek and capture: a page can keep
+// r%05d.png in dir, then holds the last frame's markup to FailIf. Opening
+// the page, and each frame's seek and capture, get the budget and
+// frameSlack: a page can keep
 // Chrome itself busy, which no wait inside the page can see.
 func (o Options) shoot(ctx context.Context, l render.Load, dir string) ([]string, error) {
 	budget := time.Duration(o.Budget) * time.Millisecond
-	c, err := Open(ctx, l, o.W, o.H, o.Scale, budget)
+	wait := budget + frameSlack
+	// Chrome lives as long as the context it starts with, so Open's bound
+	// cancels that context only when the bound passes, never once Open is done.
+	cctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	late := time.AfterFunc(wait, cancel)
+	c, err := Open(cctx, l, o.W, o.H, o.Scale, budget)
+	if !late.Stop() && ctx.Err() == nil {
+		if err == nil {
+			c.Close()
+		}
+		return nil, fmt.Errorf("page did not open within %d ms", wait.Milliseconds())
+	}
 	if err != nil {
 		return nil, err
 	}
 	defer c.Close()
-	wait := budget + frameSlack
 	refs := make([]string, o.frames())
 	for n := range refs {
 		refs[n] = filepath.Join(dir, fmt.Sprintf("r%05d.png", n))

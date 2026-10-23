@@ -46,6 +46,8 @@ func TestValidate(t *testing.T) {
 		{"no out", func(o *Options) { o.Out = "" }, "--out"},
 		{"too big", func(o *Options) { o.W, o.H = 20000, 20000 }, "verified whole"},
 		{"name with slash", func(o *Options) { o.Name = "a/b" }, "--name"},
+		{"page without a name", func(o *Options) { o.Page = "https://example.com/" }, "the page gives no file name; pass --name"},
+		{"named page URL", func(o *Options) { o.Page, o.Name = "https://example.com/", "ad" }, ""},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			o := opts(t, "testdata/css.html")
@@ -222,6 +224,20 @@ func TestRunRefusesFrameThatNeverFinishes(t *testing.T) {
 	_, _, err := run(t, o)
 	if err == nil || !strings.Contains(err.Error(), "frame 15 did not finish within") {
 		t.Fatalf("Run = %v, want frame 15 refused", err)
+	}
+	if d := time.Since(start); d > time.Minute {
+		t.Errorf("the refusal took %v", d)
+	}
+}
+
+func TestRunRefusesPageThatNeverOpens(t *testing.T) {
+	needEngines(t)
+	o := opts(t, "testdata/busy.html")
+	o.Budget = 500
+	start := time.Now()
+	_, _, err := run(t, o)
+	if err == nil || !strings.Contains(err.Error(), "page did not open within 5500 ms") {
+		t.Fatalf("Run = %v, want the open refused", err)
 	}
 	if d := time.Since(start); d > time.Minute {
 		t.Errorf("the refusal took %v", d)

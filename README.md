@@ -204,8 +204,9 @@ nothing the page loaded and no output has changed since its last success
 (`--force` captures anyway). The page's animation runs on plate's clock:
 CSS, Web Animations, requestAnimationFrame, timers, SVG and video,
 frame-exact. Frame n is the page at n/`--fps` s (default 30, up to 120),
-for `--duration` × `--fps` frames, at `--size` × `--scale` px; the poster
-is the last frame. `--budget` (default 5000 ms) is how long the page may
+for `--duration` × `--fps` frames, at `--size` × `--scale` px. The last
+frame, the poster, is the page at `--duration` − 1/`--fps` s, so an ending
+meant for the poster holds for at least a frame. `--budget` (default 5000 ms) is how long the page may
 take to settle before the first frame. `--loop` defaults to `none`;
 `crossfade` and `dip` close the loop as `clip render`'s do. Encodes,
 sharpness and `--budget-kb` are as `clip render`'s.
@@ -213,11 +214,12 @@ sharpness and `--budget-kb` are as `clip render`'s.
 `animate` refuses before Chrome starts an MP4 or WebM with an odd pixel
 side, an fps outside 1 to 120, or a duration under two frames. It refuses
 a page that does not settle within `--budget` (naming what is pending), a
-page that throws, a video that cannot play, a cross-origin iframe, a frame
+page that does not open within `--budget` plus 5 s, a page that throws, a video that cannot play, a cross-origin iframe, a frame
 that does not finish within `--budget` plus 5 s, a page whose every frame
 is one colour, a page where no frame differs from the first, and a last
-frame whose markup contains a `--fail-if` string. Any failure leaves none
-of its files for that name.
+frame whose markup contains a `--fail-if` string. A refusal before Chrome
+starts leaves an earlier run's files in place; a capture that fails leaves
+none of its files for that name.
 
 `render` and `animate` run the page outside Chrome's sandbox with open
 network access. A local page, and any script it runs, including one loaded
@@ -226,8 +228,9 @@ plate's proxy; a remote page cannot. The proxy listens on loopback for the
 render's duration, so another account on the machine could reach it too.
 Give them only pages you trust.
 
-⚠ These commands create pixels the source never had. A project that forbids
-this puts `synthesis = "forbid"` in a `plate.toml`, and they refuse to run.
+⚠ `inpaint`, `infill` and `upscale` create pixels the source never had. A
+project that forbids this puts `synthesis = "forbid"` in a `plate.toml`, and
+they refuse to run.
 
 ## Install
 
