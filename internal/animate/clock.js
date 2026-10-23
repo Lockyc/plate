@@ -432,6 +432,9 @@
 
   const srcOf = (el) =>
     el.getAttribute("src") || el.querySelector("source")?.getAttribute("src") || el.currentSrc;
+  // unready names a video without a frame, marking preload="none": plate
+  // never plays a video natively, so such a video never loads.
+  const unready = (el) => srcOf(el) + (el.preload === "none" ? ' (preload="none")' : "");
 
   // ready resolves true once el has a frame to show (or an error to
   // report), false after budget ms.
@@ -547,7 +550,7 @@
       errors: [...document.querySelectorAll("video")]
         .filter((v) => v.error)
         .map((v) => ({ src: srcOf(v), code: v.error.code })),
-      stalled: [...stalled].map(srcOf),
+      stalled: [...stalled].map(unready),
       crossOrigin: [],
     };
     for (const f of document.querySelectorAll("iframe")) {
@@ -575,7 +578,7 @@
     if (document.fonts.status !== "loaded") p.push("fonts");
     for (const img of document.images) if (!img.complete) p.push("img " + (img.currentSrc || img.src));
     for (const v of document.querySelectorAll("video")) {
-      if (!v.error && v.readyState < 2) p.push("video " + srcOf(v));
+      if (!v.error && v.readyState < 2) p.push("video " + unready(v));
     }
     for (const f of document.querySelectorAll("iframe")) {
       try {
