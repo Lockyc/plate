@@ -176,10 +176,13 @@ colours, or renders what it is given.
 - **animate** — a page's own animation, captured frame by frame on a clock
   plate owns, and encoded as `clip` encodes. Generic: the scene, its
   styles and its copy are the consuming project's HTML, CSS and JS; plate
-  ships no animation styles. `plate animate --size WxH --duration S
-  [--fps N] [--format mp4,webm,poster,webp,gif] [--budget-kb N] [--loop
-  none|crossfade|dip] --out DIR [--name N] <page>`; `--fps` defaults to 30,
-  `--loop` to `none`, since an ad has an end; the poster is the last frame.
+  ships no animation styles. `plate animate --size WxH [--scale F]
+  --duration S [--fps N] [--format mp4,webm,poster,webp,gif] [--budget-kb N] [--loop
+  none|crossfade|dip] [--budget MS] --out DIR [--name N] <page>`; `--fps`
+  defaults to 30, `--loop` to `none`, since an ad has an end; the poster is
+  the last frame. `--scale` is the device scale factor, as in `render`: the
+  video is WxH × scale pixels. `--budget` is render's settle wait, spent
+  once, before frame 0.
   - *The clock.* Before any page script runs
     (`Page.addScriptToEvaluateOnNewDocument`, every frame of the page),
     plate replaces `performance.now`, `Date`, `requestAnimationFrame`,
@@ -189,7 +192,13 @@ colours, or renders what it is given.
     `document.getAnimations()` entry (CSS animations and transitions, the
     Web Animations API, pseudo-elements included) is paused at that time,
     SVG documents get `setCurrentTime`, and every `<video>` is paused and
-    seeked, the frame waiting on each `seeked`; then `Page.captureScreenshot`.
+    seeked to its own media time, the frame waiting on each `seeked`; then
+    `Page.captureScreenshot`. The clock keeps each video's media time as a
+    browser would: the shim takes over `play()`, `pause()`, `currentTime`,
+    `loop`, `playbackRate` and `autoplay`, so a video the page starts at
+    4 s, from partway in, looping or hidden and shown by its own script,
+    captures as it plays in a browser, and a page needs no plate-specific
+    markup.
     Frame 0 waits for the load event, `document.fonts.ready` and no pending
     loads. This is the one route that is exact on macOS: Chrome refuses
     `HeadlessExperimental.beginFrame` there ("BeginFrameControl is not
@@ -215,9 +224,14 @@ colours, or renders what it is given.
     all identical, which is a page whose animation never ran on plate's
     clock. Its JSON is clip's measurement shape.
   - *Build.* A `plate build` manifest line takes `mp4`, `webm`, `gif`,
-    `webp` and `poster` outputs beside `png`, with options `dur=S` and
-    `fps=N`. On such a line `png` is the last frame of the same capture, so
-    an ad's still and its video always end alike.
+    `webp` and `poster` outputs beside `png` and `jpeg`, with options
+    `dur=S` (which makes it a video line), `fps=N`, `loop=` and
+    `budget-kb=`, and render's `budget=`; `scale` means what it means for
+    a still. On such a line `png` and `jpeg` are the last frame of the same
+    capture, so an ad's still and its video always end alike, and
+    `<name>.json` lands beside them. `pdf`, `html`, `transparent`,
+    `blank-margin`, `2up` and `marks` are refused there: each reads a
+    settled page, which an animation has only at its end.
 - **inpaint, fonts, qr, pdf, impose, marks, doc, slides** — as the README table and each package's
   doc comment describe.
 
