@@ -140,6 +140,7 @@ func (c *Capture) Seek(ctx context.Context, ms float64) error {
 		} `json:"errors"`
 		Stalled     []string `json:"stalled"`
 		CrossOrigin []string `json:"crossOrigin"`
+		Restless    int      `json:"restless"`
 	}
 	c.at = ms
 	err := c.Eval(ctx, fmt.Sprintf("__plate.seek(%s)", jsNumber(ms)), &r)
@@ -155,6 +156,8 @@ func (c *Capture) Seek(ctx context.Context, ms float64) error {
 		return fmt.Errorf("video %s cannot play: MediaError %d", r.Errors[0].Src, r.Errors[0].Code)
 	case len(r.Stalled) > 0:
 		return fmt.Errorf("video %s not ready after %d ms at %.0f ms", r.Stalled[0], c.budget.Milliseconds(), ms)
+	case r.Restless > 0:
+		return fmt.Errorf("page still starting animations, media seeks or timers after %d passes at %.0f ms", r.Restless, ms)
 	}
 	return nil
 }

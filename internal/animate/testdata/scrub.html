@@ -1,0 +1,12 @@
+<!doctype html>
+<div id="a"></div><div id="b"></div>
+<script>
+  const kf = [{ opacity: 0 }, { opacity: 1 }];
+  window.running = document.getElementById("a").animate(kf, { duration: 5000 });
+  window.held = document.getElementById("b").animate(kf, { duration: 5000 });
+  window.held.pause();
+  setTimeout(() => {
+    window.running.currentTime = 600;
+    window.held.currentTime = 600;
+  }, 500);
+</script>

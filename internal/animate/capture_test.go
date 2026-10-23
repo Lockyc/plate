@@ -654,3 +654,73 @@ func TestCapturePixelsMatchClock(t *testing.T) {
 		wantNear(t, fmt.Sprintf("transition red at %.0f ms", at(n)), r, 255-204*o, 3)
 	}
 }
+
+func TestClockReversedAnimation(t *testing.T) {
+	type st struct {
+		Time   float64
+		Events int
+	}
+	err := withCapture(t, "testdata/reverse.html", 100, 100, testBudget, func(ctx context.Context, c *Capture) error {
+		check := func(time float64, events int) func(st) {
+			return func(s st) {
+				if math.Abs(s.Time-time) > 1e-6 || s.Events != events {
+					t.Errorf("got %+v, want time %v, %d finish events", s, time, events)
+				}
+			}
+		}
+		return evalAt(t, c, ctx, 30, `({Time: window.anim.currentTime ?? -1, Events: window.finishEvents})`,
+			map[int]func(st){0: check(1000, 0), 15: check(500, 0), 30: check(0, 1)})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestClockPageSetsAnimationTime(t *testing.T) {
+	type st struct{ Running, Held float64 }
+	err := withCapture(t, "testdata/scrub.html", 100, 100, testBudget, func(ctx context.Context, c *Capture) error {
+		check := func(want st) func(st) {
+			return func(s st) {
+				if math.Abs(s.Running-want.Running) > 1e-6 || math.Abs(s.Held-want.Held) > 1e-6 {
+					t.Errorf("got %+v, want %+v", s, want)
+				}
+			}
+		}
+		return evalAt(t, c, ctx, 30, `({Running: window.running.currentTime, Held: window.held.currentTime})`,
+			map[int]func(st){14: check(st{at(14), 0}), 15: check(st{600, 600}), 30: check(st{1100, 600})})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCaptureRefusesRestlessPage(t *testing.T) {
+	err := withCapture(t, sourceVideo(t, "restless.html"), 100, 100, testBudget, func(ctx context.Context, c *Capture) error {
+		return c.Seek(ctx, 0)
+	})
+	if err == nil || !strings.Contains(err.Error(), "still starting animations, media seeks or timers after 20 passes at 0 ms") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestClockTimerFromFinishHandler(t *testing.T) {
+	type st struct {
+		N    int
+		Time float64
+	}
+	err := withCapture(t, "testdata/finishtimer.html", 200, 100, testBudget, func(ctx context.Context, c *Capture) error {
+		return evalAt(t, c, ctx, 30,
+			`(() => { const a = document.getElementById("b").getAnimations(); return {N: a.length, Time: a[0]?.currentTime ?? -1}; })()`,
+			map[int]func(st){
+				15: func(s st) {
+					if s.N != 1 || s.Time != 0 {
+						t.Errorf("at 500 ms: %+v, want the chained animation held at 0", s)
+					}
+				},
+				30: func(s st) { wantNear(t, "chained time at 1000 ms", s.Time, 500, 1e-6) },
+			})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}

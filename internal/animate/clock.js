@@ -79,7 +79,7 @@
       for (const t of timers.values()) {
         if (t.at <= now && (!next || t.at < next.at || (t.at === next.at && t.id < next.id))) next = t;
       }
-      if (!next) return;
+      if (!next) return runs > 0;
       if (runs === maxTimerRuns) throw new Error(`timers still due after ${maxTimerRuns} runs at ${now} ms`);
       if (next.every) next.at += next.every;
       else timers.delete(next.id);
@@ -99,31 +99,130 @@
   const nativePause = proto.pause;
   const nativePlay = proto.play;
   const nativeFinish = proto.finish;
-  // animation -> {start: clock ms its time 0 sits at, paused, heldAt, done}
+  const nativeReverse = proto.reverse;
+  const nativeUpdateRate = proto.updatePlaybackRate;
+  const nativeCurrent = Object.getOwnPropertyDescriptor(proto, "currentTime");
+  const nativeAnimRate = Object.getOwnPropertyDescriptor(proto, "playbackRate");
+  const current = (a) => nativeCurrent.get.call(a) || 0;
+  const setCurrent = (a, v) => nativeCurrent.set.call(a, v);
+  // animation -> {anchorClock, anchorTime: its time at anchorClock, rate,
+  // paused, heldAt: a paused one's time, done: finished natively, seen: held
+  // before}. rate is kept here because Chrome defers a rate change on a
+  // pending animation, reading the old one until it is ready.
   const recs = new WeakMap();
+  // Every animation recorded, since getAnimations() leaves out one sitting
+  // on its edge, such as a reversed one at its end, or one of no duration,
+  // finished as it is made.
+  const known = new Set();
   const pagePaused = new WeakSet();
-  const timeOf = (a, r) => (now - r.start) * a.playbackRate;
+  const record = (a, clock, time, rate = nativeAnimRate.get.call(a)) => {
+    const r = { anchorClock: clock, anchorTime: time, rate, paused: false, heldAt: 0, done: false, seen: false };
+    recs.set(a, r);
+    known.add(a);
+    return r;
+  };
+  const nativeAnimate = Element.prototype.animate;
+  Element.prototype.animate = function (...args) {
+    const a = nativeAnimate.apply(this, args);
+    record(a, now, 0);
+    return a;
+  };
+  const animations = () => {
+    const all = new Set(document.getAnimations());
+    for (const a of known) {
+      // A finished one comes back through play() or a currentTime set.
+      if (a.playState === "idle" || recs.get(a)?.done) known.delete(a);
+      else all.add(a);
+    }
+    return all;
+  };
+  const timeOf = (r) => r.anchorTime + (now - r.anchorClock) * r.rate;
+  // timeNow is a's time on the clock right now.
+  const timeNow = (a, r) => (r.paused ? r.heldAt : r.done ? current(a) : timeOf(r));
+  const reanchor = (a, r, time) => {
+    r.anchorTime = time;
+    r.anchorClock = now;
+    if (r.paused) r.heldAt = time;
+    if (r.done) {
+      r.done = false;
+      r.seen = false;
+      known.add(a);
+    }
+  };
+  const endOf = (a) => (a.effect ? a.effect.getComputedTiming().endTime : Infinity);
   proto.pause = function () {
-    const r = recs.get(this);
-    if (r && !r.paused) {
-      r.heldAt = r.done ? this.currentTime : timeOf(this, r);
+    const r = recs.get(this) || record(this, now, current(this));
+    if (!r.paused) {
+      r.heldAt = timeNow(this, r);
       r.paused = true;
       r.done = false;
+      known.add(this);
     }
     pagePaused.add(this);
     return nativePause.call(this);
   };
   proto.play = function () {
     pagePaused.delete(this);
-    // play() on a finished animation restarts it, as a new one.
-    if (recs.get(this)?.done) recs.delete(this);
-    return nativePlay.call(this);
+    const r = recs.get(this);
+    const out = nativePlay.call(this);
+    // play() on a finished animation restarts it from its start (or its
+    // end, reversed), which native play has just set.
+    if (r?.done) record(this, now, current(this), r.rate);
+    return out;
   };
   proto.finish = function () {
     const r = recs.get(this);
     if (r) r.done = true;
     return nativeFinish.call(this);
   };
+  proto.reverse = function () {
+    const r = recs.get(this);
+    const time = r ? timeNow(this, r) : current(this);
+    const rate = -(r ? r.rate : nativeAnimRate.get.call(this));
+    pagePaused.delete(this);
+    const out = nativeReverse.call(this);
+    // reverse() at an edge rewinds to the other one.
+    const end = endOf(this);
+    const from = rate < 0 && time <= 0 ? end : rate > 0 && time >= end ? 0 : time;
+    if (r) {
+      r.paused = false;
+      reanchor(this, r, from);
+      r.rate = rate;
+    } else {
+      record(this, now, from, rate);
+    }
+    return out;
+  };
+  const rateChange = (a, rate) => {
+    const r = recs.get(a);
+    if (!r) return;
+    if (!r.paused && !r.done) reanchor(a, r, timeOf(r));
+    r.rate = rate;
+  };
+  proto.updatePlaybackRate = function (rate) {
+    rateChange(this, Number(rate));
+    return nativeUpdateRate.call(this, rate);
+  };
+  Object.defineProperty(proto, "currentTime", {
+    configurable: true,
+    enumerable: true,
+    get: nativeCurrent.get,
+    set(v) {
+      const r = recs.get(this);
+      if (r) reanchor(this, r, Number(v));
+      else if (v !== null) record(this, now, Number(v));
+      setCurrent(this, v);
+    },
+  });
+  Object.defineProperty(proto, "playbackRate", {
+    configurable: true,
+    enumerable: true,
+    get: nativeAnimRate.get,
+    set(v) {
+      rateChange(this, Number(v));
+      nativeAnimRate.set.call(this, v);
+    },
+  });
   const cssPaused = (a) => {
     if (!(a instanceof CSSAnimation) || !a.effect?.target) return false;
     const cs = getComputedStyle(a.effect.target, a.effect.pseudoElement);
@@ -136,49 +235,48 @@
   const holdAnimations = async (first) => {
     const held = [];
     const entering = [];
-    for (const a of document.getAnimations()) {
-      let r = recs.get(a);
-      const fresh = !r;
-      if (fresh) {
-        r = { start: first ? 0 : now, paused: false, heldAt: 0, done: false };
-        recs.set(a, r);
-      }
+    for (const a of animations()) {
+      const r = recs.get(a) || record(a, first ? 0 : now, 0);
+      const fresh = !r.seen;
+      r.seen = true;
       if (r.done) continue;
       if (pagePaused.has(a) || cssPaused(a)) {
         if (!r.paused) {
-          r.heldAt = fresh ? a.currentTime || 0 : timeOf(a, r);
+          r.heldAt = fresh ? current(a) : timeOf(r);
           r.paused = true;
         }
-        a.currentTime = r.heldAt;
+        setCurrent(a, r.heldAt);
         continue;
       }
       if (r.paused) {
-        r.start = now - r.heldAt / (a.playbackRate || 1);
+        r.anchorTime = r.heldAt;
+        r.anchorClock = now;
         r.paused = false;
         entering.push(a);
       } else if (fresh) {
         entering.push(a);
       }
       nativePause.call(a);
+      if (nativeAnimRate.get.call(a) !== r.rate) nativeAnimRate.set.call(a, r.rate);
       held.push(a);
     }
     // Chrome's compositor keeps a newly paused animation where it was
     // running when the first time set is 0; a painted other time first
     // makes it take the real one.
     if (entering.length) {
-      for (const a of entering) a.currentTime = timeOf(a, recs.get(a)) + 1;
+      for (const a of entering) setCurrent(a, timeOf(recs.get(a)) + 1);
       await painted();
     }
     const finishing = [];
     for (const a of held) {
       const r = recs.get(a);
-      const t = timeOf(a, r);
-      const end = a.effect ? a.effect.getComputedTiming().endTime : Infinity;
-      if ((a.playbackRate > 0 && t >= end) || (a.playbackRate < 0 && t <= 0)) {
+      const t = timeOf(r);
+      const end = endOf(a);
+      if ((r.rate > 0 && t >= end) || (r.rate < 0 && t <= 0)) {
         r.done = true;
         finishing.push(a);
       } else {
-        a.currentTime = t;
+        setCurrent(a, t);
       }
     }
     for (const a of finishing) nativeFinish.call(a);
@@ -388,20 +486,27 @@
   };
 
   // Page code a seek runs (timers, events, finished promises) can start
-  // more media or animations, so the steps repeat until nothing changes.
+  // more timers, media or animations, so the steps repeat until nothing
+  // changes; a page still changing after maxPasses is restless.
   const maxPasses = 20;
   const seekFrame = async (t, first) => {
     now = t;
     fireTimers();
     runFrames();
     const stalled = new Set();
+    let restless = true;
     for (let pass = 0; pass < maxPasses; pass++) {
       const moved = await syncMedia(stalled);
       syncSVGs(first);
       const began = await holdAnimations(first);
-      if (!moved && !began) break;
+      const fired = fireTimers();
+      if (!moved && !began && !fired) {
+        restless = false;
+        break;
+      }
     }
     const out = {
+      restless: restless ? maxPasses : 0, // the passes run, when restless
       errors: [...document.querySelectorAll("video")]
         .filter((v) => v.error)
         .map((v) => ({ src: srcOf(v), code: v.error.code })),
@@ -421,6 +526,7 @@
       out.errors.push(...r.errors);
       out.stalled.push(...r.stalled);
       out.crossOrigin.push(...r.crossOrigin);
+      out.restless = Math.max(out.restless, r.restless);
     }
     return out;
   };
