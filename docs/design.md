@@ -108,11 +108,12 @@ colours, or renders what it is given.
   `--height` sets the working size, and it must never be smaller than the
   largest size the cut-out will be drawn at.
 - **render** — a local page loads from `render.plateHost` through a
-  loopback proxy (`render.server`) that records each file it serves, with the
-  sha256 of the bytes sent, and each path that was absent; other hosts are
-  forwarded and recorded. Those loads are the cache's inputs: a successful
-  render writes a `render.record` under `$XDG_CACHE_HOME/plate/render/`, named
-  by `render.cacheKey`, and the next run with that key skips Chrome while
+  loopback proxy (`render.server`) that reads each path once, recording the
+  sha256 of the bytes it serves from then on, or that it was absent; other
+  hosts are forwarded and recorded. Those loads are the cache's inputs:
+  through `render.Cached`, a successful run writes a `render.record` under
+  `$XDG_CACHE_HOME/plate/render/`, named by `render.cacheKey`, and the next
+  run with that key skips Chrome while
   every input and output keeps its hash. A remote page or an external load is
   never cached, nor are `render.PDF` and `render.PNG`. Each output is written,
   checked and hashed under a temp name beside it, then renamed in. The checks:

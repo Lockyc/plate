@@ -57,9 +57,9 @@ const defaultQuality = 90
 const pdfQuantum = 6.0
 
 type job struct {
-	url, local  string // url is the remote page, or the file URL before run swaps in the proxied one
-	query       string // the local page's "?…", kept
-	proxy       string // the --proxy-server flag, set by run for a local page
+	local       string   // the local page, "" for a remote one
+	url         string   // the page as Chrome loads it, set by run from its Load
+	args        []string // the Load's base flags, set by run
 	png, pdf    string
 	html, jpeg  string
 	quality     int
@@ -154,13 +154,9 @@ func (o Options) Validate() error {
 	return nil
 }
 
-// Run renders o through the render cache: when the record of its last
-// success still matches every file it loaded and every file it wrote, the
-// render is skipped without starting Chrome and skipped is true. Force
-// renders regardless and still records. A remote page, a page that reached
-// another host, or a file that changed while it was served leaves no
-// record, so it renders every time. The old record goes before Chrome
-// starts, so a render that fails or is killed never leaves one behind.
+// Run renders o through Cached, so an unchanged render is skipped without
+// starting Chrome. Its key is o with the page canonical, outputs absolute
+// and Force left out, since Force only says whether to look.
 //
 // Only the CLI goes through Run; the library entry points PDF and PNG stay
 // uncached.
@@ -176,72 +172,18 @@ func Run(ctx context.Context, o Options, warn io.Writer) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	j := job{url: u, local: local, query: query, png: o.PNG, pdf: o.PDF, html: o.HTML, jpeg: o.JPEG, quality: qualityOf(o), transparent: o.Transparent,
+	key := o
+	key.Page, key.Force = address(u, local, query), false
+	for _, p := range []*string{&key.PNG, &key.PDF, &key.HTML, &key.JPEG} {
+		if *p != "" {
+			if *p, err = filepath.Abs(*p); err != nil {
+				return Result{}, err
+			}
+		}
+	}
+	j := job{local: local, png: o.PNG, pdf: o.PDF, html: o.HTML, jpeg: o.JPEG, quality: qualityOf(o), transparent: o.Transparent,
 		w: o.W, h: o.H, scale: o.Scale, budget: o.Budget, blankMargin: o.BlankMargin, failIf: o.FailIf, warn: warn}
-	cacheWarn := func(err error) { fmt.Fprintf(warn, "plate render: warning: render cache: %v\n", err) }
-	page := u
-	if local != "" {
-		page = PlateURL(local, query)
-	}
-	key, err := cacheKey(o, page)
-	if err != nil {
-		// No key, no record to trust or keep: render uncached.
-		cacheWarn(err)
-		loads, _, runErr := j.run(ctx)
-		if runErr != nil {
-			return Result{}, runErr
-		}
-		return Result{Outcome: Uncacheable, Reason: "no cache key: " + err.Error(), Inputs: loads.paths()}, nil
-	}
-	var outs []string
-	for _, p := range o.Outputs() {
-		abs, err := filepath.Abs(p)
-		if err != nil {
-			return Result{}, err
-		}
-		outs = append(outs, abs)
-	}
-	if local != "" && !o.Force {
-		if r, ok := loadRecord(key); ok && r.writes(outs) && r.current() {
-			return Result{Outcome: Unchanged, Inputs: r.inputPaths()}, nil
-		}
-	}
-	if err := dropRecord(key); err != nil {
-		cacheWarn(err)
-	}
-	loads, hashes, err := j.run(ctx)
-	if err != nil {
-		return Result{}, err
-	}
-	if local == "" {
-		return Result{Outcome: Uncacheable, Reason: "remote page"}, nil
-	}
-	r, why := newRecord(loads, local, hashes)
-	if why != "" {
-		return Result{Outcome: Uncacheable, Reason: why, Inputs: loads.paths()}, nil
-	}
-	if err := saveRecord(key, r); err != nil {
-		cacheWarn(err)
-	}
-	return Result{Outcome: Rendered, Inputs: r.inputPaths()}, nil
-}
-
-// Outcome is what Run did with a render that succeeded.
-type Outcome int
-
-const (
-	Rendered    Outcome = iota // rendered, and recorded for next time
-	Unchanged                  // skipped: nothing it loaded or wrote has changed
-	Uncacheable                // rendered, but no record can vouch for it; Result.Reason says why
-)
-
-// Result is Run's outcome, with the reason when it is Uncacheable.
-type Result struct {
-	Outcome Outcome
-	Reason  string
-	// Inputs is every local file the page loaded or asked for and found
-	// missing, from the record on a skip; nil for a remote page.
-	Inputs []string
+	return Cached(ctx, "render", o.Page, key, key.Outputs(), o.Force, warn, j.run)
 }
 
 // Main runs `plate render`.
@@ -303,7 +245,7 @@ func PDF(ctx context.Context, page, out string, warn io.Writer) error {
 	if err != nil {
 		return err
 	}
-	_, _, err = job{url: u, local: local, query: query, pdf: out, scale: 1, budget: DefaultBudget, warn: warn}.run(ctx)
+	_, _, err = loadPage(ctx, u, local, query, job{local: local, pdf: out, scale: 1, budget: DefaultBudget, warn: warn}.run)
 	return err
 }
 
@@ -327,7 +269,7 @@ func pageToPNG(ctx context.Context, page, out string, w, h int, scale float64, t
 	if err != nil {
 		return err
 	}
-	_, _, err = job{url: u, local: local, query: query, png: out, w: w, h: h, scale: scale, transparent: transparent, budget: DefaultBudget, warn: io.Discard}.run(ctx)
+	_, _, err = loadPage(ctx, u, local, query, job{local: local, png: out, w: w, h: h, scale: scale, transparent: transparent, budget: DefaultBudget, warn: io.Discard}.run)
 	return err
 }
 
@@ -373,6 +315,15 @@ func pageURL(arg string) (string, string, string, error) {
 	return (&url.URL{Scheme: "file", Path: abs}).String(), abs, "", nil
 }
 
+// address is the canonical address of what pageURL returned: PlateURL of a
+// local page, or the remote URL.
+func address(u, local, query string) string {
+	if local == "" {
+		return u
+	}
+	return PlateURL(local, query)
+}
+
 // inputs lists the local page as an engine input, so the engine refuses an
 // output that is the page itself.
 func (j job) inputs() []string {
@@ -382,11 +333,8 @@ func (j job) inputs() []string {
 	return []string{j.local}
 }
 
-// run renders the page and returns everything it loaded, the union of every
-// Chrome call, and the sha256 of each output it wrote under its absolute
-// destination. A local page is served through a loopback proxy for the length of
-// the run so each load is recorded; a remote page goes to Chrome directly
-// and loads nothing local.
+// run renders the page as l loads it and returns the sha256 of each output
+// it wrote under its absolute destination.
 //
 // Each output is written and checked under a temporary name beside its
 // destination, hashed there, and only then renamed into place. The hash is
@@ -394,7 +342,8 @@ func (j job) inputs() []string {
 // target with the same output) lands on the destination meanwhile; hashing
 // the destination afterwards would record that writer's bytes under this
 // render's key.
-func (j job) run(ctx context.Context) (_ loadSet, _ []fileHash, err error) {
+func (j job) run(ctx context.Context, l Load) (_ []FileHash, err error) {
+	j.url, j.args = l.URL, l.ChromeArgs
 	var outputs []outFile
 	for _, p := range []*string{&j.png, &j.pdf, &j.html, &j.jpeg} {
 		if *p != "" {
@@ -404,7 +353,7 @@ func (j job) run(ctx context.Context) (_ loadSet, _ []fileHash, err error) {
 	if j.local != "" {
 		for _, o := range outputs {
 			if engine.SameFile(j.local, o.dest) {
-				return loadSet{}, nil, fmt.Errorf("%s is the page being rendered; write the result elsewhere", o.dest)
+				return nil, fmt.Errorf("%s is the page being rendered; write the result elsewhere", o.dest)
 			}
 		}
 	}
@@ -412,7 +361,7 @@ func (j job) run(ctx context.Context) (_ loadSet, _ []fileHash, err error) {
 	// earlier render may sit beside a fresh one.
 	for _, o := range outputs {
 		if err := os.Remove(o.dest); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return loadSet{}, nil, err
+			return nil, err
 		}
 	}
 	// A JPEG without a PNG is converted from a screenshot that is only a
@@ -441,62 +390,47 @@ func (j job) run(ctx context.Context) (_ loadSet, _ []fileHash, err error) {
 			name += ".png"
 		}
 		if outputs[i].tmp, err = tempName(name); err != nil {
-			return loadSet{}, nil, err
+			return nil, err
 		}
 		*outputs[i].slot = outputs[i].tmp
 	}
-	var srv *server
-	if j.local != "" {
-		if srv, err = serve(); err != nil {
-			return loadSet{}, nil, err
-		}
-		defer srv.Close()
-		j.url = PlateURL(j.local, j.query)
-		j.proxy = srv.proxyFlag()
-	}
-	loads := func() loadSet {
-		if srv == nil {
-			return loadSet{}
-		}
-		return srv.loads()
-	}
 	if j.png != "" {
 		if err := j.screenshot(ctx); err != nil {
-			return loads(), nil, err
+			return nil, err
 		}
 	}
 	if j.pdf != "" {
 		if err := j.print(ctx); err != nil {
-			return loads(), nil, err
+			return nil, err
 		}
 	}
 	if j.html != "" {
 		if err := j.dump(ctx); err != nil {
-			return loads(), nil, err
+			return nil, err
 		}
 	}
 	if j.jpeg != "" {
 		if err := j.convert(ctx); err != nil {
-			return loads(), nil, err
+			return nil, err
 		}
 	}
 	if j.blankMargin > 0 {
 		if err := j.checkMargins(ctx); err != nil {
-			return loads(), nil, err
+			return nil, err
 		}
 	}
-	var hashes []fileHash
+	var hashes []FileHash
 	for _, o := range outputs {
 		if o.scratch {
 			continue
 		}
 		abs, err := filepath.Abs(o.dest)
 		if err != nil {
-			return loads(), nil, err
+			return nil, err
 		}
-		h := fileHash{abs, hashFile(o.tmp)}
+		h := FileHash{abs, HashFile(o.tmp)}
 		if h.SHA256 == "" {
-			return loads(), nil, fmt.Errorf("%s vanished before it could be moved to %s", o.tmp, o.dest)
+			return nil, fmt.Errorf("%s vanished before it could be moved to %s", o.tmp, o.dest)
 		}
 		hashes = append(hashes, h)
 	}
@@ -505,10 +439,10 @@ func (j job) run(ctx context.Context) (_ loadSet, _ []fileHash, err error) {
 			continue
 		}
 		if err := os.Rename(o.tmp, o.dest); err != nil {
-			return loads(), nil, err
+			return nil, err
 		}
 	}
-	return loads(), hashes, nil
+	return hashes, nil
 }
 
 // outFile is one output of a run: the destination asked for and the
@@ -556,31 +490,46 @@ func tempName(dest string) (string, error) {
 	return f.Name(), os.Remove(f.Name())
 }
 
-// base is every Chrome call's flags. Never --user-data-dir: with it,
-// headless Chrome hangs after writing the screenshot. --virtual-time-budget
-// fast-forwards timers only on chrome-headless-shell, which is why that is
-// the pinned engine and not full Chrome.
+// baseArgs is every Chrome call's base flags, with proxy the
+// --proxy-server flag for a local page and "" for a remote one. Never
+// --user-data-dir: with it, headless Chrome hangs after writing the
+// screenshot.
 //
 // A local page is an http page on plate's proxy, so there is no
 // --allow-file-access-from-files: it would only let a remote page read local
 // files. Chrome skips a proxy for loopback hosts unless told otherwise, so
 // the bypass list is emptied of them.
-func (j job) base() []string {
-	args := []string{"--headless", "--disable-gpu", "--no-sandbox",
-		"--hide-scrollbars", "--virtual-time-budget=" + strconv.Itoa(j.budget)}
-	if j.proxy != "" {
-		args = append(args, j.proxy, "--proxy-bypass-list=<-loopback>")
+func baseArgs(proxy string) []string {
+	args := []string{"--headless", "--disable-gpu", "--no-sandbox", "--hide-scrollbars"}
+	if proxy != "" {
+		args = append(args, proxy, "--proxy-bypass-list=<-loopback>")
 	}
 	return args
 }
 
-func (j job) screenshot(ctx context.Context) error {
-	fw, fh := math.Round(float64(j.w)*j.scale), math.Round(float64(j.h)*j.scale)
+// base is the Load's flags with the virtual-time budget. That fast-forwards
+// timers only on chrome-headless-shell, which is why that is the pinned
+// engine and not full Chrome.
+func (j job) base() []string {
+	return slices.Concat(j.args, []string{"--virtual-time-budget=" + strconv.Itoa(j.budget)})
+}
+
+// CheckSize refuses a w×h CSS px capture at scale whose pixels go beyond
+// the largest screenshot verified whole.
+func CheckSize(w, h int, scale float64) error {
+	fw, fh := math.Round(float64(w)*scale), math.Round(float64(h)*scale)
 	if fw > maxSide || fh > maxSide || fw*fh > maxPixels {
 		return fmt.Errorf("render would be %gx%g px (%.1f MP), beyond the %dx%d px verified whole on %s; render smaller or at a lower --scale",
 			fw, fh, fw*fh/1e6, maxSide, maxSide, chrome)
 	}
-	pw, ph := int(fw), int(fh)
+	return nil
+}
+
+func (j job) screenshot(ctx context.Context) error {
+	if err := CheckSize(j.w, j.h, j.scale); err != nil {
+		return err
+	}
+	pw, ph := int(math.Round(float64(j.w)*j.scale)), int(math.Round(float64(j.h)*j.scale))
 	args := append(j.base(),
 		"--force-device-scale-factor="+strconv.FormatFloat(j.scale, 'f', -1, 64),
 		fmt.Sprintf("--window-size=%d,%d", j.w, j.h),

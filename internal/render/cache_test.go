@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"image"
 	"image/png"
+	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -66,8 +68,8 @@ func TestCacheRecordsOwnOutput(t *testing.T) {
 	b, _ := os.ReadFile(recs[0])
 	var r record
 	json.Unmarshal(b, &r)
-	if len(r.Outputs) != 1 || r.Outputs[0].SHA256 != hashFile(o.PNG) {
-		t.Errorf("record outputs %+v, want this render's hash %s", r.Outputs, hashFile(o.PNG))
+	if len(r.Outputs) != 1 || r.Outputs[0].SHA256 != HashFile(o.PNG) {
+		t.Errorf("record outputs %+v, want this render's hash %s", r.Outputs, HashFile(o.PNG))
 	}
 	if left, _ := filepath.Glob(filepath.Join(e.dir, ".plate-*")); len(left) != 0 {
 		t.Errorf("temporary files left: %q", left)
@@ -315,7 +317,10 @@ func TestCacheEditDuringRenderRerenders(t *testing.T) {
 	}
 }
 
-func TestCacheUnstableInputNotCached(t *testing.T) {
+// An input edited between two loads in one render is served both times with
+// the bytes first read, so the render is recorded against those bytes and
+// the next run sees the edit.
+func TestCacheReloadServesFirstRead(t *testing.T) {
 	e := cacheEnv(t)
 	css := e.out("a.css")
 	write(t, css, "body{}")
@@ -323,13 +328,78 @@ func TestCacheUnstableInputNotCached(t *testing.T) {
 	// The stub loads FIXTURE_LOADS, runs FIXTURE_AFTER, then loads them again.
 	t.Setenv("FIXTURE_AFTER", "printf 'body{color:red}' > '"+css+"'")
 	t.Setenv("FIXTURE_RELOAD", "1")
-	if res := e.result(t, e.pngOpts()); res.Outcome != Uncacheable || res.Reason != "a file changed while it rendered" {
+	if res := e.result(t, e.pngOpts()); res.Outcome != Rendered {
 		t.Errorf("result %+v", res)
 	}
 	t.Setenv("FIXTURE_AFTER", "")
 	t.Setenv("FIXTURE_RELOAD", "")
 	if e.render(t, e.pngOpts()) {
-		t.Error("a run that served one file with two contents wrote a record")
+		t.Error("skipped although the render saw the old bytes")
+	}
+	if !e.render(t, e.pngOpts()) {
+		t.Error("third run rendered")
+	}
+}
+
+// fetch loads l.URL through the proxy named in l.ChromeArgs, as Chrome would.
+func fetch(t *testing.T, l Load) {
+	t.Helper()
+	var proxy string
+	for _, a := range l.ChromeArgs {
+		if p, ok := strings.CutPrefix(a, "--proxy-server="); ok {
+			proxy = p
+		}
+	}
+	pu, err := url.Parse(proxy)
+	if proxy == "" || err != nil {
+		t.Fatalf("no proxy in %q", l.ChromeArgs)
+	}
+	resp, err := (&http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(pu)}}).Get(l.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+}
+
+// cachedOnce runs Cached for kind with do loading the page and writing out,
+// and reports what Cached returned and whether do ran.
+func cachedOnce(t *testing.T, e *env, kind, out string) (Result, bool) {
+	t.Helper()
+	called := false
+	res, err := Cached(context.Background(), kind, e.page, map[string]int{"fps": 30}, []string{out}, false, &e.stderr,
+		func(ctx context.Context, l Load) ([]FileHash, error) {
+			called = true
+			if slices.ContainsFunc(l.ChromeArgs, func(a string) bool { return strings.HasPrefix(a, "--virtual-time-budget") }) {
+				t.Errorf("ChromeArgs carry a budget: %q", l.ChromeArgs)
+			}
+			fetch(t, l)
+			write(t, out, "frames")
+			return []FileHash{{out, HashFile(out)}}, nil
+		})
+	if err != nil {
+		t.Fatalf("Cached: %v", err)
+	}
+	return res, called
+}
+
+func TestCachedSkipsUnchanged(t *testing.T) {
+	e := cacheEnv(t)
+	out := e.out("a.mp4")
+	if res, called := cachedOnce(t, e, "animate", out); !called || res.Outcome != Rendered || !slices.Equal(res.Inputs, []string{e.page}) {
+		t.Fatalf("first run %+v, do called %v", res, called)
+	}
+	if res, called := cachedOnce(t, e, "animate", out); called || res.Outcome != Unchanged {
+		t.Errorf("second run %+v, do called %v", res, called)
+	}
+}
+
+func TestCachedKindSeparatesKeys(t *testing.T) {
+	e := cacheEnv(t)
+	out := e.out("a.mp4")
+	for _, kind := range []string{"render", "animate"} {
+		if _, called := cachedOnce(t, e, kind, out); !called {
+			t.Errorf("%s: do not called; the other kind's record was used", kind)
+		}
 	}
 }
 
