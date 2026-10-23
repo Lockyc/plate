@@ -420,7 +420,7 @@ func (j job) run(ctx context.Context, l Load) (_ []FileHash, err error) {
 		}
 	}
 	if j.jpeg != "" {
-		if err := j.convert(ctx); err != nil {
+		if err := JPEG(ctx, j.png, j.jpeg, j.quality); err != nil {
 			return nil, err
 		}
 	}
@@ -579,10 +579,6 @@ func (j job) screenshot(ctx context.Context) error {
 	// print size. A CSS px is 1/96 in, so the true density is 96 × scale.
 	return raster.SetDPI(j.png, 96*j.scale)
 }
-
-// convert writes the checked screenshot j.png as the JPEG j.jpeg, stripped
-// of metadata, at j.quality.
-func (j job) convert(ctx context.Context) error { return JPEG(ctx, j.png, j.jpeg, j.quality) }
 
 // JPEG converts the PNG png to the JPEG jpeg at quality, stripped of
 // metadata.
