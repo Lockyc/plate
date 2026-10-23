@@ -808,10 +808,28 @@ func TestCaptureRefusesStringTimer(t *testing.T) {
 
 func TestClockClampsNestedTimers(t *testing.T) {
 	err := withCapture(t, "testdata/nestedtimer.html", 100, 100, testBudget, func(ctx context.Context, c *Capture) error {
-		// The script's call and four nested runs at 0 ms; the fifth waits 4 ms.
-		return evalAt(t, c, ctx, 30, `window.n`, map[int]func(int){0: func(n int) {
-			if n != 5 {
-				t.Errorf("at 0 ms the self-rescheduling timer ran %d times, want 5", n)
+		// The script's call and four nested runs at 0 ms, then one every 4 ms.
+		want := map[int]int{0: 5, 30: 255}
+		check := func(f int) func(int) {
+			return func(n int) {
+				if n != want[f] {
+					t.Errorf("frame %d: the self-rescheduling timer ran %d times, want %d", f, n, want[f])
+				}
+			}
+		}
+		return evalAt(t, c, ctx, 30, `window.n`, map[int]func(int){0: check(0), 30: check(30)})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestClockClampsRepeatingInterval(t *testing.T) {
+	err := withCapture(t, "testdata/interval.html", 100, 100, testBudget, func(ctx context.Context, c *Capture) error {
+		// Runs at 0, 1, 2 and 3 ms, then every 4 ms: 3 + 4k <= 1000.
+		return evalAt(t, c, ctx, 30, `window.n`, map[int]func(int){30: func(n int) {
+			if n != 253 {
+				t.Errorf("at 1000 ms setInterval(f, 0) ran %d times, want 253", n)
 			}
 		}})
 	})
@@ -820,11 +838,31 @@ func TestClockClampsNestedTimers(t *testing.T) {
 	}
 }
 
+func TestClockTimerRunsAtItsDueTime(t *testing.T) {
+	err := withCapture(t, "testdata/typewriter.html", 100, 100, testBudget, func(ctx context.Context, c *Capture) error {
+		return evalAt(t, c, ctx, 30, `window.log`, map[int]func([]float64){30: func(log []float64) {
+			if len(log) != 20 {
+				t.Errorf("a 50 ms chained timer ran %d times by 1000 ms, want 20", len(log))
+			}
+			for i, ms := range log {
+				if want := float64(i+1) * 50; ms != want {
+					t.Errorf("run %d read %v ms, want %v", i, ms, want)
+				}
+			}
+		}})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestCaptureRefusesTimerOverrun seeks once across 1000 s of a clamped
+// setInterval(f, 0): about 250000 runs, past the cap.
 func TestCaptureRefusesTimerOverrun(t *testing.T) {
 	err := withCapture(t, "testdata/interval.html", 100, 100, testBudget, func(ctx context.Context, c *Capture) error {
-		return c.Seek(ctx, 200000)
+		return c.Seek(ctx, 1e6)
 	})
-	if err == nil || !strings.Contains(err.Error(), "timers still due after 100000 runs at 200000 ms") || strings.Contains(err.Error(), "__plate") {
+	if err == nil || !strings.Contains(err.Error(), "timers still due after 100000 runs at 1000000 ms") || strings.Contains(err.Error(), "__plate") {
 		t.Fatalf("err = %v", err)
 	}
 }

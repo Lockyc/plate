@@ -86,23 +86,35 @@
   const maxTimerRuns = 100000;
   // fireTimers runs every due timer and reports whether any ran, or
   // "overrun" when timers are still due after maxTimerRuns.
+  // Each callback runs with the clock at its own due time, so a timer it
+  // sets is due from then, not from the seek; an interval's every run
+  // counts toward its nesting level.
   const fireTimers = () => {
+    const seekAt = now;
     for (let runs = 0; ; runs++) {
       let next;
       for (const t of timers.values()) {
-        if (t.at <= now && (!next || t.at < next.at || (t.at === next.at && t.id < next.id))) next = t;
+        if (t.at <= seekAt && (!next || t.at < next.at || (t.at === next.at && t.id < next.id))) next = t;
       }
       if (!next) return runs > 0;
       if (runs === maxTimerRuns) return "overrun";
-      if (next.every) next.at += next.every;
-      else timers.delete(next.id);
+      const due = next.at;
+      if (next.every) {
+        next.level++;
+        if (next.level >= 5) next.every = Math.max(4, next.every);
+        next.at += next.every;
+      } else {
+        timers.delete(next.id);
+      }
       nesting = next.level;
+      now = due;
       try {
         if (typeof next.cb === "function") next.cb(...next.args);
       } catch (e) {
         report(e);
       } finally {
         nesting = 0;
+        now = seekAt;
       }
     }
   };
