@@ -19,8 +19,8 @@ func TestSheetPNG(t *testing.T) {
 	ref := writeRef(t, filepath.Join(root), "front.png")
 	seedRound(t, pose, 1, "model-one", "a wave", 0.10, 0.10, 0.10, 0.10)
 	seedRound(t, pose, 2, "model-two", "another wave", 0.10)
-	if err := WriteSheet(ctx, pose, []string{ref}); err != nil {
-		t.Fatal(err)
+	if omitted, err := WriteSheet(ctx, pose, []string{ref}); err != nil || omitted != 0 {
+		t.Fatalf("omitted %d, err %v", omitted, err)
 	}
 	for _, name := range []string{"sheet.html", "sheet.png"} {
 		if _, err := os.Stat(filepath.Join(pose, name)); err != nil {

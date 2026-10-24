@@ -148,13 +148,16 @@ func roundMain(ctx context.Context, args []string, stdout, stderr io.Writer) int
 	}
 	// The sheet is a view of what is on disk; failing to draw it leaves the
 	// paid round as it is.
-	if err := writeSheet(ctx, *pose, refs); err != nil {
+	omitted, err := writeSheet(ctx, *pose, refs)
+	if err != nil {
 		fmt.Fprintf(stderr, "plate generate: contact sheet: %v\n", err)
-		code = 1
-	} else {
-		fmt.Fprintln(stdout, filepath.Join(*pose, "sheet.html"))
-		fmt.Fprintln(stdout, filepath.Join(*pose, "sheet.png"))
+		return 1
 	}
+	if omitted > 0 {
+		fmt.Fprintf(stderr, "plate generate: sheet.png shows the newest rounds that fit; the %d older are only in sheet.html\n", omitted)
+	}
+	fmt.Fprintln(stdout, filepath.Join(*pose, "sheet.html"))
+	fmt.Fprintln(stdout, filepath.Join(*pose, "sheet.png"))
 	return code
 }
 

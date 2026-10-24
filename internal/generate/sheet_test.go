@@ -1,6 +1,9 @@
 package generate
 
 import (
+	"context"
+	"errors"
+	"fmt"
 	"image/color"
 	"os"
 	"path/filepath"
@@ -9,6 +12,88 @@ import (
 	"strings"
 	"testing"
 )
+
+// stubShoot replaces the Chrome render with one whose picture is 100 px plus
+// 1000 per round on the page, and writes the page's round count as out.
+func stubShoot(t *testing.T, err error) {
+	t.Helper()
+	prev := shootSheet
+	shootSheet = func(_ context.Context, page, _, out string) (int, error) {
+		if err != nil {
+			return 0, err
+		}
+		b, rerr := os.ReadFile(page)
+		if rerr != nil {
+			return 0, rerr
+		}
+		n := strings.Count(string(b), "<section>")
+		if werr := os.WriteFile(out, []byte(fmt.Sprintf("%d rounds", n)), 0o644); werr != nil {
+			return 0, werr
+		}
+		return 100 + 1000*n, nil
+	}
+	t.Cleanup(func() { shootSheet = prev })
+}
+
+// Past what one picture holds, sheet.png keeps the newest rounds that fit
+// and sheet.html keeps them all.
+func TestSheetPNGKeepsTheNewestRoundsThatFit(t *testing.T) {
+	stubShoot(t, nil)
+	pose := filepath.Join(t.TempDir(), "wave")
+	for r := 1; r <= 20; r++ {
+		seedRound(t, pose, r, "m", "p", 0.10)
+	}
+	omitted, err := WriteSheet(context.Background(), pose, nil)
+	// 100 + 1000*16 is the most under sheetTall.
+	if err != nil || omitted != 4 {
+		t.Fatalf("omitted %d, err %v; want 4", omitted, err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(pose, "sheet.png")); string(b) != "16 rounds" {
+		t.Errorf("sheet.png drew %q, want 16 rounds", b)
+	}
+	h, _ := os.ReadFile(filepath.Join(pose, "sheet.html"))
+	if strings.Count(string(h), "<section>") != 20 || strings.Contains(string(h), "only in sheet.html") {
+		t.Errorf("sheet.html does not hold all 20 rounds unannotated")
+	}
+	es, _ := os.ReadDir(pose)
+	for _, e := range es {
+		if strings.HasPrefix(e.Name(), ".sheet-") {
+			t.Errorf("%s left behind", e.Name())
+		}
+	}
+	// Fewer rounds fit whole.
+	pose2 := filepath.Join(t.TempDir(), "wave")
+	seedRound(t, pose2, 1, "m", "p", 0.10)
+	if omitted, err := WriteSheet(context.Background(), pose2, nil); err != nil || omitted != 0 {
+		t.Errorf("one round: omitted %d, err %v", omitted, err)
+	}
+}
+
+func TestSheetPNGNoteNamesTheOmitted(t *testing.T) {
+	d := sheetData{Omitted: 1}
+	if d.OmittedNote() != "1 older round is only in sheet.html" {
+		t.Errorf("one: %q", d.OmittedNote())
+	}
+	d.Omitted = 4
+	if d.OmittedNote() != "4 older rounds are only in sheet.html" {
+		t.Errorf("four: %q", d.OmittedNote())
+	}
+}
+
+// A render that fails leaves no sheet.png from an earlier run.
+func TestSheetRenderErrorRemovesTheStalePNG(t *testing.T) {
+	stubShoot(t, errors.New("no chrome"))
+	pose := filepath.Join(t.TempDir(), "wave")
+	seedRound(t, pose, 1, "m", "p", 0.10)
+	stale := filepath.Join(pose, "sheet.png")
+	os.WriteFile(stale, []byte("old"), 0o644)
+	if _, err := WriteSheet(context.Background(), pose, nil); err == nil || !strings.Contains(err.Error(), "no chrome") {
+		t.Fatalf("err %v", err)
+	}
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Errorf("stale sheet.png kept: %v", err)
+	}
+}
 
 // seedRound writes a complete round of attempts (image and record) under pose.
 func seedRound(t *testing.T, pose string, round int, model, prompt string, costs ...float64) {

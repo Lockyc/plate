@@ -816,23 +816,38 @@ func TestPoseTotal(t *testing.T) {
 }
 
 // stubSheet replaces the sheet writer, which needs Chrome, with a recorder
-// of the calls it gets; err is what it returns.
-func stubSheet(t *testing.T, err error) *[][]string {
+// of the calls it gets; omitted and err are what it returns.
+func stubSheet(t *testing.T, omitted int, err error) *[][]string {
 	t.Helper()
 	var calls [][]string
 	prev := writeSheet
-	writeSheet = func(_ context.Context, dir string, refs []string) error {
+	writeSheet = func(_ context.Context, dir string, refs []string) (int, error) {
 		calls = append(calls, append([]string{dir}, refs...))
-		return err
+		return omitted, err
 	}
 	t.Cleanup(func() { writeSheet = prev })
 	return &calls
 }
 
+func TestSheetOmittedRoundsAreNamed(t *testing.T) {
+	needMagick(t)
+	googleServer(t, nil)
+	stubSheet(t, 3, nil)
+	dir := t.TempDir()
+	pose := filepath.Join(dir, "wave")
+	code, out, errs := gen(t, "--pose", pose, "--prompt", "p", "--ref", writeRef(t, dir, "front.png"), "--provider", "google")
+	if code != 0 || strings.Count(errs, "\n") != 1 || !strings.Contains(errs, "the 3 older are only in sheet.html") {
+		t.Errorf("code %d, stderr %q; want one line naming the 3 older rounds", code, errs)
+	}
+	if !strings.Contains(out, filepath.Join(pose, "sheet.png")) {
+		t.Errorf("stdout %q lacks the sheet", out)
+	}
+}
+
 func TestSheetAfterEveryRound(t *testing.T) {
 	needMagick(t)
 	googleServer(t, func(i int) bool { return i%2 == 1 })
-	calls := stubSheet(t, nil)
+	calls := stubSheet(t, 0, nil)
 	dir := t.TempDir()
 	pose := filepath.Join(dir, "wave")
 	ref := writeRef(t, dir, "front.png")
@@ -852,7 +867,7 @@ func TestSheetAfterEveryRound(t *testing.T) {
 func TestSheetFailureIsReported(t *testing.T) {
 	needMagick(t)
 	googleServer(t, nil)
-	stubSheet(t, errors.New("no chrome"))
+	stubSheet(t, 0, errors.New("no chrome"))
 	dir := t.TempDir()
 	pose := filepath.Join(dir, "wave")
 	ref := writeRef(t, dir, "front.png")
@@ -871,6 +886,6 @@ func TestSheetFailureIsReported(t *testing.T) {
 // TestMain keeps every test off Chrome: the sheet is stubbed out unless a
 // test asks for the real one.
 func TestMain(m *testing.M) {
-	writeSheet = func(context.Context, string, []string) error { return nil }
+	writeSheet = func(context.Context, string, []string) (int, error) { return 0, nil }
 	os.Exit(m.Run())
 }
