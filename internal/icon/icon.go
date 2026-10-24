@@ -7,8 +7,8 @@
 //
 // Each size is rendered natively by Chrome (render.PNGAlpha) rather than
 // resampled from the largest, so a 16 px icon is the vector drawn at 16 px.
-// The .icns is written here in Go, its entries PNG, so it needs no iconutil
-// and builds on Linux too.
+// The .icns is written here in Go, in the entry codes and formats iconutil
+// writes, so it needs no iconutil and builds on Linux too.
 package icon
 
 import (
@@ -18,6 +18,9 @@ import (
 	"encoding/binary"
 	"fmt"
 	"html/template"
+	"image"
+	"image/color"
+	"image/png"
 	"io"
 	"os"
 	"path/filepath"
@@ -41,16 +44,20 @@ const (
 	Box    = 824
 )
 
-// slot is one .icns entry: its type code and the PNG's side in px. The
-// order is iconutil's.
+// slot is one .icns entry: its type code, its side in px, and whether it
+// holds packed ARGB rather than a PNG. The order is iconutil's, and so are
+// the 16 and 32 px 1x entries' codes and format: macOS reads a PNG in the
+// icp4 and icp5 slots meant for them as noise.
 type slot struct {
 	code string
 	px   int
+	argb bool
 }
 
 var slots = []slot{
-	{"icp4", 16}, {"icp5", 32}, {"ic11", 32}, {"ic12", 64}, {"ic07", 128},
-	{"ic13", 256}, {"ic08", 256}, {"ic14", 512}, {"ic09", 512}, {"ic10", 1024},
+	{"ic12", 64, false}, {"ic07", 128, false}, {"ic13", 256, false}, {"ic08", 256, false},
+	{"ic04", 16, true}, {"ic14", 512, false}, {"ic09", 512, false}, {"ic05", 32, true},
+	{"ic10", 1024, false}, {"ic11", 32, false},
 }
 
 var mimes = map[string]string{".svg": "image/svg+xml", ".png": "image/png"}
@@ -142,7 +149,11 @@ func run(ctx context.Context, tile, mime, icns string, pngs []pngOut) error {
 	// Every size renders before any output is written, so a failure leaves
 	// every output as it was.
 	if icns != "" {
-		if err := atomicfile.WriteFile(icns, Encode(rendered), 0o644); err != nil {
+		b, err := Encode(rendered)
+		if err != nil {
+			return err
+		}
+		if err := atomicfile.WriteFile(icns, b, 0o644); err != nil {
 			return err
 		}
 	}
@@ -181,14 +192,21 @@ func renderAt(ctx context.Context, dir string, src template.URL, px int) ([]byte
 	return os.ReadFile(out)
 }
 
-// Encode writes an .icns holding one PNG entry per slot, from pngs keyed by
+// Encode writes an .icns holding one entry per slot, from PNGs keyed by
 // side in px; a slot whose size is missing is left out.
-func Encode(pngs map[int][]byte) []byte {
+func Encode(pngs map[int][]byte) ([]byte, error) {
 	var body bytes.Buffer
 	for _, s := range slots {
 		p, ok := pngs[s.px]
 		if !ok {
 			continue
+		}
+		if s.argb {
+			img, err := png.Decode(bytes.NewReader(p))
+			if err != nil {
+				return nil, fmt.Errorf("%d px: %w", s.px, err)
+			}
+			p = packARGB(img)
 		}
 		body.WriteString(s.code)
 		binary.Write(&body, binary.BigEndian, uint32(8+len(p)))
@@ -198,5 +216,51 @@ func Encode(pngs map[int][]byte) []byte {
 	b.WriteString("icns")
 	binary.Write(&b, binary.BigEndian, uint32(8+body.Len()))
 	b.Write(body.Bytes())
-	return b.Bytes()
+	return b.Bytes(), nil
+}
+
+// packARGB is img as an ARGB entry: "ARGB", then the alpha, red, green and
+// blue planes, colour premultiplied by alpha, each run-length packed on its
+// own.
+func packARGB(img image.Image) []byte {
+	r := img.Bounds()
+	planes := make([][]byte, 4)
+	for y := r.Min.Y; y < r.Max.Y; y++ {
+		for x := r.Min.X; x < r.Max.X; x++ {
+			c := color.RGBAModel.Convert(img.At(x, y)).(color.RGBA)
+			for i, v := range []byte{c.A, c.R, c.G, c.B} {
+				planes[i] = append(planes[i], v)
+			}
+		}
+	}
+	out := []byte("ARGB")
+	for _, p := range planes {
+		out = packBits(out, p)
+	}
+	return out
+}
+
+// packBits appends p in the icns run-length code: 0x80+n-3 then one byte
+// for a run of n from 3 to 130, or n-1 then n bytes for up to 128 literals.
+func packBits(out, p []byte) []byte {
+	for i := 0; i < len(p); {
+		run := 1
+		for i+run < len(p) && run < 130 && p[i+run] == p[i] {
+			run++
+		}
+		if run >= 3 {
+			out = append(out, byte(0x80+run-3), p[i])
+			i += run
+			continue
+		}
+		// Literals stop before the next run of 3, which packs smaller.
+		j := i
+		for j < len(p) && j-i < 128 && !(j+2 < len(p) && p[j] == p[j+1] && p[j] == p[j+2]) {
+			j++
+		}
+		out = append(out, byte(j-i-1))
+		out = append(out, p[i:j]...)
+		i = j
+	}
+	return out
 }
