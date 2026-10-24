@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -323,5 +324,64 @@ func TestBaseURLOverride(t *testing.T) {
 	t.Setenv("PLATE_GENAI_GOOGLE_URL", "http://127.0.0.1:9/")
 	if got := baseURL("google", "https://def.example"); got != "http://127.0.0.1:9" {
 		t.Errorf("override %q", got)
+	}
+}
+
+func TestGoogleUnknownSizeIsTheRoundError(t *testing.T) {
+	m := googleModel(t)
+	var n atomic.Int32
+	googleServer(t, func(w http.ResponseWriter, r *http.Request) { n.Add(1) })
+	for _, size := range []string{"", "8K"} {
+		_, _, err := provider(t).Generate(context.Background(), Request{Model: m, Prompt: "p", N: 1, Size: size})
+		if err == nil || !strings.Contains(err.Error(), `"`+size+`"`) || !strings.Contains(err.Error(), "1K, 2K, 4K") {
+			t.Errorf("size %q: err %v, want one naming the size and 1K, 2K, 4K", size, err)
+		}
+	}
+	if n.Load() != 0 {
+		t.Errorf("%d requests sent for an unknown size", n.Load())
+	}
+}
+
+func TestGoogleNoAttemptsIsTheRoundError(t *testing.T) {
+	m := googleModel(t)
+	for _, n := range []int{0, -1} {
+		if _, _, err := provider(t).Generate(context.Background(), Request{Model: m, Prompt: "p", N: n, Size: "1K"}); err == nil {
+			t.Errorf("N=%d: no error", n)
+		}
+	}
+}
+
+func TestRetryAfterLongerThanACallGivesUp(t *testing.T) {
+	waits := noSleep(t)
+	var n atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n.Add(1)
+		w.Header().Set("Retry-After", strconv.Itoa(int(callTimeout/time.Second)+1))
+		http.Error(w, `{"error":{"message":"quota exhausted"}}`, http.StatusTooManyRequests)
+	}))
+	defer srv.Close()
+	req, _ := http.NewRequest(http.MethodPost, srv.URL, strings.NewReader(`{}`))
+	err := do(context.Background(), "google", req, nil)
+	if err == nil || !strings.Contains(err.Error(), "quota exhausted") || !strings.Contains(err.Error(), "429") {
+		t.Errorf("err %v", err)
+	}
+	if len(*waits) != 0 || n.Load() != 1 {
+		t.Errorf("waits %v after %d requests, want none after 1", *waits, n.Load())
+	}
+}
+
+func TestOversizedBodyIsAnError(t *testing.T) {
+	prev := maxBody
+	maxBody = 16
+	t.Cleanup(func() { maxBody = prev })
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"x":"` + strings.Repeat("a", 64) + `"}`))
+	}))
+	defer srv.Close()
+	req, _ := http.NewRequest(http.MethodGet, srv.URL, nil)
+	var out map[string]any
+	err := do(context.Background(), "google", req, &out)
+	if err == nil || !strings.HasPrefix(err.Error(), "google: ") || !strings.Contains(err.Error(), "larger than") {
+		t.Errorf("err %v", err)
 	}
 }
