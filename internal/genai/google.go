@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"sort"
 	"strings"
-	"sync"
 )
 
 const googleDefaultURL = "https://generativelanguage.googleapis.com"
@@ -107,38 +106,10 @@ func (g google) Generate(ctx context.Context, r Request) ([]Image, []Failure, er
 	}
 	url := baseURL("google", googleDefaultURL) + "/v1beta/models/" + r.Model.ID + ":generateContent"
 
-	type result struct {
-		img  *Image
-		fail string
-		err  error
-	}
-	results := make([]result, r.N)
-	var wg sync.WaitGroup
-	for i := 0; i < r.N; i++ {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			img, fail, err := g.attempt(ctx, url, key, payload, rate)
-			results[i] = result{img, fail, err}
-		}(i)
-	}
-	wg.Wait()
-
-	var imgs []Image
-	var fails []Failure
-	for i, res := range results {
-		switch {
-		case res.err != nil && isAuth(res.err):
-			return nil, nil, res.err
-		case res.err != nil:
-			fails = append(fails, Failure{Index: i, Reason: res.err.Error()})
-		case res.img == nil:
-			fails = append(fails, Failure{Index: i, Reason: res.fail})
-		default:
-			imgs = append(imgs, *res.img)
-		}
-	}
-	return imgs, fails, nil
+	return fanOut(r.N, func(int) ([]Image, Failure, error) {
+		img, fail, err := g.attempt(ctx, url, key, payload, rate)
+		return one(img, Failure{Reason: fail}, err)
+	})
 }
 
 // attempt makes one request. It returns the image, or why there is none (a

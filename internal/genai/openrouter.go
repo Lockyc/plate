@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"slices"
 	"strings"
-	"sync"
 )
 
 const openrouterDefaultURL = "https://openrouter.ai"
@@ -91,39 +90,9 @@ func (o openrouter) Generate(ctx context.Context, r Request) ([]Image, []Failure
 	}
 	url := baseURL("openrouter", openrouterDefaultURL) + "/api/v1/images"
 
-	type result struct {
-		imgs []Image
-		fail Failure
-		err  error
-	}
-	results := make([]result, r.N)
-	var wg sync.WaitGroup
-	for i := 0; i < r.N; i++ {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			imgs, fail, err := o.attempt(ctx, url, key, payload)
-			results[i] = result{imgs, fail, err}
-		}(i)
-	}
-	wg.Wait()
-
-	var imgs []Image
-	var fails []Failure
-	for i, res := range results {
-		switch {
-		case res.err != nil && isAuth(res.err):
-			return nil, nil, res.err
-		case res.err != nil:
-			fails = append(fails, Failure{Index: i, Reason: res.err.Error()})
-		case len(res.imgs) == 0:
-			res.fail.Index = i
-			fails = append(fails, res.fail)
-		default:
-			imgs = append(imgs, res.imgs...)
-		}
-	}
-	return imgs, fails, nil
+	return fanOut(r.N, func(int) ([]Image, Failure, error) {
+		return o.attempt(ctx, url, key, payload)
+	})
 }
 
 // openrouterPixels is the explicit "WxH" a pixels-form model is sent: the
