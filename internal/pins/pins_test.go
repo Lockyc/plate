@@ -141,6 +141,33 @@ func TestImageModelsHaveAKeyAndAPrice(t *testing.T) {
 	}
 }
 
+// Every model names the sizes it takes, once: a rate-billed model's are its
+// rate table's keys; the others pin Sizes.
+func TestImageModelsHaveSizes(t *testing.T) {
+	for _, m := range ImageModels {
+		if len(m.AllowedSizes()) == 0 {
+			t.Errorf("%s/%s takes no size", m.Provider, m.ID)
+		}
+		if len(m.PerImage) > 0 && len(m.Sizes) > 0 {
+			t.Errorf("%s/%s pins Sizes beside its rate table, a second list to drift", m.Provider, m.ID)
+		}
+		switch m.Provider {
+		case "bfl":
+			if m.MaxPixels <= 0 {
+				t.Errorf("%s: bfl needs MaxPixels", m.ID)
+			}
+		case "openai":
+			if len(m.AspectPixels) == 0 {
+				t.Errorf("%s: openai needs AspectPixels", m.ID)
+			}
+		}
+	}
+	g, _ := ImageModelFor("google", "")
+	if got := strings.Join(g.AllowedSizes(), ", "); got != "1K, 2K, 4K" {
+		t.Errorf("google sizes %q, want its rate table's 1K, 2K, 4K", got)
+	}
+}
+
 func TestImageModelFor(t *testing.T) {
 	d, err := ImageModelFor("google", "")
 	if err != nil || d.ID != ImageModels[0].ID {

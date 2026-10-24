@@ -9,7 +9,6 @@ import (
 	"image"
 	"net/http"
 	"net/http/httptrace"
-	"slices"
 	"strings"
 	"sync/atomic"
 )
@@ -41,21 +40,13 @@ type openrouterResponse struct {
 }
 
 // Generate sends one /api/v1/images request per attempt, all at once: most
-// of the models behind it take only n=1. A model's Sizes, when pinned, bound
-// Request.Size; otherwise the size goes through for the API to judge. The
-// size goes as the model's SizeForm says: the resolution tier, or explicit
-// pixels (openrouterPixels). An
-// answer holding more than one image keeps them all. Each request's
+// of the models behind it take only n=1. The size goes as the model's
+// SizeForm says: the resolution tier, or explicit pixels (openrouterPixels).
+// An answer holding more than one image keeps them all. Each request's
 // usage.cost lands on its images or its Failure, so the round's costs sum to
 // the bill. An answer without usage.cost keeps its images, marked
 // "unreported": they were paid for.
 func (o openrouter) Generate(ctx context.Context, r Request) ([]Image, []Failure, error) {
-	if r.N <= 0 {
-		return nil, nil, fmt.Errorf("openrouter: %d attempts asked for; need at least 1", r.N)
-	}
-	if len(r.Model.Sizes) > 0 && !slices.Contains(r.Model.Sizes, r.Size) {
-		return nil, nil, fmt.Errorf("openrouter: %s has no size %q (sizes: %s)", r.Model.ID, r.Size, strings.Join(r.Model.Sizes, ", "))
-	}
 	key, err := r.Model.Key()
 	if err != nil {
 		return nil, nil, err

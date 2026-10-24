@@ -327,30 +327,6 @@ func TestBaseURLOverride(t *testing.T) {
 	}
 }
 
-func TestGoogleUnknownSizeIsTheRoundError(t *testing.T) {
-	m := googleModel(t)
-	var n atomic.Int32
-	googleServer(t, func(w http.ResponseWriter, r *http.Request) { n.Add(1) })
-	for _, size := range []string{"", "8K"} {
-		_, _, err := provider(t).Generate(context.Background(), Request{Model: m, Prompt: "p", N: 1, Size: size})
-		if err == nil || !strings.Contains(err.Error(), `"`+size+`"`) || !strings.Contains(err.Error(), "1K, 2K, 4K") {
-			t.Errorf("size %q: err %v, want one naming the size and 1K, 2K, 4K", size, err)
-		}
-	}
-	if n.Load() != 0 {
-		t.Errorf("%d requests sent for an unknown size", n.Load())
-	}
-}
-
-func TestGoogleNoAttemptsIsTheRoundError(t *testing.T) {
-	m := googleModel(t)
-	for _, n := range []int{0, -1} {
-		if _, _, err := provider(t).Generate(context.Background(), Request{Model: m, Prompt: "p", N: n, Size: "1K"}); err == nil {
-			t.Errorf("N=%d: no error", n)
-		}
-	}
-}
-
 func TestRetryAfterLongerThanACallGivesUp(t *testing.T) {
 	waits := noSleep(t)
 	var n atomic.Int32

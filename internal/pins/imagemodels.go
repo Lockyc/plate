@@ -3,6 +3,7 @@ package pins
 import (
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 )
 
@@ -10,11 +11,14 @@ import (
 // billing shape is filled: PerImage (rate-billed, size -> USD), InPerMTok and
 // OutPerMTok (usage-billed, USD per million tokens), FirstMP, ExtraMP and
 // RefMP (megapixel-billed, USD), or Reported (the provider states each
-// request's cost in its answer). Sizes, when set, are the only sizes the
-// model takes; Params are request fields the model needs as well. SizeForm
-// is how an openrouter model is told its size: "" sends the resolution tier,
-// "pixels" an explicit width and height, of at most MaxPixels and, when set,
-// MaxEdge on either side.
+// request's cost in its answer). Sizes are the size tiers the model takes;
+// a rate-billed model leaves it empty, its rate table's keys being its sizes
+// (AllowedSizes). Params are request fields the model needs as well.
+// SizeForm is how an openrouter model is told its size: "" sends the
+// resolution tier, "pixels" an explicit width and height. MaxPixels caps the
+// pixels a model told explicit dimensions makes, and MaxEdge, when set,
+// either side. AspectPixels is the fixed "WxH" a model that takes only a few
+// sizes makes for each aspect.
 type ImageModel struct {
 	Provider, ID, KeyEnv    string
 	PerImage                map[string]float64
@@ -27,7 +31,22 @@ type ImageModel struct {
 	SizeForm                string
 	MaxPixels               float64
 	MaxEdge                 int
+	AspectPixels            map[string]string
 	Default                 bool
+}
+
+// AllowedSizes is the size tiers the model takes: Sizes, or a rate-billed
+// model's rate table's keys, sorted.
+func (m ImageModel) AllowedSizes() []string {
+	if len(m.Sizes) > 0 || len(m.PerImage) == 0 {
+		return m.Sizes
+	}
+	sizes := make([]string, 0, len(m.PerImage))
+	for s := range m.PerImage {
+		sizes = append(sizes, s)
+	}
+	sort.Strings(sizes)
+	return sizes
 }
 
 // ImageModels is every model plate generate knows. The entry marked Default
@@ -44,17 +63,22 @@ var ImageModels = []ImageModel{
 	{Provider: "google", ID: "gemini-3-pro-image", KeyEnv: "GEMINI_API_KEY",
 		PerImage: map[string]float64{"1K": 0.134, "2K": 0.134, "4K": 0.24}, MaxRefs: 14},
 	// Checked 2026-10-24: the ID is listed on OpenAI's model page; the rates are
-	// the design spec's, not confirmed on a docs page.
+	// the design spec's, not confirmed on a docs page. AspectPixels are the
+	// sizes the edit endpoint documents as recommended; 1K and 2K both use
+	// them, and 4K is not offered, its sizes documented as experimental above
+	// 2560x1440.
 	{Provider: "openai", ID: "gpt-image-2", KeyEnv: "OPENAI_API_KEY",
-		InPerMTok: 8, OutPerMTok: 30, MaxRefs: 16},
+		InPerMTok: 8, OutPerMTok: 30, MaxRefs: 16, Sizes: []string{"1K", "2K"},
+		AspectPixels: map[string]string{"1:1": "1024x1024", "3:2": "1536x1024", "2:3": "1024x1536"}},
 	// Checked 2026-10-24: the ID is BFL's pinned FLUX.2 [pro] snapshot; the
-	// rates are the design spec's, not published in the docs text.
+	// rates are the design spec's, not published in the docs text. Four
+	// megapixels are the most BFL documents for an output, so there is no 4K.
 	{Provider: "bfl", ID: "flux-2-pro", KeyEnv: "BFL_API_KEY",
-		FirstMP: 0.03, ExtraMP: 0.015, RefMP: 0.015, MaxRefs: 8},
+		FirstMP: 0.03, ExtraMP: 0.015, RefMP: 0.015, MaxRefs: 8, Sizes: []string{"1K", "2K"}, MaxPixels: 4e6},
 	// Checked 2026-10-24: the ID is documented at POST /v1/flux-2-max in
 	// BFL's API reference; the rates are the design spec's.
 	{Provider: "bfl", ID: "flux-2-max", KeyEnv: "BFL_API_KEY",
-		FirstMP: 0.07, ExtraMP: 0.03, RefMP: 0.03, MaxRefs: 8},
+		FirstMP: 0.07, ExtraMP: 0.03, RefMP: 0.03, MaxRefs: 8, Sizes: []string{"1K", "2K"}, MaxPixels: 4e6},
 	// Checked 2026-10-24 against OpenRouter's GET /api/v1/images/models: the
 	// IDs, the resolutions each states (FLUX.2 and GPT Image state none), the
 	// input_references maximum, and the output_format and quality each takes.

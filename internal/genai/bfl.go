@@ -43,14 +43,10 @@ type bflPoll struct {
 	} `json:"result"`
 }
 
-// bflDims is the width and height for size and aspect (fitDims). 2K's four
-// megapixels are the most BFL documents for an output, so 4K is not offered.
-// The multiple of 16 is plate's own choice; BFL documents only a 64 pixel
-// minimum.
-func bflDims(size, aspect string) (int, int, error) {
-	if size != "1K" && size != "2K" {
-		return 0, 0, fmt.Errorf("bfl: no size %q (sizes: 1K, 2K)", size)
-	}
+// bflDims is the width and height for size and aspect (fitDims): the tier's
+// pixels, capped at m.MaxPixels. The multiple of 16 is plate's own choice;
+// BFL documents only a 64 pixel minimum.
+func bflDims(m pins.ImageModel, size, aspect string) (int, int, error) {
 	aw, ah := 1.0, 1.0
 	if aspect != "" {
 		var ok bool
@@ -58,7 +54,7 @@ func bflDims(size, aspect string) (int, int, error) {
 			return 0, 0, fmt.Errorf("bfl: aspect %q is not W:H", aspect)
 		}
 	}
-	wi, hi := fitDims(tierPixels[size], aw, ah, 0)
+	wi, hi := fitDims(min(tierPixels[size], m.MaxPixels), aw, ah, 0)
 	if wi < 64 || hi < 64 {
 		return 0, 0, fmt.Errorf("bfl: aspect %q is too extreme at size %s", aspect, size)
 	}
@@ -74,16 +70,10 @@ func bflCost(m pins.ImageModel, outMP, refMP float64) float64 {
 
 // Generate submits one job per attempt, all at once, and polls each until it
 // settles. Each job is billed on its own, and only a Ready one is billed, so
-// only a failure that may have reached Ready carries a cost. Everything is
-// validated before any request.
+// only a failure that may have reached Ready carries a cost. The aspect and
+// refs are read before any request.
 func (b bfl) Generate(ctx context.Context, r Request) ([]Image, []Failure, error) {
-	if r.N <= 0 {
-		return nil, nil, fmt.Errorf("bfl: %d attempts asked for; need at least 1", r.N)
-	}
-	if len(r.Refs) > r.Model.MaxRefs {
-		return nil, nil, fmt.Errorf("bfl: %s takes at most %d reference images; %d given", r.Model.ID, r.Model.MaxRefs, len(r.Refs))
-	}
-	w, h, err := bflDims(r.Size, r.Aspect)
+	w, h, err := bflDims(r.Model, r.Size, r.Aspect)
 	if err != nil {
 		return nil, nil, err
 	}

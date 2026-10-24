@@ -50,8 +50,9 @@ type Failure struct {
 	Unreported bool
 }
 
-// Provider generates images. A non-nil error means the whole round failed (for
-// example auth); Failures are per attempt.
+// Provider generates images from a Request that Check has passed. A non-nil
+// error means the whole round failed (for example auth); Failures are per
+// attempt.
 type Provider interface {
 	Name() string
 	Generate(ctx context.Context, r Request) ([]Image, []Failure, error)

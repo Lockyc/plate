@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"sort"
 	"strings"
 )
 
@@ -69,18 +68,7 @@ type googleResponse struct {
 // Generate sends one generateContent request per attempt, all at once. The
 // refs go first and the prompt last, the order Google's editing examples use.
 func (g google) Generate(ctx context.Context, r Request) ([]Image, []Failure, error) {
-	if r.N <= 0 {
-		return nil, nil, fmt.Errorf("google: %d attempts asked for; need at least 1", r.N)
-	}
-	rate, ok := r.Model.PerImage[r.Size]
-	if !ok {
-		sizes := make([]string, 0, len(r.Model.PerImage))
-		for s := range r.Model.PerImage {
-			sizes = append(sizes, s)
-		}
-		sort.Strings(sizes)
-		return nil, nil, fmt.Errorf("google: %s has no size %q (sizes: %s)", r.Model.ID, r.Size, strings.Join(sizes, ", "))
-	}
+	rate := r.Model.PerImage[r.Size]
 	key, err := r.Model.Key()
 	if err != nil {
 		return nil, nil, err

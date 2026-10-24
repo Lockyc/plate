@@ -137,10 +137,6 @@ func TestOpenAISizeMapping(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "16:9") || !strings.Contains(err.Error(), "1024x1536") {
 		t.Errorf("aspect error %v, want one naming 16:9 and the sizes offered", err)
 	}
-	_, _, err = p.Generate(context.Background(), Request{Model: m, Prompt: "p", N: 1, Size: "4K"})
-	if err == nil || !strings.Contains(err.Error(), "1K, 2K") {
-		t.Errorf("4K error %v, want one naming 1K, 2K", err)
-	}
 	if n.Load() != before {
 		t.Errorf("requests sent for unsupported sizes")
 	}
@@ -216,9 +212,6 @@ func TestOpenAIRetryReplaysTheBody(t *testing.T) {
 
 func TestOpenAIBadInputsAreRoundErrors(t *testing.T) {
 	m := openaiModel(t)
-	if _, _, err := openaiProvider(t).Generate(context.Background(), Request{Model: m, Prompt: "p", N: 0, Size: "1K"}); err == nil {
-		t.Error("N=0: no error")
-	}
 	t.Setenv(m.KeyEnv, "")
 	if _, _, err := openaiProvider(t).Generate(context.Background(), Request{Model: m, Prompt: "p", N: 1, Size: "1K"}); err == nil || !strings.Contains(err.Error(), m.KeyEnv) {
 		t.Errorf("missing key: %v", err)
