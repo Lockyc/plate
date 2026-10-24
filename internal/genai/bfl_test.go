@@ -77,8 +77,12 @@ func TestBFLSubmitAndPoll(t *testing.T) {
 			if body["width"] != float64(992) || body["height"] != float64(992) {
 				t.Errorf("size = %v x %v", body["width"], body["height"])
 			}
-			fmt.Fprintf(w, `{"id":"job-%d","polling_url":"%s/poll/%d"}`, atomic.LoadInt32(&submits), srv.URL, atomic.LoadInt32(&submits))
-		case strings.HasPrefix(r.URL.Path, "/poll/"):
+			// polling_url is ignored: the poll goes to the base host.
+			fmt.Fprintf(w, `{"id":"job-%d","polling_url":"http://127.0.0.1:1/never"}`, atomic.LoadInt32(&submits))
+		case r.URL.Path == "/v1/get_result":
+			if r.URL.Query().Get("id") != "job-1" {
+				t.Errorf("poll id = %q", r.URL.Query().Get("id"))
+			}
 			if r.Header.Get("x-key") != testKey {
 				t.Errorf("poll x-key = %q", r.Header.Get("x-key"))
 			}
@@ -108,31 +112,128 @@ func TestBFLSubmitAndPoll(t *testing.T) {
 
 func TestBFLPollGivesUp(t *testing.T) {
 	m := bflModel(t)
-	var srv *httptest.Server
-	srv = bflServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	bflServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
-			fmt.Fprintf(w, `{"id":"j","polling_url":"%s/poll"}`, srv.URL)
+			fmt.Fprint(w, `{"id":"j"}`)
 			return
 		}
 		fmt.Fprint(w, `{"status":"Pending"}`)
 	}))
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
-	var n int32
+	// Polls come back at once; the context's deadline ends the wait.
 	prev := sleep
-	sleep = func(ctx context.Context, d time.Duration) error {
-		if atomic.AddInt32(&n, 1) >= 3 {
-			cancel()
-		}
-		return ctx.Err()
+	sleep = func(c context.Context, d time.Duration) error {
+		time.Sleep(10 * time.Millisecond)
+		return c.Err()
 	}
 	t.Cleanup(func() { sleep = prev })
 	imgs, fails, err := (bfl{}).Generate(ctx, Request{Model: m, Prompt: "p", N: 1, Size: "1K"})
 	if err != nil || len(imgs) != 0 || len(fails) != 1 {
 		t.Fatalf("imgs=%d fails=%v err=%v", len(imgs), fails, err)
 	}
-	if !strings.Contains(fails[0].Reason, "Pending") {
-		t.Errorf("reason = %q, want the last status", fails[0].Reason)
+	if !strings.Contains(fails[0].Reason, "Pending") || !strings.Contains(fails[0].Reason, "; BFL billed about $") {
+		t.Errorf("reason = %q, want the last status and a billing note", fails[0].Reason)
+	}
+}
+
+func TestBFLContextDeadlineWhilePolling(t *testing.T) {
+	m := bflModel(t)
+	bflServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			fmt.Fprint(w, `{"id":"j"}`)
+			return
+		}
+		fmt.Fprint(w, `{"status":"Generating"}`)
+	}))
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	imgs, fails, err := (bfl{}).Generate(ctx, Request{Model: m, Prompt: "p", N: 1, Size: "1K"})
+	if err != nil || len(imgs) != 0 || len(fails) != 1 || !strings.Contains(fails[0].Reason, "Generating") {
+		t.Fatalf("imgs=%d fails=%v err=%v", len(imgs), fails, err)
+	}
+}
+
+func TestBFLReadyButUnusableIsBilled(t *testing.T) {
+	m := bflModel(t)
+	noSleep(t)
+	var srv *httptest.Server
+	srv = bflServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost:
+			fmt.Fprint(w, `{"id":"j"}`)
+		case r.URL.Path == "/v1/get_result":
+			fmt.Fprintf(w, `{"status":"Ready","result":{"sample":"%s/gone.png"}}`, srv.URL)
+		default:
+			http.Error(w, "expired", http.StatusNotFound)
+		}
+	}))
+	imgs, fails, err := (bfl{}).Generate(context.Background(), Request{Model: m, Prompt: "p", N: 1, Size: "1K"})
+	if err != nil || len(imgs) != 0 || len(fails) != 1 {
+		t.Fatalf("imgs=%d fails=%v err=%v", len(imgs), fails, err)
+	}
+	want := fmt.Sprintf("; BFL billed about $%.2f", m.FirstMP)
+	if !strings.HasSuffix(fails[0].Reason, want) {
+		t.Errorf("reason = %q, want suffix %q", fails[0].Reason, want)
+	}
+}
+
+func TestBFLTaskNotFoundGrace(t *testing.T) {
+	m := bflModel(t)
+	noSleep(t)
+	out := fixture(t, "out.png")
+	var srv *httptest.Server
+	var polls int32
+	srv = bflServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost:
+			fmt.Fprint(w, `{"id":"j"}`)
+		case r.URL.Path == "/v1/get_result":
+			if atomic.AddInt32(&polls, 1) <= 2 {
+				fmt.Fprint(w, `{"status":"Task not found"}`)
+				return
+			}
+			fmt.Fprintf(w, `{"status":"Ready","result":{"sample":"%s/s.png"}}`, srv.URL)
+		default:
+			w.Write(out)
+		}
+	}))
+	imgs, fails, err := (bfl{}).Generate(context.Background(), Request{Model: m, Prompt: "p", N: 1, Size: "1K"})
+	if err != nil || len(imgs) != 1 || len(fails) != 0 {
+		t.Fatalf("two not-found polls should be tolerated: imgs=%d fails=%v err=%v", len(imgs), fails, err)
+	}
+
+	// A third in a row is final.
+	srv2 := bflServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			fmt.Fprint(w, `{"id":"j"}`)
+			return
+		}
+		fmt.Fprint(w, `{"status":"Task not found"}`)
+	}))
+	_ = srv2
+	imgs, fails, err = (bfl{}).Generate(context.Background(), Request{Model: m, Prompt: "p", N: 1, Size: "1K"})
+	if err != nil || len(imgs) != 0 || len(fails) != 1 || !strings.Contains(fails[0].Reason, "Task not found") {
+		t.Fatalf("imgs=%d fails=%v err=%v", len(imgs), fails, err)
+	}
+}
+
+func TestBFLRefusesARedirectToAnotherHost(t *testing.T) {
+	m := bflModel(t)
+	var other int32
+	elsewhere := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&other, 1)
+	}))
+	defer elsewhere.Close()
+	bflServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, elsewhere.URL+"/steal", http.StatusFound)
+	}))
+	imgs, fails, err := (bfl{}).Generate(context.Background(), Request{Model: m, Prompt: "p", N: 1, Size: "1K"})
+	if err != nil || len(imgs) != 0 || len(fails) != 1 || !strings.Contains(fails[0].Reason, "refusing a redirect") {
+		t.Fatalf("imgs=%d fails=%v err=%v", len(imgs), fails, err)
+	}
+	if other != 0 {
+		t.Errorf("the other host saw %d requests", other)
 	}
 }
 
@@ -141,10 +242,9 @@ func TestBFLModeratedIsFailure(t *testing.T) {
 		t.Run(status, func(t *testing.T) {
 			m := bflModel(t)
 			noSleep(t)
-			var srv *httptest.Server
-			srv = bflServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			bflServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.Method == http.MethodPost {
-					fmt.Fprintf(w, `{"id":"j","polling_url":"%s/poll"}`, srv.URL)
+					fmt.Fprint(w, `{"id":"j"}`)
 					return
 				}
 				fmt.Fprintf(w, `{"status":%q}`, status)
@@ -170,8 +270,8 @@ func TestBFLCostFromMegapixels(t *testing.T) {
 	srv = bflServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodPost:
-			fmt.Fprintf(w, `{"id":"j","polling_url":"%s/poll"}`, srv.URL)
-		case r.URL.Path == "/poll":
+			fmt.Fprint(w, `{"id":"j"}`)
+		case r.URL.Path == "/v1/get_result":
 			fmt.Fprintf(w, `{"status":"Ready","result":{"sample":"%s/s.png"}}`, srv.URL)
 		default:
 			w.Write(out)
@@ -243,10 +343,10 @@ func TestBFLOneJobFailingKeepsTheOthers(t *testing.T) {
 			next++
 			id := next
 			mu.Unlock()
-			fmt.Fprintf(w, `{"id":"j%d","polling_url":"%s/poll/%d"}`, id, srv.URL, id)
-		case r.URL.Path == "/poll/1":
+			fmt.Fprintf(w, `{"id":"j%d"}`, id)
+		case r.URL.Path == "/v1/get_result" && r.URL.Query().Get("id") == "j1":
 			fmt.Fprint(w, `{"status":"Content Moderated"}`)
-		case strings.HasPrefix(r.URL.Path, "/poll/"):
+		case r.URL.Path == "/v1/get_result":
 			fmt.Fprintf(w, `{"status":"Ready","result":{"sample":"%s/s.png"}}`, srv.URL)
 		default:
 			w.Write(out)

@@ -38,8 +38,8 @@ var ImageModels = []ImageModel{
 	// rates are the design spec's, not published in the docs text.
 	{Provider: "bfl", ID: "flux-2-pro", KeyEnv: "BFL_API_KEY",
 		FirstMP: 0.03, ExtraMP: 0.015, RefMP: 0.015, MaxRefs: 8},
-	// Checked 2026-10-24: BFL's docs text names no ID for [max]; the ID and
-	// rates are the design spec's.
+	// Checked 2026-10-24: the ID is documented at POST /v1/flux-2-max in
+	// BFL's API reference; the rates are the design spec's.
 	{Provider: "bfl", ID: "flux-2-max", KeyEnv: "BFL_API_KEY",
 		FirstMP: 0.07, ExtraMP: 0.03, RefMP: 0.03, MaxRefs: 8},
 }

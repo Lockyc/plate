@@ -10,6 +10,7 @@ import (
 	_ "image/png" // registers the PNG decoder for image.DecodeConfig
 	"math"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -23,6 +24,10 @@ const bflDefaultURL = "https://api.bfl.ai"
 // bflPollEvery is the wait between polls of one job.
 const bflPollEvery = time.Second
 
+// bflNotFoundGrace is how many "Task not found" polls a fresh job may answer
+// before that status is final.
+const bflNotFoundGrace = 2
+
 type bfl struct{}
 
 func init() { providers["bfl"] = bfl{} }
@@ -34,8 +39,7 @@ func (bfl) Name() string { return "bfl" }
 var bflPixels = map[string]float64{"1K": 1e6, "2K": 4e6}
 
 type bflSubmit struct {
-	ID         string `json:"id"`
-	PollingURL string `json:"polling_url"`
+	ID string `json:"id"`
 }
 
 type bflPoll struct {
@@ -47,7 +51,8 @@ type bflPoll struct {
 
 // bflDims is the width and height for size and aspect: the largest multiples
 // of 16 whose area stays within the size's budget, so a job never bills
-// beyond the megapixels it was priced at.
+// beyond the megapixels it was priced at. The multiple of 16 is plate's own
+// choice; BFL documents only a 64 pixel minimum.
 func bflDims(size, aspect string) (int, int, error) {
 	px, ok := bflPixels[size]
 	if !ok {
@@ -116,7 +121,8 @@ func (b bfl) Generate(ctx context.Context, r Request) ([]Image, []Failure, error
 		return nil, nil, fmt.Errorf("bfl: %w", err)
 	}
 	cost := bflCost(r.Model, float64(w*h)/1e6, refMP)
-	url := baseURL("bfl", bflDefaultURL) + "/v1/" + r.Model.ID
+	base := baseURL("bfl", bflDefaultURL)
+	endpoint := base + "/v1/" + r.Model.ID
 
 	type result struct {
 		img  *Image
@@ -129,7 +135,7 @@ func (b bfl) Generate(ctx context.Context, r Request) ([]Image, []Failure, error
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			img, fail, err := b.attempt(ctx, url, key, payload, cost)
+			img, fail, err := b.attempt(ctx, base, endpoint, key, payload, cost)
 			results[i] = result{img, fail, err}
 		}(i)
 	}
@@ -155,8 +161,14 @@ func (b bfl) Generate(ctx context.Context, r Request) ([]Image, []Failure, error
 // attempt runs one job: submit, poll to a settled status, fetch the sample.
 // It returns the image, or why there is none (a reason for a job that ended
 // without one, an error for a failed call).
-func (bfl) attempt(ctx context.Context, url, key string, payload []byte, cost float64) (*Image, string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
+//
+// The poll goes to the base host's documented /v1/get_result, never to the
+// answer's polling_url, so the key only ever travels to the configured host.
+// A job that ended without an image after it may have been billed (cancelled
+// mid-poll, Ready but unusable) says so in its reason; a moderated or errored
+// one does not, since BFL bills only Ready jobs.
+func (bfl) attempt(ctx context.Context, base, endpoint, key string, payload []byte, cost float64) (*Image, string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
 	if err != nil {
 		return nil, "", fmt.Errorf("bfl: %w", err)
 	}
@@ -166,12 +178,18 @@ func (bfl) attempt(ctx context.Context, url, key string, payload []byte, cost fl
 	if err := do(ctx, "bfl", req, &job); err != nil {
 		return nil, "", err
 	}
-	if job.ID == "" || job.PollingURL == "" {
-		return nil, "bfl: the job answer has no id or polling_url", nil
+	if job.ID == "" {
+		return nil, "bfl: the job answer has no id", nil
 	}
+	billed := fmt.Sprintf("; BFL billed about $%.2f", cost)
+	gaveUp := func(last string) (*Image, string, error) {
+		return nil, fmt.Sprintf("bfl: gave up waiting on job %s; last status %q%s", job.ID, last, billed), nil
+	}
+	pollURL := base + "/v1/get_result?id=" + url.QueryEscape(job.ID)
 	last := "not polled"
+	notFound := 0
 	for {
-		preq, err := http.NewRequestWithContext(ctx, http.MethodGet, job.PollingURL, nil)
+		preq, err := http.NewRequestWithContext(ctx, http.MethodGet, pollURL, nil)
 		if err != nil {
 			return nil, "", fmt.Errorf("bfl: %w", err)
 		}
@@ -179,30 +197,36 @@ func (bfl) attempt(ctx context.Context, url, key string, payload []byte, cost fl
 		var p bflPoll
 		if err := do(ctx, "bfl", preq, &p); err != nil {
 			if ctx.Err() != nil {
-				return nil, fmt.Sprintf("bfl: gave up waiting on job %s; last status %q", job.ID, last), nil
+				return gaveUp(last)
 			}
 			return nil, "", err
 		}
 		last = p.Status
 		switch p.Status {
 		case "Ready":
-			return fetchSample(ctx, job.ID, p.Result.Sample, cost)
+			return fetchSample(ctx, job.ID, p.Result.Sample, cost, billed)
 		case "Pending", "Reasoning", "Generating":
+		case "Task not found":
+			// A fresh job can be unknown for a poll or two.
+			if notFound++; notFound > bflNotFoundGrace {
+				return nil, fmt.Sprintf("bfl: job %s ended with status %q", job.ID, p.Status), nil
+			}
 		default:
-			// Request Moderated, Content Moderated, Error, Task not found, ...
+			// Request Moderated, Content Moderated, Error, ...
 			return nil, fmt.Sprintf("bfl: job %s ended with status %q", job.ID, p.Status), nil
 		}
 		if err := sleep(ctx, bflPollEvery); err != nil {
-			return nil, fmt.Sprintf("bfl: gave up waiting on job %s; last status %q", job.ID, last), nil
+			return gaveUp(last)
 		}
 	}
 }
 
 // fetchSample downloads the signed result URL, which is on another host and
-// takes no key.
-func fetchSample(ctx context.Context, id, sample string, cost float64) (*Image, string, error) {
+// takes no key. The job is Ready, so every way this fails carries the billing
+// note.
+func fetchSample(ctx context.Context, id, sample string, cost float64, billed string) (*Image, string, error) {
 	if sample == "" {
-		return nil, fmt.Sprintf("bfl: job %s is Ready but has no result.sample", id), nil
+		return nil, fmt.Sprintf("bfl: job %s is Ready but has no result.sample%s", id, billed), nil
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, sample, nil)
 	if err != nil {
@@ -210,10 +234,10 @@ func fetchSample(ctx context.Context, id, sample string, cost float64) (*Image, 
 	}
 	png, err := doRaw(ctx, "bfl", req)
 	if err != nil {
-		return nil, "", err
+		return nil, fmt.Sprintf("bfl: job %s is Ready but its image could not be fetched: %v%s", id, err, billed), nil
 	}
 	if !bytes.HasPrefix(png, pngMagic) {
-		return nil, fmt.Sprintf("bfl: job %s returned an image that is not a PNG", id), nil
+		return nil, fmt.Sprintf("bfl: job %s returned an image that is not a PNG%s", id, billed), nil
 	}
 	return &Image{PNG: png, CostUSD: cost, CostBasis: "rate", ProviderID: id}, "", nil
 }
