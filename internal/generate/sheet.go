@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/lockyc/plate/internal/atomicfile"
@@ -47,6 +48,7 @@ type sheetRound struct {
 	Number        int
 	Model, Prompt string
 	Cost          string
+	Failed        string // "2 failed, $0.13 charged", or "" when nothing failed was charged
 	Attempts      []sheetAttempt
 }
 
@@ -65,11 +67,15 @@ func writeSheetHTML(dir string, refs []string) error {
 	if err != nil {
 		return err
 	}
+	fails, err := LoadFailures(dir)
+	if err != nil {
+		return err
+	}
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		return err
 	}
-	d := sheetData{Width: sheetWidth, Name: filepath.Base(abs), Total: money(PoseTotal(all))}
+	d := sheetData{Width: sheetWidth, Name: filepath.Base(abs), Total: money(PoseTotal(all) + ChargedTotal(fails))}
 	for _, ref := range refs {
 		r, err := filepath.Abs(ref)
 		if err != nil {
@@ -81,15 +87,32 @@ func writeSheetHTML(dir string, refs []string) error {
 		}
 		d.Refs = append(d.Refs, sheetRef{Src: urlPath(rel), Name: filepath.Base(ref)})
 	}
-	// Newest round first.
-	for i := len(all) - 1; i >= 0; {
-		round := all[i].Round
-		j := i
-		for j >= 0 && all[j].Round == round {
-			j--
+	// A round has records, a failures.json, or both; newest round first.
+	byRound := map[int][]Record{}
+	failsBy := map[int]RoundFailures{}
+	var nums []int
+	for _, r := range all {
+		if _, ok := byRound[r.Round]; !ok {
+			nums = append(nums, r.Round)
 		}
-		rs := all[j+1 : i+1]
-		sr := sheetRound{Number: round, Model: rs[0].Model, Prompt: rs[0].Prompt, Cost: money(PoseTotal(rs))}
+		byRound[r.Round] = append(byRound[r.Round], r)
+	}
+	for _, rf := range fails {
+		if _, ok := byRound[rf.Round]; !ok {
+			nums = append(nums, rf.Round)
+		}
+		failsBy[rf.Round] = rf
+	}
+	sort.Sort(sort.Reverse(sort.IntSlice(nums)))
+	for _, round := range nums {
+		rs, rf := byRound[round], failsBy[round]
+		sr := sheetRound{Number: round, Model: rf.Model, Prompt: rf.Prompt, Cost: money(PoseTotal(rs) + rf.Charged())}
+		if len(rs) > 0 {
+			sr.Model, sr.Prompt = rs[0].Model, rs[0].Prompt
+		}
+		if c := rf.Charged(); c > 0 {
+			sr.Failed = fmt.Sprintf("%d failed, %s charged", len(rf.Failures), money(c))
+		}
 		for _, a := range rs {
 			sr.Attempts = append(sr.Attempts, sheetAttempt{
 				Src:   urlPath(filepath.Join("rounds", roundName(a.Round), attemptBase(a.Attempt)+".png")),
@@ -97,7 +120,6 @@ func writeSheetHTML(dir string, refs []string) error {
 			})
 		}
 		d.Rounds = append(d.Rounds, sr)
-		i = j
 	}
 	var b bytes.Buffer
 	if err := sheetTmpl.Execute(&b, d); err != nil {
@@ -180,7 +202,7 @@ footer{font-size:18px}
 <div>
 {{range .Rounds}}<section>
 <h2>Round {{.Number}}</h2>
-<p class="meta">{{.Model}} · {{.Cost}}</p>
+<p class="meta">{{.Model}} · {{.Cost}}{{if .Failed}} · {{.Failed}}{{end}}</p>
 <p class="prompt">{{.Prompt}}</p>
 <div class="grid">
 {{range .Attempts}}<figure><img src="{{.Src}}" alt="{{.Label}}"><figcaption>{{.Label}}</figcaption></figure>

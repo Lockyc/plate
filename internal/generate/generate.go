@@ -24,7 +24,7 @@ import (
 	"github.com/lockyc/plate/internal/pins"
 )
 
-const usage = "generate --pose DIR --prompt TEXT --ref IMG [--ref IMG]... --provider P [--model ID] [--n 4] [--size 2K] [--aspect W:H]"
+const usage = "generate --pose DIR --prompt TEXT --ref IMG [--ref IMG]... --provider P [--model ID] [--n 4] [--size 2K] [--aspect W:H]\n       generate --list-models --provider P"
 
 // maxRefEdge is the longest edge a reference is sent at; a larger one is
 // downscaled, since the models gain nothing from it and the upload grows.
@@ -69,11 +69,15 @@ func roundMain(ctx context.Context, args []string, stdout, stderr io.Writer) int
 	n := cli.Int(fs, "n", 4, "attempts in this round")
 	size := fs.String("size", "2K", "output size: 1K, 2K or 4K")
 	aspect := fs.String("aspect", "", "aspect ratio W:H (default: the model's choice)")
+	list := fs.Bool("list-models", false, "print the --provider's model ids, one per line, and exit")
 	if _, code, ok := cli.Parse(fs, args, 0); !ok {
 		return code
 	}
 	if *provider == "" {
 		return cli.Usage(stderr, "generate", "give --provider; there is no default provider yet (%s)", strings.Join(providerNames(), ", "))
+	}
+	if *list {
+		return listModels(*provider, stdout, stderr)
 	}
 	if *pose == "" || *prompt == "" || len(refs) == 0 {
 		return cli.Usage(stderr, "generate", "give --pose, --prompt and at least one --ref")
@@ -104,16 +108,18 @@ func roundMain(ctx context.Context, args []string, stdout, stderr io.Writer) int
 	if len(fails) > 0 {
 		fmt.Fprintf(stderr, "plate generate: %d of %d attempts failed:\n", len(fails), *n)
 		for _, f := range fails {
-			fmt.Fprintf(stderr, "  %s\n", f.Reason)
+			if f.CostUSD > 0 {
+				fmt.Fprintf(stderr, "  %s (charged $%.2f)\n", f.Reason, f.CostUSD)
+			} else {
+				fmt.Fprintf(stderr, "  %s\n", f.Reason)
+			}
 		}
 		code = 1
 	}
-	if unreported > 0 {
-		noun := "attempts"
-		if unreported == 1 {
-			noun = "attempt"
-		}
-		fmt.Fprintf(stderr, "plate generate: %s did not report the cost of %d %s; they were charged but are recorded at $0.00\n", m.Provider, unreported, noun)
+	if unreported == 1 {
+		fmt.Fprintf(stderr, "plate generate: %s did not report the cost of 1 attempt; it was charged but is recorded at $0.00\n", m.Provider)
+	} else if unreported > 1 {
+		fmt.Fprintf(stderr, "plate generate: %s did not report the cost of %d attempts; they were charged but are recorded at $0.00\n", m.Provider, unreported)
 	}
 	if err != nil {
 		return cli.Fail(stderr, "generate", err)
@@ -124,11 +130,18 @@ func roundMain(ctx context.Context, args []string, stdout, stderr io.Writer) int
 	for _, p := range written {
 		fmt.Fprintln(stdout, p)
 	}
+	if unreported > 0 {
+		fmt.Fprintf(stdout, "unreported %d\n", unreported)
+	}
 	all, err := LoadPose(*pose)
 	if err != nil {
 		return cli.Fail(stderr, "generate", err)
 	}
-	total := PoseTotal(all)
+	charged, err := LoadFailures(*pose)
+	if err != nil {
+		return cli.Fail(stderr, "generate", err)
+	}
+	total := PoseTotal(all) + ChargedTotal(charged)
 	fmt.Fprintf(stdout, "pose total $%.2f\n", total)
 	if total > softLimit {
 		fmt.Fprintf(stderr, "plate generate: this pose has cost $%.2f, over $%.2f\n", total, softLimit)
@@ -145,6 +158,24 @@ func roundMain(ctx context.Context, args []string, stdout, stderr io.Writer) int
 	return code
 }
 
+// listModels prints provider's model ids from pins, one per line, default
+// first.
+func listModels(provider string, stdout, stderr io.Writer) int {
+	var ids []string
+	for _, m := range pins.ImageModels {
+		if m.Provider == provider {
+			ids = append(ids, m.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return cli.Usage(stderr, "generate", "unknown provider %q (%s)", provider, strings.Join(providerNames(), ", "))
+	}
+	for _, id := range ids {
+		fmt.Fprintln(stdout, id)
+	}
+	return 0
+}
+
 type run struct {
 	pose string
 	req  genai.Request
@@ -152,13 +183,15 @@ type run struct {
 }
 
 // round normalises the refs, claims a round, asks the provider for the
-// attempts and writes the ones that came back. It returns the paths
-// written, how many attempts written carry CostBasis "unreported" (even
-// alongside an error, since they were charged), and the failures even
-// alongside an error. A round in which no
-// attempt succeeded leaves nothing. When an attempt cannot be written, every
-// other attempt still is, the round stays NN.partial, and the error names
-// each attempt that failed and the partial folder.
+// attempts and writes the ones that came back, and failures.json when the
+// provider charged for a failed attempt. It returns the paths written, how
+// many attempts written carry CostBasis "unreported" (even alongside an
+// error, since they were charged), and the failures even alongside an
+// error. A round in which nothing came back and nothing was charged leaves
+// nothing; one with only charged failures is kept with only failures.json.
+// When a file cannot be written, every other one still is, the round stays
+// NN.partial, and the error names each one that failed and the partial
+// folder.
 func (r run) round(ctx context.Context) ([]string, int, []genai.Failure, error) {
 	p, err := genai.For(r.req.Model.Provider)
 	if err != nil {
@@ -178,7 +211,11 @@ func (r run) round(ctx context.Context) ([]string, int, []genai.Failure, error) 
 		return nil, 0, nil, err
 	}
 	imgs, fails, err := p.Generate(ctx, r.req)
-	if err != nil || len(imgs) == 0 {
+	charged := false
+	for _, f := range fails {
+		charged = charged || f.CostUSD > 0
+	}
+	if err != nil || (len(imgs) == 0 && !charged) {
 		os.Remove(dir)
 		return nil, 0, fails, err
 	}
@@ -186,6 +223,17 @@ func (r run) round(ctx context.Context) ([]string, int, []genai.Failure, error) 
 	var names []string
 	var errs []error
 	unreported := 0
+	if charged {
+		rf := RoundFailures{Provider: r.req.Model.Provider, Model: r.req.Model.ID, Prompt: r.req.Prompt, Round: num}
+		for _, f := range fails {
+			rf.Failures = append(rf.Failures, FailureRecord{Index: f.Index, Reason: f.Reason, CostUSD: f.CostUSD})
+		}
+		if err := writeFailures(dir, rf); err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", failuresName, err))
+		} else {
+			names = append(names, failuresName)
+		}
+	}
 	for i, img := range imgs {
 		base := attemptBase(i + 1)
 		if err := atomicfile.WriteFile(filepath.Join(dir, base+".png"), img.PNG, 0o644); err != nil {

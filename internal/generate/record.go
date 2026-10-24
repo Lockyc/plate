@@ -79,6 +79,45 @@ func readRecord(path string) (Record, error) {
 	return r, nil
 }
 
+// failuresName is the file in a round folder holding its failed attempts.
+const failuresName = "failures.json"
+
+// RoundFailures is a round's failures.json: the attempts that produced no
+// image, written when the provider charged for any of them so the charge is
+// on disk. Index is the attempt's place in the request (from 0), not an aMM
+// number: aMM numbers go to the images that came back.
+type RoundFailures struct {
+	Provider string          `json:"provider"`
+	Model    string          `json:"model"`
+	Prompt   string          `json:"prompt"`
+	Round    int             `json:"round"`
+	Failures []FailureRecord `json:"failures"`
+}
+
+// FailureRecord is one failed attempt and what it was charged.
+type FailureRecord struct {
+	Index   int     `json:"index"`
+	Reason  string  `json:"reason"`
+	CostUSD float64 `json:"cost_usd"`
+}
+
+// Charged is the sum of the failures' costs, in USD.
+func (rf RoundFailures) Charged() float64 {
+	var t float64
+	for _, f := range rf.Failures {
+		t += f.CostUSD
+	}
+	return t
+}
+
+func writeFailures(dir string, rf RoundFailures) error {
+	b, err := json.MarshalIndent(rf, "", "  ")
+	if err != nil {
+		return err
+	}
+	return atomicfile.WriteFile(filepath.Join(dir, failuresName), append(b, '\n'), 0o644)
+}
+
 func writeRecord(path string, r Record) error {
 	b, err := json.MarshalIndent(r, "", "  ")
 	if err != nil {
