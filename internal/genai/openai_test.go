@@ -224,3 +224,55 @@ func TestOpenAIBadInputsAreRoundErrors(t *testing.T) {
 		t.Errorf("missing key: %v", err)
 	}
 }
+
+func TestOpenAICostSumsToTheBill(t *testing.T) {
+	m := openaiModel(t)
+	out := fixture(t, "out.png")
+	openaiServer(t, func(w http.ResponseWriter, r *http.Request) { writeJSON(w, openaiImages(out, out, out, out)) })
+	// 3 asked, 4 returned (1000 in, 2000 out): the extra is billed, so it is folded in.
+	imgs, _, err := openaiProvider(t).Generate(context.Background(), Request{Model: m, Prompt: "p", N: 3, Size: "1K"})
+	bill := (1000*m.InPerMTok + 2000*m.OutPerMTok) / 1e6
+	if err != nil || len(imgs) != 3 {
+		t.Fatalf("err %v, %d images", err, len(imgs))
+	}
+	var sum float64
+	for _, im := range imgs {
+		sum += im.CostUSD
+	}
+	if math.Abs(sum-bill) > 1e-12 {
+		t.Errorf("sum %v, want the bill %v", sum, bill)
+	}
+	openaiServer(t, func(w http.ResponseWriter, r *http.Request) { writeJSON(w, openaiImages(out)) })
+	imgs, fails, _ := openaiProvider(t).Generate(context.Background(), Request{Model: m, Prompt: "p", N: 3, Size: "1K"})
+	if len(imgs) != 1 || len(fails) != 2 || math.Abs(imgs[0].CostUSD-bill) > 1e-12 {
+		t.Errorf("3 asked, 1 returned: %d images, %d failures, cost %v, want %v", len(imgs), len(fails), imgs[0].CostUSD, bill)
+	}
+}
+
+func TestOpenAIBadImageDataIsAFailure(t *testing.T) {
+	m := openaiModel(t)
+	out := fixture(t, "out.png")
+	openaiServer(t, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, map[string]any{"data": []any{
+			map[string]any{"b64_json": "!!not base64!!"},
+			map[string]any{"b64_json": base64.StdEncoding.EncodeToString([]byte("\xff\xd8\xff jpeg"))},
+			map[string]any{"b64_json": base64.StdEncoding.EncodeToString(out)},
+		}, "usage": map[string]any{"input_tokens": 1, "output_tokens": 1}})
+	})
+	imgs, fails, err := openaiProvider(t).Generate(context.Background(), Request{Model: m, Prompt: "p", N: 3, Size: "1K"})
+	if err != nil || len(imgs) != 1 || len(fails) != 2 || fails[0].Index != 0 || fails[1].Index != 1 ||
+		!strings.Contains(fails[0].Reason, "base64") || !strings.Contains(fails[1].Reason, "PNG") {
+		t.Errorf("err %v, %d images, failures %+v", err, len(imgs), fails)
+	}
+}
+
+func TestOpenAINoUsableImageStatesTheBill(t *testing.T) {
+	m := openaiModel(t)
+	openaiServer(t, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, map[string]any{"data": []any{}, "usage": map[string]any{"input_tokens": 1000000, "output_tokens": 0}})
+	})
+	_, _, err := openaiProvider(t).Generate(context.Background(), Request{Model: m, Prompt: "p", N: 1, Size: "1K"})
+	if err == nil || !strings.Contains(err.Error(), "billed $8.00 and returned no usable image") {
+		t.Errorf("err %v", err)
+	}
+}
