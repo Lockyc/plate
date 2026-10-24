@@ -64,10 +64,11 @@ independently of phase 5. Within a phase, order is open.
   only `openrouter` has, through the bake-off. Their request shapes come from
   the providers' docs. Unlock: a key for one of them, then one live round.
 - **Some possibly billed attempts carry no record.** An openai request that
-  times out after it was sent is a round error, and a bfl submit that times
-  out after sending is not marked unreported; openrouter marks both cases.
-  Deferred because openrouter is the default. Unlock: either adapter in
-  regular use, then the same `Unreported` mark.
+  times out after it was sent is a round error, a bfl submit that times out
+  after sending is not marked unreported, and a google request that times out
+  after sending, or whose 2xx body is cut off, is a plain failure; openrouter
+  marks these cases. Deferred because openrouter is the default. Unlock: any
+  of those adapters in regular use, then the same `Unreported` mark.
 - **google prices an attempt by the per-image rate,** ignoring reference
   input tokens, a fraction of a cent. Unlock: the adapter in regular use,
   then pricing from `usageMetadata`.
