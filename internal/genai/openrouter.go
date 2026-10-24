@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"image"
 	"net/http"
@@ -120,8 +121,9 @@ func openrouterPixels(r Request) (string, error) {
 // splitting usage.cost evenly over them, or why there is none (a Failure
 // carrying any cost billed, for an answer without a usable image; an error
 // for a failed call). A Failure is Unreported when the request went out and
-// no cost came back: a 2xx answer without usage.cost, or a call that ended
-// (timeout, cancel, dropped connection) while waiting on the answer.
+// no cost came back: a 2xx answer without usage.cost or whose body was cut
+// off (errBodyCut), or a call that ended (timeout, cancel, dropped
+// connection) while waiting on the answer.
 func (openrouter) attempt(ctx context.Context, url, key string, payload []byte) ([]Image, Failure, error) {
 	// awaiting is true from the moment a request is written until its answer
 	// starts, per round trip, so a retry's wait does not count.
@@ -138,7 +140,7 @@ func (openrouter) attempt(ctx context.Context, url, key string, payload []byte) 
 	req.Header.Set("Authorization", "Bearer "+key)
 	raw, err := doRaw(ctx, "openrouter", req)
 	if err != nil {
-		if awaiting.Load() {
+		if awaiting.Load() || errors.Is(err, errBodyCut) {
 			return nil, Failure{Reason: err.Error(), Unreported: true}, nil
 		}
 		return nil, Failure{}, err
