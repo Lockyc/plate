@@ -117,9 +117,13 @@ func writeSheetHTML(dir string, refs []string) error {
 			}
 		}
 		for _, a := range rs {
+			label := fmt.Sprintf("r%02d a%02d · ", a.Round, a.Attempt)
+			if a.Width > 0 && a.Height > 0 {
+				label += fmt.Sprintf("%d×%d · ", a.Width, a.Height)
+			}
 			sr.Attempts = append(sr.Attempts, sheetAttempt{
 				Src:   urlPath(filepath.Join("rounds", roundName(a.Round), attemptBase(a.Attempt)+".png")),
-				Label: fmt.Sprintf("r%02d a%02d · %s", a.Round, a.Attempt, money(a.CostUSD)),
+				Label: label + money(a.CostUSD),
 			})
 		}
 		d.Rounds = append(d.Rounds, sr)

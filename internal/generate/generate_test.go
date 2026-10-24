@@ -202,6 +202,10 @@ func TestRoundWritesAttemptsAndRecords(t *testing.T) {
 		if r.Round != 1 || r.Attempt != i {
 			t.Errorf("record %d: round %d attempt %d", i, r.Round, r.Attempt)
 		}
+		// The size asked for and the pixels that came back (the fake's 4x4).
+		if r.Width != 4 || r.Height != 4 {
+			t.Errorf("record %d: %dx%d, want the written PNG's 4x4", i, r.Width, r.Height)
+		}
 		if r.CostUSD != m.PerImage["2K"] || r.CostBasis != "rate" || !strings.HasPrefix(r.ProviderID, "resp-") {
 			t.Errorf("record %d cost/id: %+v", i, r)
 		}

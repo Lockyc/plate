@@ -15,11 +15,15 @@ import (
 
 // Record is the provenance of one attempt, written as aMM.json beside its
 // aMM.png. It says where the image came from, not how to make it again.
+// Size is the tier asked for; Width and Height are the pixels the written
+// PNG has, which a model may not match to the tier.
 type Record struct {
 	Provider   string      `json:"provider"`
 	Model      string      `json:"model"`
 	Prompt     string      `json:"prompt"`
 	Size       string      `json:"size"`
+	Width      int         `json:"width,omitempty"`
+	Height     int         `json:"height,omitempty"`
 	Aspect     string      `json:"aspect"`
 	Refs       []RefRecord `json:"refs"`
 	Round      int         `json:"round"`
