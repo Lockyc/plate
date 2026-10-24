@@ -173,6 +173,18 @@ func TestOpenRouterModels(t *testing.T) {
 		if m.KeyEnv != "OPENROUTER_API_KEY" || !m.Reported || !strings.Contains(m.ID, "/") {
 			t.Errorf("%s: key %s, reported %v; want OPENROUTER_API_KEY, reported, a vendor/ ID", m.ID, m.KeyEnv, m.Reported)
 		}
+		// Measured 2026-10-24: Gemini honours the resolution tier, FLUX.2
+		// and GPT Image only an explicit size.
+		want := map[string]string{
+			"google/gemini-3.1-flash-image": "", "google/gemini-3-pro-image": "",
+			"openai/gpt-image-2": "pixels", "black-forest-labs/flux.2-pro": "pixels", "black-forest-labs/flux.2-max": "pixels",
+		}
+		if m.SizeForm != want[m.ID] {
+			t.Errorf("%s: size form %q, want %q", m.ID, m.SizeForm, want[m.ID])
+		}
+		if m.SizeForm == "pixels" && (m.MaxPixels <= 0 || len(m.Sizes) == 0) {
+			t.Errorf("%s: pixels form needs MaxPixels and Sizes; got %v, %v", m.ID, m.MaxPixels, m.Sizes)
+		}
 	}
 	if n != 5 {
 		t.Errorf("%d openrouter models, want 5", n)
