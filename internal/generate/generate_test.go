@@ -345,6 +345,29 @@ func TestPartialRoundKeepsSuccesses(t *testing.T) {
 	}
 }
 
+// Only a partial round holding something is named as keeping images; an
+// empty one holds nothing paid. Both keep their numbers.
+func TestEmptyPartialIsNotNamed(t *testing.T) {
+	needMagick(t)
+	googleServer(t, nil)
+	dir := t.TempDir()
+	pose := filepath.Join(dir, "wave")
+	os.MkdirAll(filepath.Join(roundsDir(pose), "01.partial"), 0o755)
+	full := filepath.Join(roundsDir(pose), "02.partial")
+	os.MkdirAll(full, 0o755)
+	os.WriteFile(filepath.Join(full, "a01.png"), pngOf(t, 4, 4, color.NRGBA{0, 0, 255, 255}), 0o644)
+	code, _, errs := gen(t, "--pose", pose, "--prompt", "p", "--ref", writeRef(t, dir, "front.png"), "--provider", "google")
+	if code != 0 {
+		t.Fatalf("code %d: %s", code, errs)
+	}
+	if strings.Contains(errs, "01.partial") || !strings.Contains(errs, filepath.Join("rounds", "02.partial")+" holds an unfinished round") {
+		t.Errorf("stderr %q: want 02.partial named and 01.partial not", errs)
+	}
+	if _, err := os.Stat(filepath.Join(roundsDir(pose), "03")); err != nil {
+		t.Errorf("the round did not take the next free number: %v", err)
+	}
+}
+
 func TestKeyMissingBeforeAnything(t *testing.T) {
 	m, _ := pins.ImageModelFor("google", "")
 	t.Setenv(m.KeyEnv, "")
