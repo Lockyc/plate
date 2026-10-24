@@ -59,15 +59,41 @@ func parse(t *testing.T, b []byte) []entry {
 	}
 	var es []entry
 	for i := 8; i < len(b); {
-		n := int(binary.BigEndian.Uint32(b[i+4 : i+8]))
-		cfg, err := png.DecodeConfig(bytes.NewReader(b[i+8 : i+n]))
-		if err != nil || cfg.Width != cfg.Height {
-			t.Fatalf("%s: %v %dx%d", b[i:i+4], err, cfg.Width, cfg.Height)
-		}
-		es = append(es, entry{string(b[i : i+4]), cfg.Width})
+		code, n := string(b[i:i+4]), int(binary.BigEndian.Uint32(b[i+4:i+8]))
+		data := b[i+8 : i+n]
 		i += n
+		if px, ok := map[string]int{"ic04": 16, "ic05": 32}[code]; ok {
+			if string(data[:4]) != "ARGB" {
+				t.Fatalf("%s: not ARGB: % x", code, data[:4])
+			}
+			es = append(es, entry{code, px})
+			continue
+		}
+		cfg, err := png.DecodeConfig(bytes.NewReader(data))
+		if err != nil || cfg.Width != cfg.Height {
+			t.Fatalf("%s: %v %dx%d", code, err, cfg.Width, cfg.Height)
+		}
+		es = append(es, entry{code, cfg.Width})
 	}
 	return es
+}
+
+func TestPackBits(t *testing.T) {
+	run := bytes.Repeat([]byte{7}, 131)
+	for _, c := range []struct {
+		in, want []byte
+	}{
+		{[]byte{1}, []byte{0, 1}},
+		{[]byte{1, 2, 2}, []byte{2, 1, 2, 2}},
+		{[]byte{5, 5, 5}, []byte{0x80, 5}},
+		{[]byte{1, 2, 9, 9, 9, 9}, []byte{1, 1, 2, 0x81, 9}},
+		{run, []byte{0xff, 7, 0, 7}},
+		{bytes.Repeat([]byte{1, 2}, 65), append([]byte{127}, append(bytes.Repeat([]byte{1, 2}, 64), 1, 1, 2)...)},
+	} {
+		if got := packBits(nil, c.in); !bytes.Equal(got, c.want) {
+			t.Errorf("packBits(% x) = % x, want % x", c.in, got, c.want)
+		}
+	}
 }
 
 func TestIconWritesIcnsAndPNG(t *testing.T) {
@@ -157,36 +183,91 @@ func TestIconFailureLeavesOutputs(t *testing.T) {
 }
 
 // TestEncodeReadsBackWithIconutil holds Encode to what macOS itself reads,
-// where iconutil is there to ask.
+// pixel for pixel, where iconutil is there to ask.
 func TestEncodeReadsBackWithIconutil(t *testing.T) {
 	if _, err := exec.LookPath("iconutil"); err != nil {
 		t.Skip("no iconutil")
 	}
+	// Flat bands and per-pixel noise, with soft alpha, exercise both
+	// run-length modes.
+	src := map[int]*image.NRGBA{}
 	pngs := map[int][]byte{}
 	for _, s := range slots {
-		var b bytes.Buffer
 		img := image.NewNRGBA(image.Rect(0, 0, s.px, s.px))
-		img.Set(0, 0, color.NRGBA{1, 2, 3, 255})
+		for y := 0; y < s.px; y++ {
+			for x := 0; x < s.px; x++ {
+				c := color.NRGBA{200, 40, 60, 255}
+				if y >= s.px/2 {
+					c = color.NRGBA{uint8(x * 37), uint8(y * 11), uint8(x ^ y), uint8(128 + x%128)}
+				}
+				img.SetNRGBA(x, y, c)
+			}
+		}
+		var b bytes.Buffer
 		png.Encode(&b, img)
-		pngs[s.px] = b.Bytes()
+		src[s.px], pngs[s.px] = img, b.Bytes()
 	}
 	dir := t.TempDir()
 	icns := filepath.Join(dir, "a.icns")
-	os.WriteFile(icns, Encode(pngs), 0o644)
+	b, err := Encode(pngs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(icns, b, 0o644)
 	set := filepath.Join(dir, "a.iconset")
 	if out, err := exec.Command("iconutil", "-c", "iconset", "-o", set, icns).CombinedOutput(); err != nil {
 		t.Fatalf("iconutil: %v: %s", err, out)
 	}
-	want := []string{"icon_128x128.png", "icon_128x128@2x.png", "icon_16x16.png", "icon_16x16@2x.png",
-		"icon_256x256.png", "icon_256x256@2x.png", "icon_32x32.png", "icon_32x32@2x.png",
-		"icon_512x512.png", "icon_512x512@2x.png"}
+	files := map[string]int{"icon_16x16.png": 16, "icon_16x16@2x.png": 32, "icon_32x32.png": 32, "icon_32x32@2x.png": 64,
+		"icon_128x128.png": 128, "icon_128x128@2x.png": 256, "icon_256x256.png": 256, "icon_256x256@2x.png": 512,
+		"icon_512x512.png": 512, "icon_512x512@2x.png": 1024}
 	ents, _ := os.ReadDir(set)
-	var got []string
-	for _, e := range ents {
-		got = append(got, e.Name())
+	if len(ents) != len(files) {
+		t.Errorf("iconset has %d files, want %d", len(ents), len(files))
 	}
-	slices.Sort(got)
-	if !slices.Equal(got, want) {
-		t.Errorf("iconset %q\nwant %q", got, want)
+	for name, px := range files {
+		f, err := os.Open(filepath.Join(set, name))
+		if err != nil {
+			t.Error(err)
+			continue
+		}
+		got, err := png.Decode(f)
+		f.Close()
+		if err != nil {
+			t.Errorf("%s: %v", name, err)
+			continue
+		}
+		if bad := differing(src[px], got); bad > 0 {
+			t.Errorf("%s: %d of %d pixels differ from the source", name, bad, px*px)
+		}
 	}
+}
+
+// differing counts the pixels of got off from want by more than a level
+// in alpha, or in a colour channel by more than the 1 + 254/alpha levels
+// that 8-bit premultiplied storage can round away (1 opaque, 2 near half
+// alpha); alpha 0 pixels match whatever their colour.
+func differing(want *image.NRGBA, got image.Image) int {
+	n := 0
+	r := want.Bounds()
+	for y := r.Min.Y; y < r.Max.Y; y++ {
+		for x := r.Min.X; x < r.Max.X; x++ {
+			w := want.NRGBAAt(x, y)
+			g := color.NRGBAModel.Convert(got.At(x, y)).(color.NRGBA)
+			if w.A == 0 && g.A == 0 {
+				continue
+			}
+			tol := 1 + 254/max(int(w.A), 1)
+			for i, d := range [][2]uint8{{w.R, g.R}, {w.G, g.G}, {w.B, g.B}, {w.A, g.A}} {
+				if i == 3 {
+					tol = 1
+				}
+				if int(d[0])-int(d[1]) > tol || int(d[1])-int(d[0]) > tol {
+					n++
+					break
+				}
+			}
+		}
+	}
+	return n
 }
