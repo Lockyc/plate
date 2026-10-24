@@ -125,7 +125,7 @@ func (b bfl) Generate(ctx context.Context, r Request) ([]Image, []Failure, error
 // The poll goes to the base host's documented /v1/get_result, never to the
 // answer's polling_url, so the key only ever travels to the configured host.
 // A job that ended without an image after it may have been billed (cancelled
-// mid-poll, Ready but unusable) carries the job's cost; a moderated or
+// mid-poll, a poll that failed, Ready but unusable) carries the job's cost; a moderated or
 // errored one does not, since BFL bills only Ready jobs.
 func (bfl) attempt(ctx context.Context, base, endpoint, key string, payload []byte, cost float64) (*Image, Failure, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
@@ -158,7 +158,8 @@ func (bfl) attempt(ctx context.Context, base, endpoint, key string, payload []by
 			if ctx.Err() != nil {
 				return gaveUp(last)
 			}
-			return nil, Failure{}, err
+			// The job was taken and may yet be billed.
+			return nil, Failure{Reason: fmt.Sprintf("bfl: polling job %s: %v", job.ID, err), CostUSD: cost}, nil
 		}
 		last = p.Status
 		switch p.Status {

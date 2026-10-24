@@ -40,11 +40,14 @@ type Image struct {
 }
 
 // Failure is one attempt that produced no image. CostUSD is what the provider
-// charged for it anyway, 0 when it charged nothing.
+// charged for it anyway, 0 when it charged nothing. Unreported marks a
+// request that was sent and may have been charged, but whose cost never came
+// back; its CostUSD is then 0.
 type Failure struct {
-	Index   int
-	Reason  string
-	CostUSD float64
+	Index      int
+	Reason     string
+	CostUSD    float64
+	Unreported bool
 }
 
 // Provider generates images. A non-nil error means the whole round failed (for

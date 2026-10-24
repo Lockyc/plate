@@ -684,6 +684,40 @@ func TestChargedFailuresReachTheTotal(t *testing.T) {
 	}
 }
 
+// A failed attempt whose cost never came back may have been charged: the
+// round is kept with it in failures.json, and it is counted as unreported.
+func TestUnreportedFailuresKeepTheRound(t *testing.T) {
+	needMagick(t)
+	openrouterServer(t, func(i int, image string) map[string]any {
+		if i == 0 {
+			return imageAnswer(image, 0.05)
+		}
+		return map[string]any{"data": []any{}}
+	})
+	dir := t.TempDir()
+	pose := filepath.Join(dir, "wave")
+	code, o, e := gen(t, "--pose", pose, "--prompt", "p", "--ref", writeRef(t, dir, "front.png"), "--provider", "openrouter", "--n", "3")
+	if code != 1 || !strings.Contains(e, "did not report the cost of 2 attempts") {
+		t.Fatalf("code %d, stderr %q", code, e)
+	}
+	if !strings.Contains(o, "\nunreported 2\n") {
+		t.Errorf("stdout lacks the unreported line:\n%s", o)
+	}
+	fs, err := LoadFailures(pose)
+	if err != nil || len(fs) != 1 || len(fs[0].Failures) != 2 || !fs[0].Failures[0].Unreported {
+		t.Fatalf("failures %+v, %v", fs, err)
+	}
+	// Every attempt failed unreported: the round is still kept.
+	openrouterServer(t, func(i int, image string) map[string]any { return map[string]any{"data": []any{}} })
+	code, o, _ = gen(t, "--pose", pose, "--prompt", "p", "--ref", writeRef(t, dir, "front.png"), "--provider", "openrouter", "--n", "1")
+	if code != 1 || !strings.Contains(o, "\nunreported 1\n") {
+		t.Errorf("all unreported: code %d, stdout:\n%s", code, o)
+	}
+	if _, err := os.Stat(filepath.Join(pose, "rounds", "02", failuresName)); err != nil {
+		t.Errorf("round 02 not kept: %v", err)
+	}
+}
+
 func TestListModels(t *testing.T) {
 	code, o, e := gen(t, "--list-models", "--provider", "openrouter")
 	var want []string

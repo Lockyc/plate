@@ -83,9 +83,10 @@ func readRecord(path string) (Record, error) {
 const failuresName = "failures.json"
 
 // RoundFailures is a round's failures.json: the attempts that produced no
-// image, written when the provider charged for any of them so the charge is
-// on disk. Index is the attempt's place in the request (from 0), not an aMM
-// number: aMM numbers go to the images that came back.
+// image, written when the provider charged for any of them, or may have
+// without reporting it, so the charge is on disk. Index is the attempt's
+// place in the request (from 0), not an aMM number: aMM numbers go to the
+// images that came back.
 type RoundFailures struct {
 	Provider string          `json:"provider"`
 	Model    string          `json:"model"`
@@ -94,11 +95,24 @@ type RoundFailures struct {
 	Failures []FailureRecord `json:"failures"`
 }
 
-// FailureRecord is one failed attempt and what it was charged.
+// FailureRecord is one failed attempt and what it was charged; Unreported
+// as genai.Failure has it.
 type FailureRecord struct {
-	Index   int     `json:"index"`
-	Reason  string  `json:"reason"`
-	CostUSD float64 `json:"cost_usd"`
+	Index      int     `json:"index"`
+	Reason     string  `json:"reason"`
+	CostUSD    float64 `json:"cost_usd"`
+	Unreported bool    `json:"unreported,omitempty"`
+}
+
+// Unreported counts the failures whose cost never came back.
+func (rf RoundFailures) Unreported() int {
+	n := 0
+	for _, f := range rf.Failures {
+		if f.Unreported {
+			n++
+		}
+	}
+	return n
 }
 
 // Charged is the sum of the failures' costs, in USD.

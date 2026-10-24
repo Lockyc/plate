@@ -8,8 +8,10 @@ import (
 	"fmt"
 	"image"
 	"net/http"
+	"net/http/httptrace"
 	"slices"
 	"strings"
+	"sync/atomic"
 )
 
 const openrouterDefaultURL = "https://openrouter.ai"
@@ -126,8 +128,17 @@ func openrouterPixels(r Request) (string, error) {
 // attempt makes one request. It returns every usable image in the answer,
 // splitting usage.cost evenly over them, or why there is none (a Failure
 // carrying any cost billed, for an answer without a usable image; an error
-// for a failed call).
+// for a failed call). A Failure is Unreported when the request went out and
+// no cost came back: a 2xx answer without usage.cost, or a call that ended
+// (timeout, cancel, dropped connection) while waiting on the answer.
 func (openrouter) attempt(ctx context.Context, url, key string, payload []byte) ([]Image, Failure, error) {
+	// awaiting is true from the moment a request is written until its answer
+	// starts, per round trip, so a retry's wait does not count.
+	var awaiting atomic.Bool
+	ctx = httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{
+		WroteRequest:         func(httptrace.WroteRequestInfo) { awaiting.Store(true) },
+		GotFirstResponseByte: func() { awaiting.Store(false) },
+	})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
 	if err != nil {
 		return nil, Failure{}, fmt.Errorf("openrouter: %w", err)
@@ -136,22 +147,26 @@ func (openrouter) attempt(ctx context.Context, url, key string, payload []byte) 
 	req.Header.Set("Authorization", "Bearer "+key)
 	raw, err := doRaw(ctx, "openrouter", req)
 	if err != nil {
+		if awaiting.Load() {
+			return nil, Failure{Reason: err.Error(), Unreported: true}, nil
+		}
 		return nil, Failure{}, err
 	}
 	var resp openrouterResponse
 	if err := json.Unmarshal(raw, &resp); err != nil {
-		return nil, Failure{}, fmt.Errorf("openrouter: decoding the response: %w", err)
+		return nil, Failure{Reason: "openrouter: decoding the response: " + err.Error(), Unreported: true}, nil
 	}
 	var billed float64
 	if c := resp.Usage.Cost; c != nil {
 		billed = *c
 	}
+	unreported := resp.Usage.Cost == nil
 	if len(resp.Data) == 0 {
 		reason := "openrouter: no image returned"
 		if len(resp.Error) > 0 && string(resp.Error) != "null" {
 			reason += ": " + bodyMessage(raw, http.StatusOK)
 		}
-		return nil, Failure{Reason: reason, CostUSD: billed}, nil
+		return nil, Failure{Reason: reason, CostUSD: billed, Unreported: unreported}, nil
 	}
 	var pngs [][]byte
 	var why []string
@@ -167,7 +182,7 @@ func (openrouter) attempt(ctx context.Context, url, key string, payload []byte) 
 		}
 	}
 	if len(pngs) == 0 {
-		return nil, Failure{Reason: "openrouter: " + strings.Join(why, "; "), CostUSD: billed}, nil
+		return nil, Failure{Reason: "openrouter: " + strings.Join(why, "; "), CostUSD: billed, Unreported: unreported}, nil
 	}
 	imgs := make([]Image, len(pngs))
 	for i, png := range pngs {
