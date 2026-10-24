@@ -39,6 +39,9 @@ var now = time.Now
 
 // Main runs `plate generate`.
 func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	if len(args) > 0 && args[0] == "accept" {
+		return acceptMain(ctx, args[1:], stdout, stderr)
+	}
 	return roundMain(ctx, args, stdout, stderr)
 }
 
@@ -128,6 +131,9 @@ func roundMain(ctx context.Context, args []string, stdout, stderr io.Writer) int
 	if err := writeSheet(ctx, *pose, refs); err != nil {
 		fmt.Fprintf(stderr, "plate generate: contact sheet: %v\n", err)
 		code = 1
+	} else {
+		fmt.Fprintln(stdout, filepath.Join(*pose, "sheet.html"))
+		fmt.Fprintln(stdout, filepath.Join(*pose, "sheet.png"))
 	}
 	return code
 }

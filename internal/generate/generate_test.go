@@ -215,8 +215,8 @@ func TestRoundWritesAttemptsAndRecords(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(pose, "rounds", "01.partial")); !os.IsNotExist(err) {
 		t.Errorf("01.partial left behind: %v", err)
 	}
-	if !strings.HasSuffix(out, "pose total $0.40\n") {
-		t.Errorf("stdout does not end with the pose total:\n%s", out)
+	if !strings.HasSuffix(out, "pose total $0.40\n"+filepath.Join(pose, "sheet.html")+"\n"+filepath.Join(pose, "sheet.png")+"\n") {
+		t.Errorf("stdout does not end with the pose total and sheet paths:\n%s", out)
 	}
 	if errs != "" {
 		t.Errorf("stderr %q", errs)
@@ -256,7 +256,7 @@ func TestRoundNumbering(t *testing.T) {
 	if len(rs) != 2 || rs[0].Round != 1 || rs[1].Round != 4 {
 		t.Errorf("LoadPose: %+v", rs)
 	}
-	if !strings.HasSuffix(out, "pose total $0.20\n") {
+	if !strings.HasSuffix(out, "pose total $0.20\n"+filepath.Join(pose, "sheet.html")+"\n"+filepath.Join(pose, "sheet.png")+"\n") {
 		t.Errorf("total counts the partial round:\n%s", out)
 	}
 }
@@ -593,9 +593,12 @@ func TestSheetAfterEveryRound(t *testing.T) {
 	pose := filepath.Join(dir, "wave")
 	ref := writeRef(t, dir, "front.png")
 	// A partial round (two attempts failed) still gets its sheet.
-	code, _, errs := gen(t, "--pose", pose, "--prompt", "p", "--ref", ref, "--provider", "google")
+	code, out, errs := gen(t, "--pose", pose, "--prompt", "p", "--ref", ref, "--provider", "google")
 	if code != 1 {
 		t.Fatalf("code %d: %s", code, errs)
+	}
+	if !strings.Contains(out, filepath.Join(pose, "sheet.html")) || !strings.Contains(out, filepath.Join(pose, "sheet.png")) {
+		t.Errorf("stdout %q lacks the sheet paths", out)
 	}
 	if len(*calls) != 1 || (*calls)[0][0] != pose || (*calls)[0][1] != ref {
 		t.Errorf("sheet calls %v", *calls)
