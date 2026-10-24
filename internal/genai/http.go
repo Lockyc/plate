@@ -152,13 +152,20 @@ func call(ctx context.Context, req *http.Request) ([]byte, int, http.Header, err
 	return body, resp.StatusCode, resp.Header, nil
 }
 
-// retryAfter parses a Retry-After header: delay seconds or an HTTP date.
+// retryAfter parses a Retry-After header: delay seconds or an HTTP date. A
+// seconds value past callTimeout (one too large for an int64 included) comes
+// back as callTimeout+1s rather than overflowing, so do's cap still gives up.
+// time.Until saturates, so a far-future date cannot wrap.
 func retryAfter(v string) (time.Duration, bool) {
 	v = strings.TrimSpace(v)
 	if v == "" {
 		return 0, false
 	}
-	if s, err := strconv.Atoi(v); err == nil && s >= 0 {
+	if strings.Trim(v, "0123456789") == "" {
+		s, err := strconv.ParseInt(v, 10, 64)
+		if err != nil || s > int64(callTimeout/time.Second) {
+			return callTimeout + time.Second, true
+		}
 		return time.Duration(s) * time.Second, true
 	}
 	if t, err := http.ParseTime(v); err == nil {
