@@ -296,15 +296,9 @@ func TestBFLRefusesBeforeAnyRequest(t *testing.T) {
 	m := bflModel(t)
 	var hits int32
 	bflServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { atomic.AddInt32(&hits, 1) }))
-	refs := make([]Ref, m.MaxRefs+1)
-	for i := range refs {
-		refs[i] = Ref{PNG: pngOf(8, 8)}
-	}
 	cases := map[string]Request{
-		"too many refs": {Model: m, Prompt: "p", Refs: refs, N: 1, Size: "1K"},
-		"4K":            {Model: m, Prompt: "p", N: 1, Size: "4K"},
-		"bad aspect":    {Model: m, Prompt: "p", N: 1, Size: "1K", Aspect: "wide"},
-		"no attempts":   {Model: m, Prompt: "p", N: 0, Size: "1K"},
+		"bad aspect":     {Model: m, Prompt: "p", N: 1, Size: "1K", Aspect: "wide"},
+		"unreadable ref": {Model: m, Prompt: "p", N: 1, Size: "1K", Refs: []Ref{{PNG: []byte("\xff\xd8\xff")}}},
 	}
 	for name, r := range cases {
 		if _, _, err := (bfl{}).Generate(context.Background(), r); err == nil {

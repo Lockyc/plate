@@ -8,7 +8,11 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
+	"sort"
 	"strconv"
+	"strings"
+
+	"github.com/lockyc/plate/internal/pins"
 )
 
 const openaiDefaultURL = "https://api.openai.com"
@@ -19,14 +23,26 @@ func init() { providers["openai"] = openai{} }
 
 func (openai) Name() string { return "openai" }
 
-// openaiSizes maps a Request.Aspect to a size the edit endpoint documents as
-// recommended. "1K" and "2K" both use it; 4K sizes are documented as
-// experimental above 2560x1440, so they are not offered.
-var openaiSizes = map[string]string{
-	"": "1024x1024", "1:1": "1024x1024", "3:2": "1536x1024", "2:3": "1024x1536",
+// openaiSize is the "WxH" the model makes at aspect (its AspectPixels),
+// square when no aspect is asked for.
+func openaiSize(m pins.ImageModel, aspect string) (string, error) {
+	if aspect == "" {
+		aspect = "1:1"
+	}
+	if size, ok := m.AspectPixels[aspect]; ok {
+		return size, nil
+	}
+	aspects := make([]string, 0, len(m.AspectPixels))
+	for a := range m.AspectPixels {
+		aspects = append(aspects, a)
+	}
+	sort.Strings(aspects)
+	offered := make([]string, len(aspects))
+	for i, a := range aspects {
+		offered[i] = m.AspectPixels[a] + " (" + a + ")"
+	}
+	return "", fmt.Errorf("openai: %s cannot make aspect %q (sizes: %s)", m.ID, aspect, strings.Join(offered, ", "))
 }
-
-const openaiSizeList = "1024x1024 (1:1), 1536x1024 (3:2), 1024x1536 (2:3)"
 
 type openaiResponse struct {
 	Data []struct {
@@ -46,15 +62,9 @@ type openaiResponse struct {
 // usable image splits the bill over its Failures instead. ProviderID is empty
 // because do does not expose response headers.
 func (openai) Generate(ctx context.Context, r Request) ([]Image, []Failure, error) {
-	if r.N <= 0 {
-		return nil, nil, fmt.Errorf("openai: %d attempts asked for; need at least 1", r.N)
-	}
-	if r.Size != "1K" && r.Size != "2K" {
-		return nil, nil, fmt.Errorf("openai: %s has no size %q (sizes: 1K, 2K)", r.Model.ID, r.Size)
-	}
-	size, ok := openaiSizes[r.Aspect]
-	if !ok {
-		return nil, nil, fmt.Errorf("openai: %s cannot make aspect %q (sizes: %s)", r.Model.ID, r.Aspect, openaiSizeList)
+	size, err := openaiSize(r.Model, r.Aspect)
+	if err != nil {
+		return nil, nil, err
 	}
 	key, err := r.Model.Key()
 	if err != nil {

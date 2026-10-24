@@ -82,9 +82,6 @@ func roundMain(ctx context.Context, args []string, stdout, stderr io.Writer) int
 	if *pose == "" || *prompt == "" || len(refs) == 0 {
 		return cli.Usage(stderr, "generate", "give --pose, --prompt and at least one --ref")
 	}
-	if *n < 1 {
-		return cli.Usage(stderr, "generate", "--n must be at least 1")
-	}
 	m := pins.DefaultImageModel()
 	if *provider != "" {
 		var err error
@@ -92,8 +89,8 @@ func roundMain(ctx context.Context, args []string, stdout, stderr io.Writer) int
 			return cli.Usage(stderr, "generate", "%v", err)
 		}
 	}
-	if m.MaxRefs > 0 && len(refs) > m.MaxRefs {
-		return cli.Usage(stderr, "generate", "%s takes at most %d references; %d given", m.ID, m.MaxRefs, len(refs))
+	if err := genai.Check(m, *n, len(refs), *size); err != nil {
+		return cli.Usage(stderr, "generate", "%v", err)
 	}
 	if _, err := m.Key(); err != nil {
 		return cli.Fail(stderr, "generate", err)

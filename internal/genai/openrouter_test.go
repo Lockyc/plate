@@ -175,8 +175,6 @@ func TestOpenRouterPixelsRefused(t *testing.T) {
 		refs                []Ref
 		want                string
 	}{
-		// FLUX.2 makes at most 4 MP, so 4K would be 2K at a 4K price.
-		{"black-forest-labs/flux.2-pro", "4K", "", nil, "1K, 2K"},
 		{"black-forest-labs/flux.2-pro", "2K", "", []Ref{{Path: "r.jpg", PNG: []byte("\xff\xd8\xff")}}, "reference 1"},
 		{"black-forest-labs/flux.2-pro", "2K", "wide", nil, "W:H"},
 	} {
@@ -188,16 +186,6 @@ func TestOpenRouterPixelsRefused(t *testing.T) {
 	}
 	if n.Load() != 0 {
 		t.Errorf("%d requests made; want none", n.Load())
-	}
-}
-
-func TestOpenRouterSizeChecked(t *testing.T) {
-	m := openrouterModel(t, "google/gemini-3-pro-image")
-	var n atomic.Int32
-	openrouterServer(t, func(w http.ResponseWriter, r *http.Request) { n.Add(1) })
-	_, _, err := openrouterProvider(t).Generate(context.Background(), Request{Model: m, Prompt: "p", N: 1, Size: "512"})
-	if err == nil || !strings.Contains(err.Error(), "1K, 2K, 4K") || n.Load() != 0 {
-		t.Errorf("err %v, %d requests; want an error naming the sizes and no request", err, n.Load())
 	}
 }
 

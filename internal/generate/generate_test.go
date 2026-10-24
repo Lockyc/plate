@@ -367,6 +367,27 @@ func TestKeyMissingBeforeAnything(t *testing.T) {
 	}
 }
 
+// A request the model cannot take is refused before a round is claimed or a
+// request sent.
+func TestRequestCheckedBeforeAnything(t *testing.T) {
+	s := googleServer(t, nil)
+	dir := t.TempDir()
+	pose := filepath.Join(dir, "wave")
+	ref := writeRef(t, dir, "front.png")
+	for _, args := range [][]string{{"--size", "8K"}, {"--n", "0"}} {
+		code, _, errs := gen(t, append([]string{"--pose", pose, "--prompt", "p", "--ref", ref, "--provider", "google"}, args...)...)
+		if code != 2 || errs == "" {
+			t.Errorf("%v: code %d, stderr %q", args, code, errs)
+		}
+	}
+	if _, err := os.Stat(pose); !os.IsNotExist(err) {
+		t.Errorf("pose folder created: %v", err)
+	}
+	if s.n.Load() != 0 {
+		t.Error("the provider was called")
+	}
+}
+
 func TestModelNeedsProvider(t *testing.T) {
 	code, _, errs := gen(t, "--pose", t.TempDir(), "--prompt", "p", "--ref", "x.png", "--model", "gpt-image-2")
 	if code != 2 || !strings.Contains(errs, "--model needs --provider") {
