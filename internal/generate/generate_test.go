@@ -10,6 +10,7 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -229,17 +230,20 @@ func TestRoundNumbering(t *testing.T) {
 	if code != 0 {
 		t.Fatal(e)
 	}
-	if _, err := os.Stat(filepath.Join(pose, "rounds", "02", "a01.png")); err != nil {
-		t.Errorf("second run did not write round 02: %v", err)
+	if _, err := os.Stat(filepath.Join(pose, "rounds", "04", "a01.png")); err != nil {
+		t.Errorf("second run did not write round 04, above the partial: %v", err)
 	}
-	if _, err := os.Stat(stale); !os.IsNotExist(err) {
-		t.Errorf("stale partial round kept: %v", err)
+	if _, err := os.Stat(filepath.Join(stale, "a01.json")); err != nil {
+		t.Errorf("partial round not kept: %v", err)
+	}
+	if want := "plate generate: rounds/03.partial holds an unfinished round; its images are kept\n"; e != want {
+		t.Errorf("stderr %q, want %q", e, want)
 	}
 	rs, err := LoadPose(pose)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(rs) != 2 || rs[0].Round != 1 || rs[1].Round != 2 {
+	if len(rs) != 2 || rs[0].Round != 1 || rs[1].Round != 4 {
 		t.Errorf("LoadPose: %+v", rs)
 	}
 	if !strings.HasSuffix(out, "pose total $0.20\n") {
@@ -339,6 +343,107 @@ func TestRefNormalised(t *testing.T) {
 	r := recordAt(t, filepath.Join(pose, "rounds", "01", "a01.json"))
 	if r.Refs[0].SHA256 != sum(t, ref) {
 		t.Errorf("record SHA256 %s is not the original file's", r.Refs[0].SHA256)
+	}
+}
+
+// magickRef makes a ref with magick from args (the output path appended).
+func magickRef(t *testing.T, name string, args ...string) string {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), name)
+	if _, err := engine.Run(ctx, engine.Cmd{Engine: "magick", Args: append(args, p), Outputs: []string{p}}); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+// sentRef runs one attempt with ref and decodes the PNG the provider got.
+func sentRef(t *testing.T, ref string) image.Image {
+	t.Helper()
+	s := googleServer(t, nil)
+	pose := filepath.Join(t.TempDir(), "wave")
+	if code, _, e := gen(t, "--pose", pose, "--prompt", "p", "--ref", ref, "--provider", "google", "--n", "1"); code != 0 {
+		t.Fatal(e)
+	}
+	sent := refsSent(t, s.bodies[0])
+	if len(sent) != 1 {
+		t.Fatalf("%d refs sent", len(sent))
+	}
+	img, err := png.Decode(bytes.NewReader(sent[0]))
+	if err != nil {
+		t.Fatalf("ref sent is not a PNG: %v", err)
+	}
+	return img
+}
+
+func TestRefCMYKJPEGGoesAsSRGB(t *testing.T) {
+	needMagick(t)
+	ref := magickRef(t, "cmyk.jpg", "-size", "64x64", "xc:red", "-colorspace", "CMYK")
+	r, g, b, _ := sentRef(t, ref).At(32, 32).RGBA()
+	if r>>8 < 200 || g>>8 > 60 || b>>8 > 60 {
+		t.Errorf("CMYK red sent as rgb(%d,%d,%d), want red", r>>8, g>>8, b>>8)
+	}
+}
+
+func TestRefLargeJPEGDownscaled(t *testing.T) {
+	needMagick(t)
+	ref := magickRef(t, "big.jpg", "-size", "6000x4000", "xc:gray")
+	if b := sentRef(t, ref).Bounds(); b.Dx() != 2048 || b.Dy() != 1365 {
+		t.Errorf("6000x4000 sent at %dx%d, want 2048x1365", b.Dx(), b.Dy())
+	}
+}
+
+// TestInterruptedRoundKeepsWhatArrived: cancelled after two of four answers,
+// the round holds those two and is complete.
+func TestInterruptedRoundKeepsWhatArrived(t *testing.T) {
+	needMagick(t)
+	m, _ := pins.ImageModelFor("google", "")
+	t.Setenv(m.KeyEnv, "test-key-not-real")
+	out := pngOf(t, 4, 4, color.NRGBA{0, 0, 255, 255})
+	cctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	var n atomic.Int32
+	var answered sync.WaitGroup
+	answered.Add(2)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if n.Add(1) <= 2 {
+			defer answered.Done()
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{"responseId": "r", "candidates": []any{map[string]any{
+				"finishReason": "STOP",
+				"content": map[string]any{"role": "model", "parts": []any{map[string]any{"inlineData": map[string]any{
+					"mimeType": "image/png", "data": base64.StdEncoding.EncodeToString(out),
+				}}}},
+			}}})
+			return
+		}
+		// The server sees the client hang up only once the body is read.
+		io.Copy(io.Discard, r.Body)
+		answered.Wait()
+		// Give the client time to read the two answers before the cancel.
+		time.Sleep(200 * time.Millisecond)
+		cancel()
+		select {
+		case <-r.Context().Done():
+		case <-time.After(5 * time.Second):
+		}
+	}))
+	defer srv.Close()
+	t.Setenv("PLATE_GENAI_GOOGLE_URL", srv.URL)
+	dir := t.TempDir()
+	pose := filepath.Join(dir, "wave")
+	ref := writeRef(t, dir, "front.png")
+	var o, e bytes.Buffer
+	code := Main(cctx, []string{"--pose", pose, "--prompt", "p", "--ref", ref, "--provider", "google"}, &o, &e)
+	if code != 1 {
+		t.Fatalf("code %d, want 1: %s", code, e.String())
+	}
+	es, _ := os.ReadDir(filepath.Join(pose, "rounds"))
+	if len(es) != 1 || es[0].Name() != "01" {
+		t.Fatalf("rounds/ holds %v, want only 01", es)
+	}
+	got, _ := filepath.Glob(filepath.Join(pose, "rounds", "01", "a*.png"))
+	if len(got) != 2 {
+		t.Errorf("round 01 holds %d attempts, want 2", len(got))
 	}
 }
 
