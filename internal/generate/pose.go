@@ -11,12 +11,14 @@ import (
 )
 
 // A pose folder holds DIR/rounds/NN/aMM.png and aMM.json, NN and MM two
-// digits from 01, and failures.json in a round where the provider charged
-// for an attempt that produced no image (alone, when no attempt did). A round is written as NN.partial and renamed to NN once
-// its records are in, so a round folder without the suffix is complete. A
-// partial round a failed run left is never deleted: it may hold images the
-// person paid for. It is not read as part of the pose, and no later round
-// takes its number.
+// digits from 01, and failures.json in a round where the provider charged,
+// or may have, for an attempt that produced no image (alone, when no attempt
+// did). A round is written as NN.partial and renamed to NN once its records
+// are in, so a round folder without the suffix is complete. A partial round
+// a failed run left is never deleted: it may hold images the person paid
+// for, and an empty one may be another run's claim still waiting on its
+// provider. It is not read as part of the pose, and no later round takes its
+// number.
 const partialSuffix = ".partial"
 
 // roundDir matches a round folder's name: NN, or NN.partial.
@@ -64,13 +66,18 @@ func rounds(pose string) ([]int, error) {
 	return ns, err
 }
 
-// partialRounds names each partial round under pose relative to it, as
-// rounds/NN.partial.
+// partialRounds names each partial round under pose that holds anything,
+// relative to it, as rounds/NN.partial. An empty one holds nothing paid.
 func partialRounds(pose string) ([]string, error) {
 	_, ps, err := scan(pose)
 	var names []string
 	for _, n := range ps {
-		names = append(names, filepath.Join("rounds", roundName(n)+partialSuffix))
+		name := filepath.Join("rounds", roundName(n)+partialSuffix)
+		es, rerr := os.ReadDir(filepath.Join(pose, name))
+		if rerr == nil && len(es) == 0 {
+			continue
+		}
+		names = append(names, name)
 	}
 	return names, err
 }
