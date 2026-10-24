@@ -1,0 +1,198 @@
+package genai
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/lockyc/plate/internal/pins"
+)
+
+// callTimeout bounds one HTTP call; an image model can take minutes on a 4K image.
+const callTimeout = 180 * time.Second
+
+// backoff is the wait before each retry of a 429 or 5xx; its length is the
+// retry count. A Retry-After header replaces the wait it falls on.
+var backoff = []time.Duration{2 * time.Second, 4 * time.Second, 8 * time.Second}
+
+// sleep waits d or until ctx ends. A var so tests can record waits instead.
+var sleep = func(ctx context.Context, d time.Duration) error {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// statusError is a non-2xx answer from a provider.
+type statusError struct {
+	provider string
+	status   int
+	msg      string
+}
+
+func (e *statusError) Error() string {
+	s := fmt.Sprintf("%s: %s (HTTP %d)", e.provider, e.msg, e.status)
+	if e.auth() {
+		s += "; check " + keyEnv(e.provider)
+	}
+	return s
+}
+
+func (e *statusError) auth() bool {
+	return e.status == http.StatusUnauthorized || e.status == http.StatusForbidden
+}
+
+// isAuth reports whether err is a provider refusing the key, which fails a
+// whole round rather than one attempt.
+func isAuth(err error) bool {
+	var se *statusError
+	return errors.As(err, &se) && se.auth()
+}
+
+// keyEnv names the environment variable holding provider's key.
+func keyEnv(provider string) string {
+	for _, m := range pins.ImageModels {
+		if m.Provider == provider {
+			return m.KeyEnv
+		}
+	}
+	return "the " + provider + " API key"
+}
+
+// baseURL is def, or the PLATE_GENAI_<PROVIDER>_URL override (for tests).
+func baseURL(provider, def string) string {
+	if v := os.Getenv("PLATE_GENAI_" + strings.ToUpper(provider) + "_URL"); v != "" {
+		return strings.TrimRight(v, "/")
+	}
+	return def
+}
+
+// do sends req, retrying a 429 or 5xx after each backoff wait, and decodes the
+// JSON answer into out (unless out is nil). Each call has its own timeout. A
+// request with a body must be replayable (http.NewRequest sets GetBody for the
+// standard readers). Errors start "<provider>: " and carry the provider's own
+// message.
+func do(ctx context.Context, provider string, req *http.Request, out any) error {
+	for attempt := 0; ; attempt++ {
+		r := req
+		if attempt > 0 && req.Body != nil {
+			if req.GetBody == nil {
+				return fmt.Errorf("%s: request body cannot be replayed for a retry", provider)
+			}
+			body, err := req.GetBody()
+			if err != nil {
+				return fmt.Errorf("%s: %w", provider, err)
+			}
+			r = req.Clone(ctx)
+			r.Body = body
+		}
+		body, status, hdr, err := call(ctx, r)
+		if err != nil {
+			return fmt.Errorf("%s: %w", provider, err)
+		}
+		if status/100 == 2 {
+			if out == nil {
+				return nil
+			}
+			if err := json.Unmarshal(body, out); err != nil {
+				return fmt.Errorf("%s: decoding the response: %w", provider, err)
+			}
+			return nil
+		}
+		se := &statusError{provider: provider, status: status, msg: bodyMessage(body, status)}
+		retryable := status == http.StatusTooManyRequests || status >= 500
+		if !retryable || attempt >= len(backoff) {
+			return se
+		}
+		wait := backoff[attempt]
+		if ra, ok := retryAfter(hdr.Get("Retry-After")); ok {
+			wait = ra
+		}
+		if err := sleep(ctx, wait); err != nil {
+			return fmt.Errorf("%s: %w (waiting to retry after: %s)", provider, err, se.msg)
+		}
+	}
+}
+
+// call makes one HTTP round trip under callTimeout and reads the whole body.
+func call(ctx context.Context, req *http.Request) ([]byte, int, http.Header, error) {
+	cctx, cancel := context.WithTimeout(ctx, callTimeout)
+	defer cancel()
+	resp, err := http.DefaultClient.Do(req.WithContext(cctx))
+	if err != nil {
+		return nil, 0, nil, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, 0, nil, fmt.Errorf("reading the response: %w", err)
+	}
+	return body, resp.StatusCode, resp.Header, nil
+}
+
+// retryAfter parses a Retry-After header: delay seconds or an HTTP date.
+func retryAfter(v string) (time.Duration, bool) {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return 0, false
+	}
+	if s, err := strconv.Atoi(v); err == nil && s >= 0 {
+		return time.Duration(s) * time.Second, true
+	}
+	if t, err := http.ParseTime(v); err == nil {
+		d := time.Until(t)
+		if d < 0 {
+			d = 0
+		}
+		return d, true
+	}
+	return 0, false
+}
+
+// bodyMessage pulls the provider's error message out of an error body: the
+// {"error":{"message"}} shape (Google, OpenAI), {"error":"..."}, {"detail"}
+// (BFL) or {"message"}; otherwise the body text itself, shortened.
+func bodyMessage(body []byte, status int) string {
+	var v struct {
+		Error   json.RawMessage `json:"error"`
+		Detail  json.RawMessage `json:"detail"`
+		Message string          `json:"message"`
+	}
+	if json.Unmarshal(body, &v) == nil {
+		var e struct {
+			Message string `json:"message"`
+		}
+		var s string
+		switch {
+		case json.Unmarshal(v.Error, &e) == nil && e.Message != "":
+			return e.Message
+		case json.Unmarshal(v.Error, &s) == nil && s != "":
+			return s
+		case json.Unmarshal(v.Detail, &s) == nil && s != "":
+			return s
+		case len(v.Detail) > 0 && string(v.Detail) != "null":
+			return string(v.Detail)
+		case v.Message != "":
+			return v.Message
+		}
+	}
+	text := strings.TrimSpace(string(body))
+	if text == "" {
+		return http.StatusText(status)
+	}
+	if len(text) > 500 {
+		text = text[:500] + "…"
+	}
+	return text
+}
