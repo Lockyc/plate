@@ -93,15 +93,17 @@ BiRefNet runs on rembg's CPU build.
 registered by name (`genai.For`); its calls go through the shared client in
 internal/genai/http.go, which bounds each call (`callTimeout`), retries a
 429 or 5xx (`backoff`, `Retry-After`), starts every error with the provider
-and names the key variable on an auth refusal, and refuses a cross-host
-redirect that would carry a key header. `PLATE_GENAI_<PROVIDER>_URL`
+and names the key variable on an auth refusal (which fails a round only
+when every attempt meets it, `fanOut`), and refuses a redirect that would
+carry a key header off its scheme and host. `PLATE_GENAI_<PROVIDER>_URL`
 points a provider at an httptest server, as `PLATE_ENGINE_<NAME>` does for
 an engine.
 
 Every model a provider can call is a `pins.ImageModel` in
 internal/pins/imagemodels.go: its ID, its key variable, its billing shape
 (each attempt's cost and `genai.Image.CostBasis` come from it), the sizes,
-references and request fields it takes. The first entry per provider is
+references and request fields it takes; `genai.Check` refuses a round
+outside them before a round is claimed. The first entry per provider is
 that provider's default model; the entry marked `Default` is what a run
 without `--provider` uses (`pins.DefaultImageModel`). A key is read
 only from the environment (`pins.ImageModel.Key`) and is never part of an
@@ -267,10 +269,11 @@ colours, or renders what it is given.
   or read. Each attempt's `generate.Record` names what made it; a reference
   that was itself an attempt embeds that attempt's record (`RefRecord`), so
   an accepted record carries its whole chain once the pose folder is gone.
-  A failed attempt the provider charged for lands in `failures.json`
-  (`RoundFailures`) and counts in the pose total, past `softLimit` of which
-  each round warns. `WriteSheet` writes the contact sheet as HTML and
-  renders it to PNG (`render.PNG`), so the agent sees what the person sees;
+  A failed attempt the provider charged for, or may have
+  (`genai.Failure.Unreported`), lands in `failures.json` (`RoundFailures`)
+  and counts in the pose total, past `softLimit` of which each round warns.
+  `WriteSheet` writes the contact sheet as HTML and renders the newest
+  rounds that fit to PNG (`render.PNG`), so the agent sees what the person sees;
   `generate accept` writes the record before the image. Every file a person
   keeps goes through `internal/atomicfile`.
 - **inpaint, fonts, qr, pdf, impose, marks, doc, slides** — as the README table and each package's

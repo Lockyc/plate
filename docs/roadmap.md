@@ -35,8 +35,8 @@ independently of phase 5. Within a phase, order is open.
 
 ## Deferred
 
-- **generate's default model is provisional.** It is FLUX.2 pro via
-  OpenRouter. The bake-off reference (Big Buck Bunny) is likely in every
+- **generate's default model is provisional.** It is the `Default` pin in
+  internal/pins/imagemodels.go. The bake-off reference (Big Buck Bunny) is likely in every
   model's training data, so it measured recall more than reference-
   following. Unlock for a firmer choice: a comparison on a character no
   model has seen (a consuming project's own character, run case by case

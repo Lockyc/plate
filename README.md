@@ -244,11 +244,11 @@ they refuse to run.
 
 ### Generating a pose
 
-`generate` is the one command that uses the network and an API key. Each
-provider reads its key from an environment variable; set it only for the
-providers you use. A round without one stops before anything is sent and
-names the variable, `plate doctor` says which providers have a key set
-(never the value), and no key is ever a flag or written to a file.
+`generate` is the one command that needs an API key. Each provider reads
+its key from an environment variable; set it only for the providers you
+use. A round without one stops before anything is sent and names the
+variable, `plate doctor` names each provider's variable and whether it is
+set (never the value), and no key is ever a flag or written to a file.
 Without `--provider` a run uses the default model, marked in
 `--list-models`; with `--provider`, `--model` defaults to that provider's
 first model, and `--model` always needs `--provider`.
@@ -258,13 +258,16 @@ The loop, for one pose in a gitignored working folder of your own repo:
 1. **Run a round.** `plate generate --pose work/pointing --ref hero.png
    --prompt "…"` sends `--n` attempts (default 4) and writes
    `rounds/NN/aMM.png`, each with `aMM.json` beside it: provider, model,
-   prompt, size, the sha256 of each reference, cost and date. It prints
-   each path, the pose's total spend, and `sheet.html` and `sheet.png`.
+   prompt, size asked for and pixels made, the sha256 of each reference,
+   cost and date. It prints each path, the pose's total spend, and
+   `sheet.html` and `sheet.png`.
 2. **Look at the sheet.** It shows the references, then every attempt of
-   every round, newest round first, each labelled `rNN-aMM` with its model
-   and cost. The next round rewords the prompt, adds or drops a
-   reference, tries another model, or passes a near-miss attempt as a
-   `--ref`; that attempt's record is then carried inside the new one's.
+   every round, newest round first, each labelled `rNN aMM` with its pixels
+   and cost; `sheet.png` holds the newest rounds that fit one picture, and
+   says how many older ones only `sheet.html` shows. The next round
+   rewords the prompt, adds or drops a reference, tries another model, or
+   passes a near-miss attempt as a `--ref`; that attempt's record is then
+   carried inside the new one's.
 3. **Accept one.** `plate generate accept --pose work/pointing r03-a02
    assets/pointing.png` writes the image and `assets/pointing.provenance.json`,
    the record with the full chain of attempts it came from. It never
@@ -279,9 +282,10 @@ provider, so re-rendering never spends money or changes the art.
 
 Spend is shown, not capped. Each round prints `pose total $N`, including
 failed attempts the provider charged for (recorded in the round's
-`failures.json`), and warns on stderr once a pose passes US$10.00. A
-provider that charged without saying how much has those attempts recorded
-at $0.00, and the round prints `unreported N`. A round in which some
+`failures.json`), and warns on stderr once a pose passes the soft limit
+(`softLimit` in internal/generate). An attempt the provider charged, or may
+have, without saying how much is recorded at $0.00, and the round prints
+`unreported N`. A round in which some
 attempts failed exits 1 with the reasons. A run cut short leaves
 `rounds/NN.partial`, which keeps any images it paid for and is never read
 as part of the pose.
