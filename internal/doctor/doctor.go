@@ -72,6 +72,7 @@ func run(ctx context.Context, engines []pins.Engine, install bool, get getter, o
 		}
 	}
 	tw.Flush()
+	keyReport(out)
 	if len(bad) > 0 || failed {
 		if len(bad) > 0 {
 			fmt.Fprintf(out, "\nthese commands will not run until the rows above are fixed: %s\n", strings.Join(bad, ", "))
@@ -135,4 +136,25 @@ func check(ctx context.Context, e pins.Engine) status {
 	}
 	s.note, s.ok = "ok", true
 	return s
+}
+
+// keyReport prints whether each image provider's API key is set. A missing
+// key never fails doctor: only `generate` needs one, and the value is never
+// printed.
+func keyReport(out io.Writer) {
+	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "\nprovider\tkey")
+	seen := map[string]bool{}
+	for _, m := range pins.ImageModels {
+		if seen[m.KeyEnv] {
+			continue
+		}
+		seen[m.KeyEnv] = true
+		state := "set"
+		if _, err := m.Key(); err != nil {
+			state = "not set"
+		}
+		fmt.Fprintf(tw, "%s\t%s\n", m.Provider, state)
+	}
+	tw.Flush()
 }

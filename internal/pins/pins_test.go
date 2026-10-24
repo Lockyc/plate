@@ -3,6 +3,7 @@ package pins
 import (
 	"regexp"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -107,5 +108,60 @@ func TestMLPins(t *testing.T) {
 	}
 	if IOPaint.Version == "" || IOPaint.ExcludeNewer == "" {
 		t.Error("IOPaint needs a version and an exclude-newer date")
+	}
+}
+
+func TestImageModelsHaveAKeyAndAPrice(t *testing.T) {
+	if len(ImageModels) == 0 {
+		t.Fatal("no image models")
+	}
+	for _, m := range ImageModels {
+		if m.KeyEnv == "" || m.Provider == "" || m.ID == "" {
+			t.Errorf("%+v: provider, id and key variable are required", m)
+		}
+		shapes := 0
+		if len(m.PerImage) > 0 {
+			shapes++
+		}
+		if m.InPerMTok > 0 || m.OutPerMTok > 0 {
+			shapes++
+		}
+		if m.FirstMP > 0 || m.ExtraMP > 0 || m.RefMP > 0 {
+			shapes++
+		}
+		if shapes != 1 {
+			t.Errorf("%s/%s fills %d billing shapes, want 1", m.Provider, m.ID, shapes)
+		}
+	}
+}
+
+func TestImageModelFor(t *testing.T) {
+	d, err := ImageModelFor("google", "")
+	if err != nil || d.ID != ImageModels[0].ID {
+		t.Fatalf("default: %+v, %v", d, err)
+	}
+	m, err := ImageModelFor("google", "gemini-3-pro-image")
+	if err != nil || m.ID != "gemini-3-pro-image" {
+		t.Fatalf("named: %+v, %v", m, err)
+	}
+	_, err = ImageModelFor("google", "nope")
+	if err == nil || !strings.Contains(err.Error(), "gemini-3-pro-image") {
+		t.Fatalf("unknown id error should list IDs: %v", err)
+	}
+	if _, err := ImageModelFor("nobody", ""); err == nil {
+		t.Fatal("unknown provider should fail")
+	}
+}
+
+func TestKeyUnset(t *testing.T) {
+	m := ImageModel{Provider: "openai", KeyEnv: "PLATE_TEST_KEY"}
+	t.Setenv("PLATE_TEST_KEY", "")
+	_, err := m.Key()
+	if err == nil || err.Error() != "PLATE_TEST_KEY is not set; openai needs an API key" {
+		t.Fatalf("got %v", err)
+	}
+	t.Setenv("PLATE_TEST_KEY", "sk-secret")
+	if k, err := m.Key(); err != nil || k != "sk-secret" {
+		t.Fatalf("got %q, %v", k, err)
 	}
 }

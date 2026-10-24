@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"slices"
 	"strings"
@@ -193,5 +194,26 @@ func TestEnginesListAnimate(t *testing.T) {
 				t.Errorf("%s: UsedBy %v lacks %s", name, e.UsedBy, c)
 			}
 		}
+	}
+}
+
+func TestDoctorReportsProviderKeys(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	t.Setenv("OPENAI_API_KEY", "sk-test")
+	t.Setenv("GEMINI_API_KEY", "")
+	var out bytes.Buffer
+	code := run(ctx, nil, false, nil, &out)
+	if code != 0 {
+		t.Fatalf("a missing key must not change the exit status, got %d", code)
+	}
+	o := out.String()
+	if !regexp.MustCompile(`openai +set\b`).MatchString(o) {
+		t.Errorf("no 'openai  set' row:\n%s", o)
+	}
+	if !regexp.MustCompile(`google +not set`).MatchString(o) {
+		t.Errorf("no 'google  not set' row:\n%s", o)
+	}
+	if strings.Contains(o, "sk-test") {
+		t.Errorf("key value leaked:\n%s", o)
 	}
 }
