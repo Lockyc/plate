@@ -97,6 +97,14 @@ independently of phase 5. Within a phase, order is open.
   a video's `seeked`, a seek waits two `requestAnimationFrame`s for the
   frame to reach the compositor. Deferred because the quality cases pass.
   Unlock: a flake, then `requestVideoFrameCallback`.
+- **animate's frames are not reproducible for every scene.** Two captures of
+  a CSS-only scene (several keyframed transforms, staggered ghost copies with
+  an opacity smear, a whole-body shake) at 1080 px on one host differ on some
+  targets and not others: the reported sharpness moves in the fourth decimal
+  and the MP4 changes, so a consumer proving a migration by comparing builds
+  has to allow its clips. The `animate-*` frame-identity case covers its own
+  scene only. Unlock: such a scene reduced to a quality case, then the
+  differing frames found and their source pinned.
 
 - **doctor runs no managed engine.** `doctor` reports chrome-headless-shell
   ok once its pinned build is unpacked, without starting it, so a Linux host
