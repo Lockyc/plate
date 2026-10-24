@@ -266,13 +266,30 @@ func TestOpenAIBadImageDataIsAFailure(t *testing.T) {
 	}
 }
 
-func TestOpenAINoUsableImageStatesTheBill(t *testing.T) {
+func TestOpenAINoUsableImageSplitsTheBillOverFailures(t *testing.T) {
 	m := openaiModel(t)
 	openaiServer(t, func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]any{"data": []any{}, "usage": map[string]any{"input_tokens": 1000000, "output_tokens": 0}})
 	})
-	_, _, err := openaiProvider(t).Generate(context.Background(), Request{Model: m, Prompt: "p", N: 1, Size: "1K"})
-	if err == nil || !strings.Contains(err.Error(), "billed $8.00 and returned no usable image") {
-		t.Errorf("err %v", err)
+	imgs, fails, err := openaiProvider(t).Generate(context.Background(), Request{Model: m, Prompt: "p", N: 2, Size: "1K"})
+	if err != nil || len(imgs) != 0 || len(fails) != 2 {
+		t.Fatalf("err %v, %d images, failures %+v", err, len(imgs), fails)
+	}
+	var sum float64
+	for _, f := range fails {
+		sum += f.CostUSD
+	}
+	if math.Abs(sum-m.InPerMTok) > 1e-12 || fails[0].CostUSD != fails[1].CostUSD {
+		t.Errorf("failures %+v, want the $%v bill split evenly", fails, m.InPerMTok)
+	}
+}
+
+func TestOpenAIShortfallFailuresCarryNoCost(t *testing.T) {
+	m := openaiModel(t)
+	out := fixture(t, "out.png")
+	openaiServer(t, func(w http.ResponseWriter, r *http.Request) { writeJSON(w, openaiImages(out)) })
+	_, fails, _ := openaiProvider(t).Generate(context.Background(), Request{Model: m, Prompt: "p", N: 2, Size: "1K"})
+	if len(fails) != 1 || fails[0].CostUSD != 0 {
+		t.Errorf("failures %+v: the bill is on the image returned", fails)
 	}
 }

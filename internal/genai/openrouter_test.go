@@ -144,17 +144,27 @@ func TestOpenRouterCostIsReported(t *testing.T) {
 			t.Errorf("image cost %v basis %q, want 0.0625 reported", im.CostUSD, im.CostBasis)
 		}
 	}
-	// One request answered with two images: the one kept carries the whole bill.
+	// One request answered with two images: both are kept, splitting the bill.
 	openrouterServer(t, func(w http.ResponseWriter, r *http.Request) { writeJSON(w, openrouterImages(0.10, out, out)) })
 	imgs, _, err = p.Generate(context.Background(), Request{Model: m, Prompt: "p", N: 1, Size: "1K"})
-	if err != nil || len(imgs) != 1 || math.Abs(imgs[0].CostUSD-0.10) > 1e-12 {
-		t.Errorf("err %v, images %+v, want one at the whole bill", err, imgs)
+	if err != nil || len(imgs) != 2 || math.Abs(imgs[0].CostUSD-0.05) > 1e-12 || math.Abs(imgs[1].CostUSD-0.05) > 1e-12 {
+		t.Errorf("err %v, images %+v, want two at half the bill each", err, imgs)
+	}
+	// Two images, one unusable: the usable one carries the whole bill.
+	openrouterServer(t, func(w http.ResponseWriter, r *http.Request) {
+		v := openrouterImages(0.10, out, out)
+		v["data"].([]any)[1].(map[string]any)["b64_json"] = "!!not base64!!"
+		writeJSON(w, v)
+	})
+	imgs, fails, err := p.Generate(context.Background(), Request{Model: m, Prompt: "p", N: 1, Size: "1K"})
+	if err != nil || len(fails) != 0 || len(imgs) != 1 || math.Abs(imgs[0].CostUSD-0.10) > 1e-12 {
+		t.Errorf("err %v, failures %+v, images %+v, want one image at the whole bill", err, fails, imgs)
 	}
 	// No usage.cost: the paid image is kept, marked unreported, never dropped.
 	openrouterServer(t, func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]any{"data": openrouterImages(0, out)["data"], "usage": map[string]any{"total_tokens": 30}})
 	})
-	imgs, fails, err := p.Generate(context.Background(), Request{Model: m, Prompt: "p", N: 1, Size: "1K"})
+	imgs, fails, err = p.Generate(context.Background(), Request{Model: m, Prompt: "p", N: 1, Size: "1K"})
 	if err != nil || len(fails) != 0 || len(imgs) != 1 || imgs[0].CostUSD != 0 || imgs[0].CostBasis != "unreported" {
 		t.Errorf("err %v, failures %v, images %+v; want one unreported image", err, fails, imgs)
 	}
@@ -200,15 +210,15 @@ func TestOpenRouterNoImageIsAFailure(t *testing.T) {
 		writeJSON(w, map[string]any{"data": []any{}, "error": map[string]any{"message": "content policy"}, "usage": map[string]any{"cost": 0}})
 	})
 	imgs, fails, err := openrouterProvider(t).Generate(context.Background(), Request{Model: m, Prompt: "p", N: 2, Size: "1K"})
-	if err != nil || len(imgs) != 0 || len(fails) != 2 || !strings.Contains(fails[0].Reason, "content policy") {
+	if err != nil || len(imgs) != 0 || len(fails) != 2 || !strings.Contains(fails[0].Reason, "content policy") || fails[0].CostUSD != 0 {
 		t.Errorf("err %v, %d images, failures %+v", err, len(imgs), fails)
 	}
 	openrouterServer(t, func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]any{"data": []any{}, "usage": map[string]any{"cost": 0.04}})
 	})
 	_, fails, _ = openrouterProvider(t).Generate(context.Background(), Request{Model: m, Prompt: "p", N: 1, Size: "1K"})
-	if len(fails) != 1 || !strings.Contains(fails[0].Reason, "no image") || !strings.Contains(fails[0].Reason, "$0.04") {
-		t.Errorf("failures %+v, want one saying no image and the $0.04 billed", fails)
+	if len(fails) != 1 || !strings.Contains(fails[0].Reason, "no image") || fails[0].CostUSD != 0.04 {
+		t.Errorf("failures %+v, want one saying no image, costing the $0.04 billed", fails)
 	}
 }
 
@@ -220,7 +230,7 @@ func TestOpenRouterNonPNGIsAFailure(t *testing.T) {
 		}}, "usage": map[string]any{"cost": 0.03}})
 	})
 	imgs, fails, err := openrouterProvider(t).Generate(context.Background(), Request{Model: m, Prompt: "p", N: 1, Size: "1K"})
-	if err != nil || len(imgs) != 0 || len(fails) != 1 || !strings.Contains(fails[0].Reason, "PNG") || !strings.Contains(fails[0].Reason, "image/jpeg") {
+	if err != nil || len(imgs) != 0 || len(fails) != 1 || !strings.Contains(fails[0].Reason, "PNG") || !strings.Contains(fails[0].Reason, "image/jpeg") || fails[0].CostUSD != 0.03 {
 		t.Errorf("err %v, %d images, failures %+v", err, len(imgs), fails)
 	}
 }

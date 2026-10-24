@@ -132,8 +132,8 @@ func TestBFLPollGivesUp(t *testing.T) {
 	if err != nil || len(imgs) != 0 || len(fails) != 1 {
 		t.Fatalf("imgs=%d fails=%v err=%v", len(imgs), fails, err)
 	}
-	if !strings.Contains(fails[0].Reason, "Pending") || !strings.Contains(fails[0].Reason, "; BFL billed about $") {
-		t.Errorf("reason = %q, want the last status and a billing note", fails[0].Reason)
+	if !strings.Contains(fails[0].Reason, "Pending") || fails[0].CostUSD != m.FirstMP {
+		t.Errorf("failure %+v, want the last status and CostUSD %v", fails[0], m.FirstMP)
 	}
 }
 
@@ -172,9 +172,8 @@ func TestBFLReadyButUnusableIsBilled(t *testing.T) {
 	if err != nil || len(imgs) != 0 || len(fails) != 1 {
 		t.Fatalf("imgs=%d fails=%v err=%v", len(imgs), fails, err)
 	}
-	want := fmt.Sprintf("; BFL billed about $%.2f", m.FirstMP)
-	if !strings.HasSuffix(fails[0].Reason, want) {
-		t.Errorf("reason = %q, want suffix %q", fails[0].Reason, want)
+	if fails[0].CostUSD != m.FirstMP || strings.Contains(fails[0].Reason, "billed") {
+		t.Errorf("failure %+v, want CostUSD %v and no billing note in the reason", fails[0], m.FirstMP)
 	}
 }
 
@@ -254,7 +253,7 @@ func TestBFLModeratedIsFailure(t *testing.T) {
 				t.Fatalf("imgs=%d fails=%v err=%v", len(imgs), fails, err)
 			}
 			for i, f := range fails {
-				if f.Index != i || !strings.Contains(f.Reason, status) {
+				if f.Index != i || !strings.Contains(f.Reason, status) || f.CostUSD != 0 {
 					t.Errorf("fail %d = %+v", i, f)
 				}
 			}
