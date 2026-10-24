@@ -19,8 +19,13 @@ import (
 const callTimeout = 180 * time.Second
 
 // backoff is the wait before each retry of a 429 or 5xx; its length is the
-// retry count. A Retry-After header replaces the wait it falls on.
+// retry count. A Retry-After header replaces the wait it falls on; one longer
+// than callTimeout gives up instead.
 var backoff = []time.Duration{2 * time.Second, 4 * time.Second, 8 * time.Second}
+
+// maxBody caps a response body: a 4K PNG in base64 is well under it. A var so
+// tests can shrink it.
+var maxBody int64 = 256 << 20
 
 // sleep waits d or until ctx ends. A var so tests can record waits instead.
 var sleep = func(ctx context.Context, d time.Duration) error {
@@ -117,6 +122,9 @@ func do(ctx context.Context, provider string, req *http.Request, out any) error 
 		}
 		wait := backoff[attempt]
 		if ra, ok := retryAfter(hdr.Get("Retry-After")); ok {
+			if ra > callTimeout {
+				return se
+			}
 			wait = ra
 		}
 		if err := sleep(ctx, wait); err != nil {
@@ -134,7 +142,10 @@ func call(ctx context.Context, req *http.Request) ([]byte, int, http.Header, err
 		return nil, 0, nil, err
 	}
 	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBody+1))
+	if err == nil && int64(len(body)) > maxBody {
+		err = fmt.Errorf("response is larger than %d MiB", maxBody>>20)
+	}
 	if err != nil {
 		return nil, 0, nil, fmt.Errorf("reading the response: %w", err)
 	}

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 )
@@ -69,6 +70,18 @@ type googleResponse struct {
 // Generate sends one generateContent request per attempt, all at once. The
 // refs go first and the prompt last, the order Google's editing examples use.
 func (g google) Generate(ctx context.Context, r Request) ([]Image, []Failure, error) {
+	if r.N <= 0 {
+		return nil, nil, fmt.Errorf("google: %d attempts asked for; need at least 1", r.N)
+	}
+	rate, ok := r.Model.PerImage[r.Size]
+	if !ok {
+		sizes := make([]string, 0, len(r.Model.PerImage))
+		for s := range r.Model.PerImage {
+			sizes = append(sizes, s)
+		}
+		sort.Strings(sizes)
+		return nil, nil, fmt.Errorf("google: %s has no size %q (sizes: %s)", r.Model.ID, r.Size, strings.Join(sizes, ", "))
+	}
 	key, err := r.Model.Key()
 	if err != nil {
 		return nil, nil, err
@@ -105,7 +118,7 @@ func (g google) Generate(ctx context.Context, r Request) ([]Image, []Failure, er
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			img, fail, err := g.attempt(ctx, url, key, payload, r)
+			img, fail, err := g.attempt(ctx, url, key, payload, rate)
 			results[i] = result{img, fail, err}
 		}(i)
 	}
@@ -130,7 +143,7 @@ func (g google) Generate(ctx context.Context, r Request) ([]Image, []Failure, er
 
 // attempt makes one request. It returns the image, or why there is none (a
 // fail reason for an answer without an image, an error for a failed call).
-func (google) attempt(ctx context.Context, url, key string, payload []byte, r Request) (*Image, string, error) {
+func (google) attempt(ctx context.Context, url, key string, payload []byte, rate float64) (*Image, string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
 	if err != nil {
 		return nil, "", fmt.Errorf("google: %w", err)
@@ -160,11 +173,7 @@ func (google) attempt(ctx context.Context, url, key string, payload []byte, r Re
 			if !bytes.HasPrefix(png, pngMagic) {
 				return nil, fmt.Sprintf("google: returned image is not a PNG (%s)", p.InlineData.MimeType), nil
 			}
-			size := r.Size
-			if size == "" {
-				size = "1K" // the API's default imageSize
-			}
-			return &Image{PNG: png, CostUSD: r.Model.PerImage[size], CostBasis: "rate", ProviderID: resp.ResponseID}, "", nil
+			return &Image{PNG: png, CostUSD: rate, CostBasis: "rate", ProviderID: resp.ResponseID}, "", nil
 		}
 		if c.FinishReason != "" {
 			reason := "finishReason " + c.FinishReason
