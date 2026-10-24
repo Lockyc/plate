@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"image"
 	"image/color"
 	"image/png"
@@ -568,4 +569,61 @@ func TestPoseTotal(t *testing.T) {
 	if got := PoseTotal([]Record{{CostUSD: 0.25}, {CostUSD: 1.5}}); got != 1.75 {
 		t.Errorf("PoseTotal = %v", got)
 	}
+}
+
+// stubSheet replaces the sheet writer, which needs Chrome, with a recorder
+// of the calls it gets; err is what it returns.
+func stubSheet(t *testing.T, err error) *[][]string {
+	t.Helper()
+	var calls [][]string
+	prev := writeSheet
+	writeSheet = func(_ context.Context, dir string, refs []string) error {
+		calls = append(calls, append([]string{dir}, refs...))
+		return err
+	}
+	t.Cleanup(func() { writeSheet = prev })
+	return &calls
+}
+
+func TestSheetAfterEveryRound(t *testing.T) {
+	needMagick(t)
+	googleServer(t, func(i int) bool { return i%2 == 1 })
+	calls := stubSheet(t, nil)
+	dir := t.TempDir()
+	pose := filepath.Join(dir, "wave")
+	ref := writeRef(t, dir, "front.png")
+	// A partial round (two attempts failed) still gets its sheet.
+	code, _, errs := gen(t, "--pose", pose, "--prompt", "p", "--ref", ref, "--provider", "google")
+	if code != 1 {
+		t.Fatalf("code %d: %s", code, errs)
+	}
+	if len(*calls) != 1 || (*calls)[0][0] != pose || (*calls)[0][1] != ref {
+		t.Errorf("sheet calls %v", *calls)
+	}
+}
+
+func TestSheetFailureIsReported(t *testing.T) {
+	needMagick(t)
+	googleServer(t, nil)
+	stubSheet(t, errors.New("no chrome"))
+	dir := t.TempDir()
+	pose := filepath.Join(dir, "wave")
+	ref := writeRef(t, dir, "front.png")
+	code, out, errs := gen(t, "--pose", pose, "--prompt", "p", "--ref", ref, "--provider", "google")
+	if code != 1 || !strings.Contains(errs, "no chrome") {
+		t.Errorf("code %d, stderr %q", code, errs)
+	}
+	if _, err := os.Stat(filepath.Join(pose, "rounds", "01", "a01.png")); err != nil {
+		t.Errorf("the paid round was disturbed: %v", err)
+	}
+	if !strings.Contains(out, "pose total") {
+		t.Errorf("stdout %q", out)
+	}
+}
+
+// TestMain keeps every test off Chrome: the sheet is stubbed out unless a
+// test asks for the real one.
+func TestMain(m *testing.M) {
+	writeSheet = func(context.Context, string, []string) error { return nil }
+	os.Exit(m.Run())
 }
