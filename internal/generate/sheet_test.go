@@ -78,6 +78,19 @@ func TestSheetHTML(t *testing.T) {
 	if strings.Contains(h, "<script") {
 		t.Errorf("script in sheet")
 	}
+	// A record carrying its pixels shows them.
+	r := recordAt(t, filepath.Join(roundsDir(pose), "02", "a01.json"))
+	r.Width, r.Height = 1824, 2176
+	if err := writeRecord(filepath.Join(roundsDir(pose), "02", "a01.json"), r); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeSheetHTML(pose, nil); err != nil {
+		t.Fatal(err)
+	}
+	b, _ = os.ReadFile(filepath.Join(pose, "sheet.html"))
+	if !strings.Contains(string(b), "r02 a01 · 1824×2176 · $0.25") {
+		t.Errorf("sheet.html lacks the attempt's pixels:\n%s", b)
+	}
 }
 
 func TestSheetShowsChargedFailures(t *testing.T) {

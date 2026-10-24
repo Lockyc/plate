@@ -260,6 +260,11 @@ func (r run) round(ctx context.Context) ([]string, int, []genai.Failure, error) 
 			Size: r.req.Size, Aspect: r.req.Aspect, Refs: rrs, Round: num, Attempt: i + 1,
 			CostUSD: img.CostUSD, CostBasis: img.CostBasis, ProviderID: img.ProviderID, Created: created,
 		}
+		// A PNG whose header cannot be read still gets its record, without
+		// pixels: it was paid for.
+		if w, h, err := imgsize.Dims(filepath.Join(dir, base+".png")); err == nil {
+			rec.Width, rec.Height = w, h
+		}
 		if err := writeRecord(filepath.Join(dir, base+".json"), rec); err != nil {
 			errs = append(errs, fmt.Errorf("attempt %d record: %w", i+1, err))
 			continue
