@@ -11,16 +11,18 @@ import (
 // sixteen, before any cap of the model's own.
 var tierPixels = map[string]float64{"1K": 1e6, "2K": 4e6, "4K": 16e6}
 
-// parseAspect reads "W:H" into its two positive sides.
+// parseAspect reads "W:H" into its two positive, finite sides.
 func parseAspect(aspect string) (float64, float64, bool) {
 	ws, hs, found := strings.Cut(aspect, ":")
 	w, err1 := strconv.ParseFloat(ws, 64)
 	h, err2 := strconv.ParseFloat(hs, 64)
-	if !found || err1 != nil || err2 != nil || w <= 0 || h <= 0 {
+	if !found || err1 != nil || err2 != nil || !finite(w) || !finite(h) || w <= 0 || h <= 0 {
 		return 0, 0, false
 	}
 	return w, h, true
 }
+
+func finite(v float64) bool { return !math.IsNaN(v) && !math.IsInf(v, 0) }
 
 // fitDims is the largest width and height at aspect aw:ah within px pixels
 // and, when maxEdge is above 0, maxEdge on either side, each rounded down to
