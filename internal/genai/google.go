@@ -96,22 +96,24 @@ func (g google) Generate(ctx context.Context, r Request) ([]Image, []Failure, er
 
 	return fanOut(r.N, func(int) ([]Image, Failure, error) {
 		img, fail, err := g.attempt(ctx, url, key, payload, rate)
-		return one(img, Failure{Reason: fail}, err)
+		return one(img, fail, err)
 	})
 }
 
 // attempt makes one request. It returns the image, or why there is none (a
-// fail reason for an answer without an image, an error for a failed call).
-func (google) attempt(ctx context.Context, url, key string, payload []byte, rate float64) (*Image, string, error) {
+// failure for an answer without a usable image, an error for a failed call).
+// Google bills per output image, so an image that arrives unusable still costs
+// the rate; an answer with no image costs nothing.
+func (google) attempt(ctx context.Context, url, key string, payload []byte, rate float64) (*Image, Failure, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
 	if err != nil {
-		return nil, "", fmt.Errorf("google: %w", err)
+		return nil, Failure{}, fmt.Errorf("google: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("x-goog-api-key", key)
 	var resp googleResponse
 	if err := do(ctx, "google", req, &resp); err != nil {
-		return nil, "", err
+		return nil, Failure{}, err
 	}
 	var why []string
 	if br := resp.PromptFeedback.BlockReason; br != "" {
@@ -127,12 +129,13 @@ func (google) attempt(ctx context.Context, url, key string, payload []byte, rate
 			}
 			png, err := base64.StdEncoding.DecodeString(p.InlineData.Data)
 			if err != nil {
-				return nil, "google: image data is not base64: " + err.Error(), nil
+				return nil, Failure{Reason: "google: image data is not base64: " + err.Error(), CostUSD: rate}, nil
 			}
 			if !bytes.HasPrefix(png, pngMagic) {
-				return nil, fmt.Sprintf("google: returned image is not a PNG (%s)", p.InlineData.MimeType), nil
+				reason := fmt.Sprintf("google: returned image is not a PNG (%s)", p.InlineData.MimeType)
+				return nil, Failure{Reason: reason, CostUSD: rate}, nil
 			}
-			return &Image{PNG: png, CostUSD: rate, CostBasis: "rate", ProviderID: resp.ResponseID}, "", nil
+			return &Image{PNG: png, CostUSD: rate, CostBasis: "rate", ProviderID: resp.ResponseID}, Failure{}, nil
 		}
 		if c.FinishReason != "" {
 			reason := "finishReason " + c.FinishReason
@@ -145,5 +148,5 @@ func (google) attempt(ctx context.Context, url, key string, payload []byte, rate
 	if len(why) == 0 {
 		why = append(why, "no candidates")
 	}
-	return nil, "google: no image (" + strings.Join(why, "; ") + ")", nil
+	return nil, Failure{Reason: "google: no image (" + strings.Join(why, "; ") + ")"}, nil
 }

@@ -196,6 +196,9 @@ func TestGoogleNoImageIsAFailure(t *testing.T) {
 	if fails[0].Index != 0 || !strings.Contains(fails[0].Reason, "SAFETY") {
 		t.Errorf("failure %+v", fails[0])
 	}
+	if fails[0].CostUSD != 0 {
+		t.Errorf("no image was generated, so nothing is billed: %+v", fails[0])
+	}
 }
 
 func TestGoogleNonPNGIsAFailure(t *testing.T) {
@@ -208,7 +211,11 @@ func TestGoogleNonPNGIsAFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(imgs) != 0 || len(fails) != 1 || !strings.Contains(fails[0].Reason, "PNG") {
-		t.Errorf("images %d, failures %+v", len(imgs), fails)
+		t.Fatalf("images %d, failures %+v", len(imgs), fails)
+	}
+	// Google billed the image it generated, usable or not.
+	if fails[0].CostUSD <= 0 {
+		t.Errorf("an unusable image still costs the rate: %+v", fails[0])
 	}
 }
 
