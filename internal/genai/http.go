@@ -148,25 +148,29 @@ func doRaw(ctx context.Context, provider string, req *http.Request) ([]byte, err
 // keyHeaders are the headers a provider's key travels in.
 var keyHeaders = []string{"x-key", "x-goog-api-key", "Authorization"}
 
-// client refuses a redirect to another host when the request carries a key:
-// Go re-sends custom headers such as x-key across hosts, which would hand the
-// key to wherever the provider's answer points. A keyless request (a signed
-// result URL) may follow.
-var client = &http.Client{CheckRedirect: func(req *http.Request, via []*http.Request) error {
+// client follows redirects through checkRedirect.
+var client = &http.Client{CheckRedirect: checkRedirect}
+
+// checkRedirect refuses a redirect off the original scheme and host when the
+// request carries a key: Go re-sends custom headers such as x-key across
+// hosts, which would hand the key to wherever the provider's answer points,
+// and a drop from https to http would send it in the clear. A keyless
+// request (a signed result URL) may follow.
+func checkRedirect(req *http.Request, via []*http.Request) error {
 	if len(via) >= 10 {
 		return errors.New("stopped after 10 redirects")
 	}
 	first := via[0]
-	if req.URL.Host == first.URL.Host {
+	if req.URL.Host == first.URL.Host && req.URL.Scheme == first.URL.Scheme {
 		return nil
 	}
 	for _, h := range keyHeaders {
 		if first.Header.Get(h) != "" {
-			return fmt.Errorf("refusing a redirect from %s to another host (%s), which would carry the API key", first.URL.Host, req.URL.Host)
+			return fmt.Errorf("refusing a redirect from %s://%s to %s://%s, which would carry the API key", first.URL.Scheme, first.URL.Host, req.URL.Scheme, req.URL.Host)
 		}
 	}
 	return nil
-}}
+}
 
 // call makes one HTTP round trip under callTimeout and reads the whole body.
 func call(ctx context.Context, req *http.Request) ([]byte, int, http.Header, error) {
