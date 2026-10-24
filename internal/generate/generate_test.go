@@ -69,6 +69,12 @@ type server struct {
 
 func googleServer(t *testing.T, fail func(i int) bool) *server {
 	t.Helper()
+	return googleServerOn(t, fail, nil)
+}
+
+// googleServerOn is googleServer that also calls each before answering.
+func googleServerOn(t *testing.T, fail func(i int) bool, each func()) *server {
+	t.Helper()
 	m, err := pins.ImageModelFor("google", "")
 	if err != nil {
 		t.Fatal(err)
@@ -77,6 +83,9 @@ func googleServer(t *testing.T, fail func(i int) bool) *server {
 	out := pngOf(t, 4, 4, color.NRGBA{0, 0, 255, 255})
 	s := &server{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if each != nil {
+			each()
+		}
 		i := int(s.n.Add(1) - 1)
 		var body map[string]any
 		json.NewDecoder(r.Body).Decode(&body)
@@ -248,6 +257,64 @@ func TestRoundNumbering(t *testing.T) {
 	}
 	if !strings.HasSuffix(out, "pose total $0.20\n") {
 		t.Errorf("total counts the partial round:\n%s", out)
+	}
+}
+
+// TestClaimSkipsATakenNumber: another run's NN.partial or NN at the number
+// claimed (here plain files, which the scan does not count) is stepped past.
+func TestClaimSkipsATakenNumber(t *testing.T) {
+	needMagick(t)
+	googleServer(t, nil)
+	dir := t.TempDir()
+	pose := filepath.Join(dir, "wave")
+	ref := writeRef(t, dir, "front.png")
+	args := []string{"--pose", pose, "--prompt", "p", "--ref", ref, "--provider", "google", "--n", "1"}
+	if code, _, e := gen(t, args...); code != 0 {
+		t.Fatal(e)
+	}
+	rd := filepath.Join(pose, "rounds")
+	os.WriteFile(filepath.Join(rd, "02.partial"), nil, 0o644)
+	os.WriteFile(filepath.Join(rd, "03"), nil, 0o644)
+	if code, _, e := gen(t, args...); code != 0 {
+		t.Fatal(e)
+	}
+	if _, err := os.Stat(filepath.Join(rd, "04", "a01.png")); err != nil {
+		t.Errorf("round not written at 04: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(rd, "03.partial")); !os.IsNotExist(err) {
+		t.Errorf("03.partial left after stepping past 03: %v", err)
+	}
+}
+
+// TestWriteFailureWritesTheRest: attempt 2 cannot be written (a folder
+// stands where its image goes); 1, 3 and 4 still are, in the kept partial.
+func TestWriteFailureWritesTheRest(t *testing.T) {
+	needMagick(t)
+	dir := t.TempDir()
+	pose := filepath.Join(dir, "wave")
+	partial := filepath.Join(pose, "rounds", "01.partial")
+	// The round is claimed before the requests, so the folder is there now.
+	googleServerOn(t, nil, func() { os.MkdirAll(filepath.Join(partial, "a02.png", "x"), 0o755) })
+	ref := writeRef(t, dir, "front.png")
+	code, _, errs := gen(t, "--pose", pose, "--prompt", "p", "--ref", ref, "--provider", "google")
+	if code != 1 {
+		t.Fatalf("code %d, want 1: %s", code, errs)
+	}
+	for _, n := range []string{"a01", "a03", "a04"} {
+		for _, ext := range []string{".png", ".json"} {
+			if fi, err := os.Stat(filepath.Join(partial, n+ext)); err != nil || fi.IsDir() {
+				t.Errorf("%s%s not written: %v", n, ext, err)
+			}
+		}
+	}
+	if _, err := os.Stat(filepath.Join(partial, "a02.json")); !os.IsNotExist(err) {
+		t.Errorf("a02.json written without its image: %v", err)
+	}
+	if !strings.Contains(errs, "attempt 2") || strings.Contains(errs, "attempt 1:") || !strings.Contains(errs, partial) {
+		t.Errorf("stderr does not name attempt 2 and the partial folder:\n%s", errs)
+	}
+	if _, err := os.Stat(filepath.Join(pose, "rounds", "01")); !os.IsNotExist(err) {
+		t.Errorf("an incomplete round was renamed complete: %v", err)
 	}
 }
 

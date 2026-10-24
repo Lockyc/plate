@@ -6,6 +6,7 @@ package generate
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -131,11 +132,12 @@ type run struct {
 	refs []string
 }
 
-// round normalises the refs, asks the provider for the attempts and writes
-// the ones that came back as a new round. It returns the paths written, and
-// the failures even alongside an error. A round in which no attempt
-// succeeded writes nothing. A write error names the partial folder, which
-// keeps whatever was written.
+// round normalises the refs, claims a round, asks the provider for the
+// attempts and writes the ones that came back. It returns the paths
+// written, and the failures even alongside an error. A round in which no
+// attempt succeeded leaves nothing. When an attempt cannot be written, every
+// other attempt still is, the round stays NN.partial, and the error names
+// each attempt that failed and the partial folder.
 func (r run) round(ctx context.Context) ([]string, []genai.Failure, error) {
 	p, err := genai.For(r.req.Model.Provider)
 	if err != nil {
@@ -150,23 +152,23 @@ func (r run) round(ctx context.Context) ([]string, []genai.Failure, error) {
 	if r.req.Refs, err = normalise(ctx, r.refs); err != nil {
 		return nil, nil, err
 	}
+	num, dir, err := claimRound(r.pose)
+	if err != nil {
+		return nil, nil, err
+	}
 	imgs, fails, err := p.Generate(ctx, r.req)
 	if err != nil || len(imgs) == 0 {
+		os.Remove(dir)
 		return nil, fails, err
-	}
-	num, dir, err := newRound(r.pose)
-	if err != nil {
-		return nil, fails, err
-	}
-	kept := func(err error) error {
-		return fmt.Errorf("%w; the round so far is kept in %s", err, dir)
 	}
 	created := now().UTC().Format(time.RFC3339)
 	var names []string
+	var errs []error
 	for i, img := range imgs {
 		base := attemptBase(i + 1)
 		if err := atomicfile.WriteFile(filepath.Join(dir, base+".png"), img.PNG, 0o644); err != nil {
-			return nil, fails, kept(err)
+			errs = append(errs, fmt.Errorf("attempt %d: %w", i+1, err))
+			continue
 		}
 		rec := Record{
 			Provider: r.req.Model.Provider, Model: r.req.Model.ID, Prompt: r.req.Prompt,
@@ -174,13 +176,19 @@ func (r run) round(ctx context.Context) ([]string, []genai.Failure, error) {
 			CostUSD: img.CostUSD, CostBasis: img.CostBasis, ProviderID: img.ProviderID, Created: created,
 		}
 		if err := writeRecord(filepath.Join(dir, base+".json"), rec); err != nil {
-			return nil, fails, kept(err)
+			errs = append(errs, fmt.Errorf("attempt %d record: %w", i+1, err))
+			continue
 		}
 		names = append(names, base+".png", base+".json")
 	}
 	final := filepath.Join(roundsDir(r.pose), roundName(num))
-	if err := os.Rename(dir, final); err != nil {
-		return nil, fails, kept(err)
+	if len(errs) == 0 {
+		if err := os.Rename(dir, final); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if len(errs) > 0 {
+		return nil, fails, fmt.Errorf("%w; the round so far is kept in %s", errors.Join(errs...), dir)
 	}
 	written := make([]string, len(names))
 	for i, n := range names {
