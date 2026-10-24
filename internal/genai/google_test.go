@@ -385,3 +385,24 @@ func TestOversizedBodyIsAnError(t *testing.T) {
 		t.Errorf("err %v", err)
 	}
 }
+
+func TestHugeRetryAfterGivesUp(t *testing.T) {
+	for _, v := range []string{"99999999999", "99999999999999999999999999", "Fri, 31 Dec 9999 23:59:59 GMT"} {
+		waits := noSleep(t)
+		var n atomic.Int32
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			n.Add(1)
+			w.Header().Set("Retry-After", v)
+			http.Error(w, `{"error":{"message":"quota exhausted"}}`, http.StatusTooManyRequests)
+		}))
+		req, _ := http.NewRequest(http.MethodPost, srv.URL, strings.NewReader(`{}`))
+		err := do(context.Background(), "google", req, nil)
+		srv.Close()
+		if err == nil || !strings.Contains(err.Error(), "429") {
+			t.Errorf("Retry-After %s: err %v", v, err)
+		}
+		if len(*waits) != 0 || n.Load() != 1 {
+			t.Errorf("Retry-After %s: waits %v after %d requests, want none after 1", v, *waits, n.Load())
+		}
+	}
+}
