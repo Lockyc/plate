@@ -8,13 +8,18 @@ import (
 
 // ImageModel is one hosted image model `plate generate` can call. Exactly one
 // billing shape is filled: PerImage (rate-billed, size -> USD), InPerMTok and
-// OutPerMTok (usage-billed, USD per million tokens), or FirstMP, ExtraMP and
-// RefMP (megapixel-billed, USD).
+// OutPerMTok (usage-billed, USD per million tokens), FirstMP, ExtraMP and
+// RefMP (megapixel-billed, USD), or Reported (the provider states each
+// request's cost in its answer). Sizes, when set, are the only sizes the
+// model takes; Params are request fields the model needs as well.
 type ImageModel struct {
 	Provider, ID, KeyEnv    string
 	PerImage                map[string]float64
 	InPerMTok, OutPerMTok   float64
 	FirstMP, ExtraMP, RefMP float64
+	Reported                bool
+	Sizes                   []string
+	Params                  map[string]string
 	MaxRefs                 int
 }
 
@@ -42,6 +47,19 @@ var ImageModels = []ImageModel{
 	// BFL's API reference; the rates are the design spec's.
 	{Provider: "bfl", ID: "flux-2-max", KeyEnv: "BFL_API_KEY",
 		FirstMP: 0.07, ExtraMP: 0.03, RefMP: 0.03, MaxRefs: 8},
+	// Checked 2026-10-24 against OpenRouter's GET /api/v1/images/models: the
+	// IDs, the resolutions each states (FLUX.2 and GPT Image state none), the
+	// input_references maximum, and the output_format and quality each takes.
+	{Provider: "openrouter", ID: "google/gemini-3.1-flash-image", KeyEnv: "OPENROUTER_API_KEY",
+		Reported: true, Sizes: []string{"512", "1K", "2K", "4K"}, MaxRefs: 14},
+	{Provider: "openrouter", ID: "google/gemini-3-pro-image", KeyEnv: "OPENROUTER_API_KEY",
+		Reported: true, Sizes: []string{"1K", "2K", "4K"}, MaxRefs: 14},
+	{Provider: "openrouter", ID: "openai/gpt-image-2", KeyEnv: "OPENROUTER_API_KEY",
+		Reported: true, Params: map[string]string{"quality": "high"}, MaxRefs: 16},
+	{Provider: "openrouter", ID: "black-forest-labs/flux.2-pro", KeyEnv: "OPENROUTER_API_KEY",
+		Reported: true, Params: map[string]string{"output_format": "png"}, MaxRefs: 8},
+	{Provider: "openrouter", ID: "black-forest-labs/flux.2-max", KeyEnv: "OPENROUTER_API_KEY",
+		Reported: true, Params: map[string]string{"output_format": "png"}, MaxRefs: 8},
 }
 
 // ImageModelFor returns provider's model id; an empty id gives the provider's

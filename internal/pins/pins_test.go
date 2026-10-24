@@ -132,6 +132,9 @@ func TestImageModelsHaveAKeyAndAPrice(t *testing.T) {
 		if m.FirstMP > 0 || m.ExtraMP > 0 || m.RefMP > 0 {
 			shapes++
 		}
+		if m.Reported {
+			shapes++
+		}
 		if shapes != 1 {
 			t.Errorf("%s/%s fills %d billing shapes, want 1", m.Provider, m.ID, shapes)
 		}
@@ -153,6 +156,26 @@ func TestImageModelFor(t *testing.T) {
 	}
 	if _, err := ImageModelFor("nobody", ""); err == nil {
 		t.Fatal("unknown provider should fail")
+	}
+}
+
+func TestOpenRouterModels(t *testing.T) {
+	d, err := ImageModelFor("openrouter", "")
+	if err != nil || d.ID != "google/gemini-3.1-flash-image" {
+		t.Fatalf("default: %+v, %v", d, err)
+	}
+	n := 0
+	for _, m := range ImageModels {
+		if m.Provider != "openrouter" {
+			continue
+		}
+		n++
+		if m.KeyEnv != "OPENROUTER_API_KEY" || !m.Reported || !strings.Contains(m.ID, "/") {
+			t.Errorf("%s: key %s, reported %v; want OPENROUTER_API_KEY, reported, a vendor/ ID", m.ID, m.KeyEnv, m.Reported)
+		}
+	}
+	if n != 5 {
+		t.Errorf("%d openrouter models, want 5", n)
 	}
 }
 
