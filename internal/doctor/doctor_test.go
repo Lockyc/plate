@@ -208,11 +208,12 @@ func TestDoctorReportsProviderKeys(t *testing.T) {
 		t.Fatalf("a missing key must not change the exit status, got %d", code)
 	}
 	o := out.String()
-	if !regexp.MustCompile(`openai +set\b`).MatchString(o) {
-		t.Errorf("no 'openai  set' row:\n%s", o)
+	// Each row names the variable to set, never its value.
+	if !regexp.MustCompile(`openai +OPENAI_API_KEY +set\b`).MatchString(o) {
+		t.Errorf("no 'openai  OPENAI_API_KEY  set' row:\n%s", o)
 	}
-	if !regexp.MustCompile(`google +not set`).MatchString(o) {
-		t.Errorf("no 'google  not set' row:\n%s", o)
+	if !regexp.MustCompile(`google +GEMINI_API_KEY +not set`).MatchString(o) {
+		t.Errorf("no 'google  GEMINI_API_KEY  not set' row:\n%s", o)
 	}
 	if strings.Contains(o, "sk-test") {
 		t.Errorf("key value leaked:\n%s", o)
