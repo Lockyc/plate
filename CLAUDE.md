@@ -40,9 +40,10 @@ around plate, is the failure this rule exists to stop.
 - **Generic only.** A crop box, path, colour or threshold tuned to one image
   belongs in the consuming project's recipe, passed as a flag.
 - **One engine runner, one pin table.** Every external call goes through
-  `internal/engine`, and every version lives in `internal/pins`. Never call
-  `exec.Command` from an op package, and never restate a version in a doc or
-  error string.
+  `internal/engine`, every provider call through `internal/genai`, and every
+  version and model ID lives in `internal/pins`. Never call `exec.Command`
+  or a provider's API from an op package, and never restate a version or
+  model ID in a doc or error string.
 - **Python only for ML**, as embedded PEP 723 scripts with `exclude-newer`
   and a committed lockfile run `--locked`, model revisions pinned in
   `internal/pins` (or, where a library fetches the weights itself, by that

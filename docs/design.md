@@ -24,7 +24,9 @@ wrapping it would add nothing; a resize down for the web goes through
 main.go              dispatch
 internal/<op>/       one package per command (cutout, inpaint, infill, upscale,
                      grade, render, build, press, pdf, impose, marks, doc,
-                     slides, shrink, diff, clip, animate, fonts, qr, doctor)
+                     slides, shrink, diff, clip, animate, fonts, qr, generate,
+                     doctor)
+internal/genai/      the one way a hosted image model is called
 internal/cdp/        a DevTools-protocol session with Chrome over --remote-debugging-pipe
 internal/video/      the encode, checks and whole-set publish clip and animate share
 internal/sheet/      a PDF's pages redrawn as forms on new sheets (impose, marks)
@@ -38,7 +40,7 @@ internal/frame/      the source pre-pass the ML ops read: oriented, sRGB, 8-bit
 internal/icc/        the embedded sRGB profile
 internal/imgsize/    image dimensions without decoding pixels
 internal/enginetest/ sh stubs that stand in for engines in tests
-internal/pins/       the one table of engine versions
+internal/pins/       the one table of engine versions and hosted image models
 internal/pdf/        PDF page count, page boxes and text through poppler; the
                      pdf command; pinning a written PDF's dates
 internal/policy/     the plate.toml synthesis policy
@@ -84,9 +86,33 @@ runs it under iopaint's torch and passes the answer as iopaint's `--device`
 (cpu, cuda or mps), and iopaint runs LaMa on the CPU when given mps.
 BiRefNet runs on rembg's CPU build.
 
+## Providers
+
+`internal/genai` is the one way a hosted image model is called, as
+`internal/engine` is for executables. Each provider is a `genai.Provider`
+registered by name (`genai.For`); its calls go through the shared client in
+internal/genai/http.go, which bounds each call (`callTimeout`), retries a
+429 or 5xx (`backoff`, `Retry-After`), starts every error with the provider
+and names the key variable on an auth refusal, and refuses a cross-host
+redirect that would carry a key header. `PLATE_GENAI_<PROVIDER>_URL`
+points a provider at an httptest server, as `PLATE_ENGINE_<NAME>` does for
+an engine.
+
+Every model a provider can call is a `pins.ImageModel` in
+internal/pins/imagemodels.go: its ID, its key variable, its billing shape
+(each attempt's cost and `genai.Image.CostBasis` come from it), the sizes,
+references and request fields it takes. The first entry per provider is
+that provider's default model; there is no default provider. A key is read
+only from the environment (`pins.ImageModel.Key`) and is never part of an
+error or a record.
+
+Nothing on a build, render or animate path may import `internal/genai`
+(`TestNoBuildPathReachesGenai` walks their imports), so a re-render never
+reaches the network for pixels.
+
 ## Synthesis policy
 
-`inpaint`, `infill` and `upscale` create pixels the camera or artist never
+`inpaint`, `infill`, `upscale` and `generate` create pixels the camera or artist never
 made. plate looks for `plate.toml` in the working directory and each parent;
 if the nearest one sets `synthesis = "forbid"`, those commands exit with an
 error naming the file. Everything else only computes an alpha channel, moves
@@ -232,6 +258,20 @@ colours, or renders what it is given.
     `<name>.json` lands beside them. `pdf`, `html`, `transparent`,
     `blank-margin`, `2up` and `marks` are refused there: each reads a
     settled page, which an animation has only at its end.
+- **generate** — an iteration tool, never a build step: a person picks
+  among attempts, and the accepted image, not a re-run, is the source. A
+  pose folder's layout is at `partialSuffix` (internal/generate/pose.go): a
+  round is claimed as `NN.partial` before any request is sent (`claimRound`)
+  and renamed once every file is in, and a partial round is never deleted
+  or read. Each attempt's `generate.Record` names what made it; a reference
+  that was itself an attempt embeds that attempt's record (`RefRecord`), so
+  an accepted record carries its whole chain once the pose folder is gone.
+  A failed attempt the provider charged for lands in `failures.json`
+  (`RoundFailures`) and counts in the pose total, past `softLimit` of which
+  each round warns. `WriteSheet` writes the contact sheet as HTML and
+  renders it to PNG (`render.PNG`), so the agent sees what the person sees;
+  `generate accept` writes the record before the image. Every file a person
+  keeps goes through `internal/atomicfile`.
 - **inpaint, fonts, qr, pdf, impose, marks, doc, slides** — as the README table and each package's
   doc comment describe.
 

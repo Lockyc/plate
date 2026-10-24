@@ -9,8 +9,9 @@ Image, render and document operations for print and web pipelines, as one
 command: lift a subject out of a photo, fill, enlarge or shrink artwork, render HTML to
 PNG, JPEG, PDF or its settled DOM, cut a screen recording into a short looping demo clip, animate a page into a short video, preview a Google Slides deck, turn markdown into a
 PDF, look inside a PDF, make a press-ready PDF, put an A5 flyer two-up on
-an A4 sheet to print and cut, match a colour grade. Each
-operation wraps an engine at a pinned version, and its output is checked
+an A4 sheet to print and cut, match a colour grade, draw new poses of a
+character from reference images with a hosted image model. Each
+operation wraps an engine or model at a pinned version, and its output is checked
 against a committed set of test images.
 
 ## Status
@@ -46,11 +47,13 @@ the exceptions listed under [Platforms](#platforms). What comes next is in
 | `animate` | Captures a page's own animation frame by frame as a muted MP4, WebM, poster, WebP or GIF, with a JSON of its measurements, skipped when nothing changed | `plate animate --size WxH [--scale F] --duration S [--fps N] [--format mp4,webm,poster,webp,gif] [--loop none\|crossfade\|dip] [--budget-kb N] [--budget MS] --out DIR [--name N] [--fail-if TEXT]... [--force] <page.html\|http(s) or file URL>` |
 | `fonts` | Embeds web fonts, from files or from Google Fonts by family name, into a CSS file so a page renders from the filesystem, optionally cut to the characters a language uses | `plate fonts [--display block] [--subset latin] [--google FAMILY:WEIGHT:STYLE]... -o fonts.css [FILE:FAMILY:WEIGHT:STYLE]...` |
 | `qr` | Makes a QR code SVG that any phone camera decodes | `plate qr [--ec L\|M\|Q\|H] [--fg RRGGBB] [--bg RRGGBB] -o out.svg <text>` |
-| `doctor` | Checks every engine against its pin, installs the ones plate manages, and prints the install command for the rest | `plate doctor [--install]` |
+| `generate` ⚠ | Makes a round of attempts at a character pose from reference images through a hosted image model, each with a provenance record, and redraws the pose's contact sheet | `plate generate --pose DIR --prompt TEXT --ref IMG [--ref IMG]... --provider P [--model ID] [--n 4] [--size 1K\|2K\|4K] [--aspect W:H]` or `plate generate --list-models --provider P` |
+| `generate accept` | Copies the attempt you picked out of a pose folder, with its provenance beside it | `plate generate accept --pose DIR <rNN-aMM> <out.png>` |
+| `doctor` | Checks every engine against its pin, installs the ones plate manages, prints the install command for the rest, and says which providers' API keys are set | `plate doctor [--install]` |
 | `version` | Prints plate's version | `plate version` |
 
-`plate <command> -h` lists each flag with its default; for `pdf` and
-`grade`, `plate <command> <verb> -h` does.
+`plate <command> -h` lists each flag with its default; for `pdf`,
+`grade` and `generate accept`, `plate <command> <verb> -h` does.
 
 `render --html` writes the page's DOM after its scripts have run, a static
 copy to publish; it needs no `--size`, and refuses a page that does not end in
@@ -235,9 +238,52 @@ plate's proxy; a remote page cannot. The proxy listens on loopback for the
 render's duration, so another account on the machine could reach it too.
 Give them only pages you trust.
 
-⚠ `inpaint`, `infill` and `upscale` create pixels the source never had. A
+⚠ `inpaint`, `infill`, `upscale` and `generate` create pixels the source never had. A
 project that forbids this puts `synthesis = "forbid"` in a `plate.toml`, and
 they refuse to run.
+
+### Generating a pose
+
+`generate` is the one command that uses the network and an API key. Each
+provider reads its key from an environment variable; set it only for the
+providers you use. A round without one stops before anything is sent and
+names the variable, `plate doctor` says which providers have a key set
+(never the value), and no key is ever a flag or written to a file.
+`--provider` has no default yet; `--model` defaults to the provider's first
+model in `--list-models`.
+
+The loop, for one pose in a gitignored working folder of your own repo:
+
+1. **Run a round.** `plate generate --pose work/pointing --ref hero.png
+   --prompt "…" --provider P` sends `--n` attempts (default 4) and writes
+   `rounds/NN/aMM.png`, each with `aMM.json` beside it: provider, model,
+   prompt, size, the sha256 of each reference, cost and date. It prints
+   each path, the pose's total spend, and `sheet.html` and `sheet.png`.
+2. **Look at the sheet.** It shows the references, then every attempt of
+   every round, newest round first, each labelled `rNN-aMM` with its model
+   and cost. The next round rewords the prompt, adds or drops a
+   reference, tries another model, or passes a near-miss attempt as a
+   `--ref`; that attempt's record is then carried inside the new one's.
+3. **Accept one.** `plate generate accept --pose work/pointing r03-a02
+   assets/pointing.png` writes the image and `assets/pointing.provenance.json`,
+   the record with the full chain of attempts it came from. It never
+   overwrites either file.
+4. **Commit the accepted image and its provenance** in your own repo, and
+   run your pipeline (`cutout`, `upscale`, `render`) from that image like any
+   supplied source. The record says where the image came from, not how to
+   make it again: models retire, so the image is what you keep.
+
+Never in a build: no `plate build` line, `render` or `animate` can reach a
+provider, so re-rendering never spends money or changes the art.
+
+Spend is shown, not capped. Each round prints `pose total $N`, including
+failed attempts the provider charged for (recorded in the round's
+`failures.json`), and warns on stderr once a pose passes US$10.00. A
+provider that charged without saying how much has those attempts recorded
+at $0.00, and the round prints `unreported N`. A round in which some
+attempts failed exits 1 with the reasons. A run cut short leaves
+`rounds/NN.partial`, which keeps any images it paid for and is never read
+as part of the pose.
 
 ## Install
 
@@ -285,6 +331,11 @@ chooses the PyTorch device instead.
 images in `quality/` and checks each result against a measured threshold. It
 needs every engine and model installed.
 
+`just bakeoff` runs every OpenRouter model over a set of poses of an openly
+licensed character and writes each pose's contact sheet, for a person to
+compare. It spends real money, needs the OpenRouter key, and has no
+threshold.
+
 ## Development
 
 ```bash
@@ -292,6 +343,7 @@ just build    # ./plate
 just test
 just gate     # gofmt check + vet + tests
 just quality  # the quality cases over quality/
+just bakeoff  # every OpenRouter model over the bake-off poses (paid)
 just lock-ml  # re-resolve the ML scripts' lockfiles after editing a PEP 723 header
 just install  # go install, then print the version
 ```
