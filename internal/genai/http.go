@@ -172,6 +172,11 @@ func checkRedirect(req *http.Request, via []*http.Request) error {
 	return nil
 }
 
+// errBodyCut is wrapped in call's error when a 2xx answer's body could not be
+// read whole: the provider answered, and may have billed, but what it said is
+// lost.
+var errBodyCut = errors.New("the answer's body was cut off")
+
 // call makes one HTTP round trip under callTimeout and reads the whole body.
 func call(ctx context.Context, req *http.Request) ([]byte, int, http.Header, error) {
 	cctx, cancel := context.WithTimeout(ctx, callTimeout)
@@ -186,6 +191,9 @@ func call(ctx context.Context, req *http.Request) ([]byte, int, http.Header, err
 		err = fmt.Errorf("response is larger than %d MiB", maxBody>>20)
 	}
 	if err != nil {
+		if resp.StatusCode/100 == 2 {
+			return nil, 0, nil, fmt.Errorf("reading the response: %w: %w", errBodyCut, err)
+		}
 		return nil, 0, nil, fmt.Errorf("reading the response: %w", err)
 	}
 	return body, resp.StatusCode, resp.Header, nil

@@ -117,9 +117,9 @@ func roundMain(ctx context.Context, args []string, stdout, stderr io.Writer) int
 		code = 1
 	}
 	if unreported == 1 {
-		fmt.Fprintf(stderr, "plate generate: %s did not report the cost of 1 attempt; it was charged but is recorded at $0.00\n", m.Provider)
+		fmt.Fprintf(stderr, "plate generate: %s did not report the cost of 1 attempt; it may have been charged and is recorded at $0.00\n", m.Provider)
 	} else if unreported > 1 {
-		fmt.Fprintf(stderr, "plate generate: %s did not report the cost of %d attempts; they were charged but are recorded at $0.00\n", m.Provider, unreported)
+		fmt.Fprintf(stderr, "plate generate: %s did not report the cost of %d attempts; they may have been charged and are recorded at $0.00\n", m.Provider, unreported)
 	}
 	if err != nil {
 		return cli.Fail(stderr, "generate", err)
@@ -201,7 +201,8 @@ type run struct {
 // provider charged for a failed attempt or may have without reporting it
 // (Failure.Unreported). It returns the paths written, how many attempts
 // carry an unreported cost (images written with CostBasis "unreported" and
-// Unreported failures, even alongside an error, since they were charged),
+// Unreported failures, even alongside an error, since they may have been
+// charged),
 // and the failures even alongside an error. A round in which nothing came
 // back and nothing was or may have been charged leaves nothing; one with
 // only such failures is kept with only failures.json.

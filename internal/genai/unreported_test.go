@@ -44,6 +44,25 @@ func TestOpenRouterUnreportedFailures(t *testing.T) {
 		t.Errorf("timed out after sending: err %v, failures %+v; want one Unreported", err, fails)
 	}
 
+	// A 2xx whose body is cut off was billed: its cost never arrived.
+	openrouterServer(t, func(w http.ResponseWriter, r *http.Request) {
+		io.Copy(io.Discard, r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"data":[{"b64_json":"`))
+		w.(http.Flusher).Flush()
+		select {
+		case <-r.Context().Done():
+		case <-time.After(5 * time.Second):
+		}
+	})
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel2()
+	_, fails, err = p.Generate(ctx2, Request{Model: m, Prompt: "p", N: 1, Size: "1K"})
+	if err != nil || len(fails) != 1 || !fails[0].Unreported {
+		t.Errorf("2xx body cut off: err %v, failures %+v; want one Unreported", err, fails)
+	}
+
 	srv := httptest.NewServer(http.NotFoundHandler())
 	srv.Close()
 	t.Setenv("PLATE_GENAI_OPENROUTER_URL", srv.URL)
