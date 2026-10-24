@@ -3,3 +3,4 @@ docs/superpowers/
 .superpowers/
 .claude/worktrees/
 .DS_Store
+/quality/bakeoff/out/

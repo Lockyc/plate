@@ -120,3 +120,11 @@ recipe  = "written for plate: a 402 pt phone screen of thin UI text on the dark 
 author  = "plate"
 licence = "CC0"
 sha256  = "12c8a071886105eea26fd235571a9912c4c3afeefd16478735fd6a7de1a9ea9a"
+
+[[asset]]
+file    = "bunny-reference.png"
+source  = "https://commons.wikimedia.org/wiki/File:BBB-Bunny.png"
+author  = "Blender Foundation (Big Buck Bunny, peach.blender.org)"
+licence = "CC BY 3.0"
+recipe  = "magick SOURCE -crop 520x620+360+10 +repage crop.png; plate cutout crop.png bunny-reference.png"
+sha256  = "950988be350624c0c869535ed0406c8820c7bba28bde7c2a6ae532a36455788d"
