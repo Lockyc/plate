@@ -54,12 +54,15 @@ func (e *statusError) Error() string {
 	return s
 }
 
+// auth reports whether the answer refuses the key: a 401, or a 403 from any
+// provider but OpenRouter, which answers 403 for a prompt its moderation
+// flagged and 401 for a bad key.
 func (e *statusError) auth() bool {
-	return e.status == http.StatusUnauthorized || e.status == http.StatusForbidden
+	return e.status == http.StatusUnauthorized || (e.status == http.StatusForbidden && e.provider != "openrouter")
 }
 
 // isAuth reports whether err is a provider refusing the key, which fails a
-// whole round rather than one attempt.
+// whole round when every attempt meets it (fanOut).
 func isAuth(err error) bool {
 	var se *statusError
 	return errors.As(err, &se) && se.auth()

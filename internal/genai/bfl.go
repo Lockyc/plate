@@ -12,7 +12,6 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/lockyc/plate/internal/pins"
@@ -114,39 +113,9 @@ func (b bfl) Generate(ctx context.Context, r Request) ([]Image, []Failure, error
 	base := baseURL("bfl", bflDefaultURL)
 	endpoint := base + "/v1/" + r.Model.ID
 
-	type result struct {
-		img  *Image
-		fail Failure
-		err  error
-	}
-	results := make([]result, r.N)
-	var wg sync.WaitGroup
-	for i := 0; i < r.N; i++ {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			img, fail, err := b.attempt(ctx, base, endpoint, key, payload, cost)
-			results[i] = result{img, fail, err}
-		}(i)
-	}
-	wg.Wait()
-
-	var imgs []Image
-	var fails []Failure
-	for i, res := range results {
-		switch {
-		case res.err != nil && isAuth(res.err):
-			return nil, nil, res.err
-		case res.err != nil:
-			fails = append(fails, Failure{Index: i, Reason: res.err.Error()})
-		case res.img == nil:
-			res.fail.Index = i
-			fails = append(fails, res.fail)
-		default:
-			imgs = append(imgs, *res.img)
-		}
-	}
-	return imgs, fails, nil
+	return fanOut(r.N, func(int) ([]Image, Failure, error) {
+		return one(b.attempt(ctx, base, endpoint, key, payload, cost))
+	})
 }
 
 // attempt runs one job: submit, poll to a settled status, fetch the sample.
