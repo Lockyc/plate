@@ -136,7 +136,9 @@ colours, or renders what it is given.
   values has its own `--despill-*` flag, which overrides the preset.
   `--height` sets the working size, and it must never be smaller than the
   largest size the cut-out will be drawn at.
-- **render** — a local page loads from `render.plateHost` through a
+- **render** — a local page loads from the run's own random subdomain of
+  `render.plateHost` (the only host it serves files for, so no other local
+  process can read files through it) via a
   loopback proxy (`render.server`) that reads each path once, recording the
   sha256 of the bytes it serves from then on, or that it was absent; other
   hosts are forwarded and recorded. Those loads are the cache's inputs:

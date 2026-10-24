@@ -28,9 +28,10 @@ done
 page=
 for a in "$@"; do page=$a; done
 [ -n "$proxy" ] && curl -s -o /dev/null -x "$proxy" "$page"
+origin=$(printf '%s' "$page" | sed -E 's|^(http://[^/]+).*|\1|')
 load() {
   for p in $FIXTURE_LOADS; do
-    [ -n "$proxy" ] && curl -s -o /dev/null -x "$proxy" "http://plate.invalid$p"
+    [ -n "$proxy" ] && curl -s -o /dev/null -x "$proxy" "$origin$p"
   done
 }
 load
@@ -514,6 +515,7 @@ func TestRenderPDFFailIfReadsDOM(t *testing.T) {
 	}
 }
 
+// Chrome loads a local page on the run's own random subdomain of plate.invalid.
 func TestRenderPageURLIsPlateOrigin(t *testing.T) {
 	e := setup(t, 1, 1)
 	arg := (&url.URL{Scheme: "file", Path: e.page, RawQuery: "x=1"}).String()
@@ -522,7 +524,8 @@ func TestRenderPageURLIsPlateOrigin(t *testing.T) {
 	}
 	args := chromeArgs(t, e)
 	last := args[len(args)-1]
-	if !strings.HasPrefix(last, "http://plate.invalid/") || !strings.HasSuffix(last, "page.html?x=1") {
+	u, err := url.Parse(last)
+	if err != nil || !strings.HasSuffix(u.Hostname(), ".plate.invalid") || !strings.HasSuffix(last, "page.html?x=1") {
 		t.Errorf("page URL = %q", last)
 	}
 }

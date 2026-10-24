@@ -153,8 +153,10 @@ func Stage(page []byte, dir, css string) []byte {
 	} else if loc := doctypeRe.FindIndex(page); loc != nil {
 		at = loc[1]
 	}
-	block := "\n<base href=\"" + html.EscapeString(render.PlateURL(dir, "")+"/") + "\">\n" +
-		"<link rel=\"stylesheet\" href=\"" + html.EscapeString(render.PlateURL(css, "")) + "\">\n" +
+	// Root-relative, so they resolve on whichever host the render loads the page
+	// from, and the staged bytes (which the cache hashes) are the same every run.
+	block := "\n<base href=\"" + html.EscapeString(render.PlatePath(dir)+"/") + "\">\n" +
+		"<link rel=\"stylesheet\" href=\"" + html.EscapeString(render.PlatePath(css)) + "\">\n" +
 		"<script>" + titleJS + "</script>\n"
 	out := make([]byte, 0, len(page)+len(block))
 	out = append(out, page[:at]...)

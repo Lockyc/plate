@@ -33,6 +33,10 @@ done
 page=
 for a in "$@"; do page=$a; done
 [ -n "$proxy" ] && curl -s -o /dev/null -x "$proxy" "$page"
+origin=$(printf '%s' "$page" | sed -E 's|^(http://[^/]+).*|\1|')
+for p in $FIXTURE_LOADS; do
+  [ -n "$proxy" ] && curl -s -o /dev/null -x "$proxy" "$origin$p"
+done
 for u in $FIXTURE_URLS; do
   [ -n "$proxy" ] && curl -s -o /dev/null -x "$proxy" "$u"
 done
@@ -241,7 +245,7 @@ func TestBuildOutRelativeToCwd(t *testing.T) {
 func TestBuildRefusesLoadingAnotherOutput(t *testing.T) {
 	e := setup(t, "b")
 	aOut := filepath.Join(e.dir, "dist", "a.png")
-	t.Setenv("FIXTURE_URLS", "http://plate.invalid"+filepath.ToSlash(aOut))
+	t.Setenv("FIXTURE_LOADS", filepath.ToSlash(aOut))
 	if code := e.run(e.manifest); code != 0 {
 		t.Fatalf("b alone: code %d: %s", code, e.stderr.String())
 	}
