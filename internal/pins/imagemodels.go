@@ -18,8 +18,8 @@ type ImageModel struct {
 	MaxRefs                 int
 }
 
+// ImageModels is every model plate generate knows. The first entry for each
 // provider is that provider's default.
-// queried).
 var ImageModels = []ImageModel{
 	// Checked 2026-10-24 (Gemini pricing page).
 	{Provider: "google", ID: "gemini-3.1-flash-image", KeyEnv: "GEMINI_API_KEY",
