@@ -111,12 +111,83 @@ func TestOpenRouterModelParams(t *testing.T) {
 		json.NewDecoder(r.Body).Decode(&body)
 		writeJSON(w, openrouterImages(0.03, out))
 	})
-	// The models list states no resolutions for FLUX.2, so 4K goes through.
-	if _, _, err := openrouterProvider(t).Generate(context.Background(), Request{Model: m, Prompt: "p", N: 1, Size: "4K"}); err != nil {
+	if _, _, err := openrouterProvider(t).Generate(context.Background(), Request{Model: m, Prompt: "p", N: 1, Size: "1K"}); err != nil {
 		t.Fatal(err)
 	}
-	if body["output_format"] != "png" || body["resolution"] != "4K" {
-		t.Errorf("body %v, want output_format png and resolution 4K", body)
+	if body["output_format"] != "png" {
+		t.Errorf("body %v, want output_format png", body)
+	}
+}
+
+// A pixels-form model gets an explicit size: the tier's megapixels (capped at
+// the model's), at --aspect or else the first reference's aspect, each side
+// rounded down to a multiple of 16. No resolution or aspect_ratio goes with
+// it: OpenRouter refuses an aspect_ratio that disagrees with the size.
+func TestOpenRouterPixelsSize(t *testing.T) {
+	ref := pngOf(520, 620)
+	other := pngOf(900, 300)
+	for _, c := range []struct {
+		model, size, aspect string
+		refs                [][]byte
+		want                string
+	}{
+		// sqrt(4e6*520/620) = 1831.6 -> 1824; 1831.6*620/520 = 2183.9 -> 2176.
+		{"black-forest-labs/flux.2-pro", "2K", "", [][]byte{ref, other}, "1824x2176"},
+		// sqrt(1e6*1.5) = 1224.7 -> 1216; 816.5 -> 816.
+		{"black-forest-labs/flux.2-max", "1K", "3:2", [][]byte{ref}, "1216x816"},
+		{"black-forest-labs/flux.2-pro", "2K", "", nil, "2000x2000"},
+		{"openai/gpt-image-2", "2K", "", [][]byte{ref}, "1824x2176"},
+		// 4K is capped at GPT Image's 8,294,400 pixels.
+		{"openai/gpt-image-2", "4K", "16:9", nil, "3840x2160"},
+		// ... and at its 3840 pixel edge: 3840 x 1645.7 -> 1632.
+		{"openai/gpt-image-2", "4K", "21:9", nil, "3840x1632"},
+	} {
+		m := openrouterModel(t, c.model)
+		var body map[string]any
+		openrouterServer(t, func(w http.ResponseWriter, r *http.Request) {
+			json.NewDecoder(r.Body).Decode(&body)
+			writeJSON(w, openrouterImages(0.03, fixture(t, "out.png")))
+		})
+		var refs []Ref
+		for _, p := range c.refs {
+			refs = append(refs, Ref{Path: "r.png", PNG: p})
+		}
+		_, _, err := openrouterProvider(t).Generate(context.Background(), Request{Model: m, Prompt: "p", N: 1, Size: c.size, Aspect: c.aspect, Refs: refs})
+		if err != nil {
+			t.Fatalf("%s %s %q: %v", c.model, c.size, c.aspect, err)
+		}
+		if body["size"] != c.want {
+			t.Errorf("%s %s %q: size %v, want %s", c.model, c.size, c.aspect, body["size"], c.want)
+		}
+		for _, k := range []string{"resolution", "aspect_ratio"} {
+			if _, ok := body[k]; ok {
+				t.Errorf("%s %s %q: %s sent: %v", c.model, c.size, c.aspect, k, body[k])
+			}
+		}
+	}
+}
+
+func TestOpenRouterPixelsRefused(t *testing.T) {
+	var n atomic.Int32
+	openrouterServer(t, func(w http.ResponseWriter, r *http.Request) { n.Add(1) })
+	for _, c := range []struct {
+		model, size, aspect string
+		refs                []Ref
+		want                string
+	}{
+		// FLUX.2 makes at most 4 MP, so 4K would be 2K at a 4K price.
+		{"black-forest-labs/flux.2-pro", "4K", "", nil, "1K, 2K"},
+		{"black-forest-labs/flux.2-pro", "2K", "", []Ref{{Path: "r.jpg", PNG: []byte("\xff\xd8\xff")}}, "reference 1"},
+		{"black-forest-labs/flux.2-pro", "2K", "wide", nil, "W:H"},
+	} {
+		m := openrouterModel(t, c.model)
+		_, _, err := openrouterProvider(t).Generate(context.Background(), Request{Model: m, Prompt: "p", N: 1, Size: c.size, Aspect: c.aspect, Refs: c.refs})
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s %s %q: err %v, want one naming %q", c.model, c.size, c.aspect, err, c.want)
+		}
+	}
+	if n.Load() != 0 {
+		t.Errorf("%d requests made; want none", n.Load())
 	}
 }
 

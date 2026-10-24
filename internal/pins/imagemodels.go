@@ -11,7 +11,10 @@ import (
 // OutPerMTok (usage-billed, USD per million tokens), FirstMP, ExtraMP and
 // RefMP (megapixel-billed, USD), or Reported (the provider states each
 // request's cost in its answer). Sizes, when set, are the only sizes the
-// model takes; Params are request fields the model needs as well.
+// model takes; Params are request fields the model needs as well. SizeForm
+// is how an openrouter model is told its size: "" sends the resolution tier,
+// "pixels" an explicit width and height, of at most MaxPixels and, when set,
+// MaxEdge on either side.
 type ImageModel struct {
 	Provider, ID, KeyEnv    string
 	PerImage                map[string]float64
@@ -21,6 +24,9 @@ type ImageModel struct {
 	Sizes                   []string
 	Params                  map[string]string
 	MaxRefs                 int
+	SizeForm                string
+	MaxPixels               float64
+	MaxEdge                 int
 }
 
 // ImageModels is every model plate generate knows. The first entry for each
@@ -50,16 +56,27 @@ var ImageModels = []ImageModel{
 	// Checked 2026-10-24 against OpenRouter's GET /api/v1/images/models: the
 	// IDs, the resolutions each states (FLUX.2 and GPT Image state none), the
 	// input_references maximum, and the output_format and quality each takes.
+	// Size forms measured live 2026-10-24 at 2K with a 520x620 reference:
+	// FLUX.2 and GPT Image ignore resolution (FLUX.2 returns the reference's
+	// size) and honour an explicit size exactly; Gemini takes the tier.
 	{Provider: "openrouter", ID: "google/gemini-3.1-flash-image", KeyEnv: "OPENROUTER_API_KEY",
 		Reported: true, Sizes: []string{"512", "1K", "2K", "4K"}, MaxRefs: 14},
+	// Measured 2026-10-24: returns 1K pixels at resolution 2K, with or
+	// without aspect_ratio.
 	{Provider: "openrouter", ID: "google/gemini-3-pro-image", KeyEnv: "OPENROUTER_API_KEY",
 		Reported: true, Sizes: []string{"1K", "2K", "4K"}, MaxRefs: 14},
+	// Checked 2026-10-24 (OpenAI's image generation guide): sides multiples
+	// of 16, neither over 3840, at most 8,294,400 pixels.
 	{Provider: "openrouter", ID: "openai/gpt-image-2", KeyEnv: "OPENROUTER_API_KEY",
-		Reported: true, Params: map[string]string{"quality": "high"}, MaxRefs: 16},
+		Reported: true, Params: map[string]string{"quality": "high"}, MaxRefs: 16,
+		SizeForm: "pixels", Sizes: []string{"1K", "2K", "4K"}, MaxPixels: 8294400, MaxEdge: 3840},
+	// FLUX.2 makes at most 4 MP (BFL's docs), so there is no 4K.
 	{Provider: "openrouter", ID: "black-forest-labs/flux.2-pro", KeyEnv: "OPENROUTER_API_KEY",
-		Reported: true, Params: map[string]string{"output_format": "png"}, MaxRefs: 8},
+		Reported: true, Params: map[string]string{"output_format": "png"}, MaxRefs: 8,
+		SizeForm: "pixels", Sizes: []string{"1K", "2K"}, MaxPixels: 4e6},
 	{Provider: "openrouter", ID: "black-forest-labs/flux.2-max", KeyEnv: "OPENROUTER_API_KEY",
-		Reported: true, Params: map[string]string{"output_format": "png"}, MaxRefs: 8},
+		Reported: true, Params: map[string]string{"output_format": "png"}, MaxRefs: 8,
+		SizeForm: "pixels", Sizes: []string{"1K", "2K"}, MaxPixels: 4e6},
 }
 
 // ImageModelFor returns provider's model id; an empty id gives the provider's

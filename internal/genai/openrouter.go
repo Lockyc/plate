@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"image"
 	"net/http"
 	"slices"
 	"strings"
@@ -40,7 +41,9 @@ type openrouterResponse struct {
 
 // Generate sends one /api/v1/images request per attempt, all at once: most
 // of the models behind it take only n=1. A model's Sizes, when pinned, bound
-// Request.Size; otherwise the size goes through for the API to judge. An
+// Request.Size; otherwise the size goes through for the API to judge. The
+// size goes as the model's SizeForm says: the resolution tier, or explicit
+// pixels (openrouterPixels). An
 // answer holding more than one image keeps them all. Each request's
 // usage.cost lands on its images or its Failure, so the round's costs sum to
 // the bill. An answer without usage.cost keeps its images, marked
@@ -62,9 +65,17 @@ func (o openrouter) Generate(ctx context.Context, r Request) ([]Image, []Failure
 	}
 	body["model"] = r.Model.ID
 	body["prompt"] = r.Prompt
-	body["resolution"] = r.Size
-	if r.Aspect != "" {
-		body["aspect_ratio"] = r.Aspect
+	if r.Model.SizeForm == "pixels" {
+		size, err := openrouterPixels(r)
+		if err != nil {
+			return nil, nil, err
+		}
+		body["size"] = size
+	} else {
+		body["resolution"] = r.Size
+		if r.Aspect != "" {
+			body["aspect_ratio"] = r.Aspect
+		}
 	}
 	if len(r.Refs) > 0 {
 		refs := make([]openrouterRef, len(r.Refs))
@@ -113,6 +124,34 @@ func (o openrouter) Generate(ctx context.Context, r Request) ([]Image, []Failure
 		}
 	}
 	return imgs, fails, nil
+}
+
+// openrouterPixels is the explicit "WxH" a pixels-form model is sent: the
+// tier's budget capped at the model's MaxPixels and MaxEdge (fitDims), at
+// Request.Aspect, else the first reference's aspect, else square. It goes
+// without aspect_ratio, which OpenRouter refuses when it disagrees with an
+// explicit size, as the rounding can make it.
+func openrouterPixels(r Request) (string, error) {
+	aw, ah := 1.0, 1.0
+	switch {
+	case r.Aspect != "":
+		var ok bool
+		if aw, ah, ok = parseAspect(r.Aspect); !ok {
+			return "", fmt.Errorf("openrouter: aspect %q is not W:H", r.Aspect)
+		}
+	case len(r.Refs) > 0:
+		cfg, _, err := image.DecodeConfig(bytes.NewReader(r.Refs[0].PNG))
+		if err != nil {
+			return "", fmt.Errorf("openrouter: reference 1 is not a readable PNG: %w", err)
+		}
+		aw, ah = float64(cfg.Width), float64(cfg.Height)
+	}
+	px := min(tierPixels[r.Size], r.Model.MaxPixels)
+	w, h := fitDims(px, aw, ah, r.Model.MaxEdge)
+	if w < 64 || h < 64 {
+		return "", fmt.Errorf("openrouter: aspect %g:%g is too extreme at size %s", aw, ah, r.Size)
+	}
+	return fmt.Sprintf("%dx%d", w, h), nil
 }
 
 // attempt makes one request. It returns every usable image in the answer,

@@ -12,7 +12,6 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -34,10 +33,6 @@ func init() { providers["bfl"] = bfl{} }
 
 func (bfl) Name() string { return "bfl" }
 
-// bflPixels is the pixel budget of each Request.Size: 1K is one megapixel and
-// 2K four, the most BFL documents for an output. 4K is not offered.
-var bflPixels = map[string]float64{"1K": 1e6, "2K": 4e6}
-
 type bflSubmit struct {
 	ID string `json:"id"`
 }
@@ -49,28 +44,22 @@ type bflPoll struct {
 	} `json:"result"`
 }
 
-// bflDims is the width and height for size and aspect: the largest multiples
-// of 16 whose area stays within the size's budget, so a job never bills
-// beyond the megapixels it was priced at. The multiple of 16 is plate's own
-// choice; BFL documents only a 64 pixel minimum.
+// bflDims is the width and height for size and aspect (fitDims). 2K's four
+// megapixels are the most BFL documents for an output, so 4K is not offered.
+// The multiple of 16 is plate's own choice; BFL documents only a 64 pixel
+// minimum.
 func bflDims(size, aspect string) (int, int, error) {
-	px, ok := bflPixels[size]
-	if !ok {
+	if size != "1K" && size != "2K" {
 		return 0, 0, fmt.Errorf("bfl: no size %q (sizes: 1K, 2K)", size)
 	}
 	aw, ah := 1.0, 1.0
 	if aspect != "" {
-		ws, hs, found := strings.Cut(aspect, ":")
-		w, err1 := strconv.ParseFloat(ws, 64)
-		h, err2 := strconv.ParseFloat(hs, 64)
-		if !found || err1 != nil || err2 != nil || w <= 0 || h <= 0 {
+		var ok bool
+		if aw, ah, ok = parseAspect(aspect); !ok {
 			return 0, 0, fmt.Errorf("bfl: aspect %q is not W:H", aspect)
 		}
-		aw, ah = w, h
 	}
-	w := math.Sqrt(px * aw / ah)
-	h := w * ah / aw
-	wi, hi := int(w)/16*16, int(h)/16*16
+	wi, hi := fitDims(tierPixels[size], aw, ah, 0)
 	if wi < 64 || hi < 64 {
 		return 0, 0, fmt.Errorf("bfl: aspect %q is too extreme at size %s", aspect, size)
 	}
