@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/textproto"
 	"strconv"
-	"strings"
 )
 
 const openaiDefaultURL = "https://api.openai.com"
@@ -44,7 +43,7 @@ type openaiResponse struct {
 // the round's error; only the first N entries of data are kept, and one missing
 // or unusable becomes a Failure. The whole billed usage cost is split evenly
 // over the images returned, so their CostUSD sums to the bill; a 200 with no
-// usable image is a round error stating the amount billed. ProviderID is empty
+// usable image splits the bill over its Failures instead. ProviderID is empty
 // because do does not expose response headers.
 func (openai) Generate(ctx context.Context, r Request) ([]Image, []Failure, error) {
 	if r.N <= 0 {
@@ -101,7 +100,6 @@ func (openai) Generate(ctx context.Context, r Request) ([]Image, []Failure, erro
 	billed := (float64(resp.Usage.InputTokens)*r.Model.InPerMTok + float64(resp.Usage.OutputTokens)*r.Model.OutPerMTok) / 1e6
 	var pngs [][]byte
 	var fails []Failure
-	var reasons []string
 	for i := 0; i < r.N; i++ {
 		reason := ""
 		if i >= len(resp.Data) {
@@ -115,10 +113,12 @@ func (openai) Generate(ctx context.Context, r Request) ([]Image, []Failure, erro
 			continue
 		}
 		fails = append(fails, Failure{Index: i, Reason: reason})
-		reasons = append(reasons, reason)
 	}
 	if len(pngs) == 0 {
-		return nil, nil, fmt.Errorf("openai: billed $%.2f and returned no usable image: %s", billed, strings.Join(reasons, "; "))
+		for i := range fails {
+			fails[i].CostUSD = billed / float64(len(fails))
+		}
+		return nil, fails, nil
 	}
 	imgs := make([]Image, len(pngs))
 	for i, png := range pngs {

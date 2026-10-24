@@ -39,10 +39,12 @@ type Image struct {
 	ProviderID string
 }
 
-// Failure is one attempt that produced no image.
+// Failure is one attempt that produced no image. CostUSD is what the provider
+// charged for it anyway, 0 when it charged nothing.
 type Failure struct {
-	Index  int
-	Reason string
+	Index   int
+	Reason  string
+	CostUSD float64
 }
 
 // Provider generates images. A non-nil error means the whole round failed (for
