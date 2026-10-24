@@ -27,10 +27,12 @@ type ImageModel struct {
 	SizeForm                string
 	MaxPixels               float64
 	MaxEdge                 int
+	Default                 bool
 }
 
-// ImageModels is every model plate generate knows. The first entry for each
-// provider is that provider's default.
+// ImageModels is every model plate generate knows. The entry marked Default
+// is the model a run without --provider uses; otherwise the first entry for
+// each provider is that provider's default.
 var ImageModels = []ImageModel{
 	// Checked 2026-10-24 (Gemini pricing page).
 	{Provider: "google", ID: "gemini-3.1-flash-image", KeyEnv: "GEMINI_API_KEY",
@@ -71,12 +73,23 @@ var ImageModels = []ImageModel{
 		Reported: true, Params: map[string]string{"quality": "high"}, MaxRefs: 16,
 		SizeForm: "pixels", Sizes: []string{"1K", "2K", "4K"}, MaxPixels: 8294400, MaxEdge: 3840},
 	// FLUX.2 makes at most 4 MP (BFL's docs), so there is no 4K.
+	// The overall default, 2026-10-24 (provisional; see docs/roadmap.md).
 	{Provider: "openrouter", ID: "black-forest-labs/flux.2-pro", KeyEnv: "OPENROUTER_API_KEY",
-		Reported: true, Params: map[string]string{"output_format": "png"}, MaxRefs: 8,
+		Default: true, Reported: true, Params: map[string]string{"output_format": "png"}, MaxRefs: 8,
 		SizeForm: "pixels", Sizes: []string{"1K", "2K"}, MaxPixels: 4e6},
 	{Provider: "openrouter", ID: "black-forest-labs/flux.2-max", KeyEnv: "OPENROUTER_API_KEY",
 		Reported: true, Params: map[string]string{"output_format": "png"}, MaxRefs: 8,
 		SizeForm: "pixels", Sizes: []string{"1K", "2K"}, MaxPixels: 4e6},
+}
+
+// DefaultImageModel returns the model a run without --provider uses.
+func DefaultImageModel() ImageModel {
+	for _, m := range ImageModels {
+		if m.Default {
+			return m
+		}
+	}
+	return ImageModel{}
 }
 
 // ImageModelFor returns provider's model id; an empty id gives the provider's

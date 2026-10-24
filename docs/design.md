@@ -102,7 +102,8 @@ Every model a provider can call is a `pins.ImageModel` in
 internal/pins/imagemodels.go: its ID, its key variable, its billing shape
 (each attempt's cost and `genai.Image.CostBasis` come from it), the sizes,
 references and request fields it takes. The first entry per provider is
-that provider's default model; there is no default provider. A key is read
+that provider's default model; the entry marked `Default` is what a run
+without `--provider` uses (`pins.DefaultImageModel`). A key is read
 only from the environment (`pins.ImageModel.Key`) and is never part of an
 error or a record.
 

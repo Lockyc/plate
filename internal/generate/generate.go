@@ -24,7 +24,7 @@ import (
 	"github.com/lockyc/plate/internal/pins"
 )
 
-const usage = "generate --pose DIR --prompt TEXT --ref IMG [--ref IMG]... --provider P [--model ID] [--n 4] [--size 2K] [--aspect W:H]\n       generate --list-models --provider P"
+const usage = "generate --pose DIR --prompt TEXT --ref IMG [--ref IMG]... [--provider P [--model ID]] [--n 4] [--size 2K] [--aspect W:H]\n       generate --list-models [--provider P]"
 
 // maxRefEdge is the longest edge a reference is sent at; a larger one is
 // downscaled, since the models gain nothing from it and the upload grows.
@@ -64,17 +64,17 @@ func roundMain(ctx context.Context, args []string, stdout, stderr io.Writer) int
 	prompt := fs.String("prompt", "", "what to make of the references (required)")
 	var refs cli.Multi
 	fs.Var(&refs, "ref", "a reference image; repeat for more (at least one)")
-	provider := fs.String("provider", "", "the hosted model's provider: "+strings.Join(providerNames(), ", ")+" (required)")
-	model := fs.String("model", "", "the provider's model id (default: the provider's first)")
+	provider := fs.String("provider", "", "the hosted model's provider: "+strings.Join(providerNames(), ", ")+" (default: "+pins.DefaultImageModel().Provider+")")
+	model := fs.String("model", "", "the provider's model id; needs --provider (default: "+pins.DefaultImageModel().ID+" without --provider, else the provider's first)")
 	n := cli.Int(fs, "n", 4, "attempts in this round")
 	size := fs.String("size", "2K", "output size: 1K, 2K or 4K")
 	aspect := fs.String("aspect", "", "aspect ratio W:H (default: the model's choice)")
-	list := fs.Bool("list-models", false, "print the --provider's model ids, one per line, and exit")
+	list := fs.Bool("list-models", false, "print the model ids, one per line, and exit (every provider's as `provider id` without --provider)")
 	if _, code, ok := cli.Parse(fs, args, 0); !ok {
 		return code
 	}
-	if *provider == "" {
-		return cli.Usage(stderr, "generate", "give --provider; there is no default provider yet (%s)", strings.Join(providerNames(), ", "))
+	if *model != "" && *provider == "" {
+		return cli.Usage(stderr, "generate", "--model needs --provider (%s)", strings.Join(providerNames(), ", "))
 	}
 	if *list {
 		return listModels(*provider, stdout, stderr)
@@ -85,9 +85,12 @@ func roundMain(ctx context.Context, args []string, stdout, stderr io.Writer) int
 	if *n < 1 {
 		return cli.Usage(stderr, "generate", "--n must be at least 1")
 	}
-	m, err := pins.ImageModelFor(*provider, *model)
-	if err != nil {
-		return cli.Usage(stderr, "generate", "%v", err)
+	m := pins.DefaultImageModel()
+	if *provider != "" {
+		var err error
+		if m, err = pins.ImageModelFor(*provider, *model); err != nil {
+			return cli.Usage(stderr, "generate", "%v", err)
+		}
 	}
 	if m.MaxRefs > 0 && len(refs) > m.MaxRefs {
 		return cli.Usage(stderr, "generate", "%s takes at most %d references; %d given", m.ID, m.MaxRefs, len(refs))
@@ -159,8 +162,19 @@ func roundMain(ctx context.Context, args []string, stdout, stderr io.Writer) int
 }
 
 // listModels prints provider's model ids from pins, one per line, default
-// first.
+// first; with no provider it prints every model as `provider id`, the overall
+// default marked.
 func listModels(provider string, stdout, stderr io.Writer) int {
+	if provider == "" {
+		for _, m := range pins.ImageModels {
+			mark := ""
+			if m.Default {
+				mark = " (default)"
+			}
+			fmt.Fprintf(stdout, "%s %s%s\n", m.Provider, m.ID, mark)
+		}
+		return 0
+	}
 	var ids []string
 	for _, m := range pins.ImageModels {
 		if m.Provider == provider {

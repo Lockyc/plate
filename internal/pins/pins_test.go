@@ -203,3 +203,18 @@ func TestKeyUnset(t *testing.T) {
 		t.Fatalf("got %q, %v", k, err)
 	}
 }
+
+func TestExactlyOneDefaultImageModel(t *testing.T) {
+	n := 0
+	for _, m := range ImageModels {
+		if m.Default {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("%d default image models, want exactly 1", n)
+	}
+	if d := DefaultImageModel(); !d.Default {
+		t.Fatalf("DefaultImageModel returned %+v", d)
+	}
+}

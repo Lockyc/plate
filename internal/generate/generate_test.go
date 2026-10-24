@@ -367,18 +367,39 @@ func TestKeyMissingBeforeAnything(t *testing.T) {
 	}
 }
 
-func TestProviderRequired(t *testing.T) {
-	code, _, errs := gen(t, "--pose", t.TempDir(), "--prompt", "p", "--ref", "x.png")
-	if code != 2 || !strings.Contains(errs, "no default") {
+func TestModelNeedsProvider(t *testing.T) {
+	code, _, errs := gen(t, "--pose", t.TempDir(), "--prompt", "p", "--ref", "x.png", "--model", "gpt-image-2")
+	if code != 2 || !strings.Contains(errs, "--model needs --provider") {
 		t.Fatalf("code %d, stderr %q", code, errs)
 	}
-	for _, p := range []string{"google", "openai", "bfl"} {
-		if !strings.Contains(errs, p) {
-			t.Errorf("stderr does not list %s: %q", p, errs)
-		}
+}
+
+func TestBareRunUsesDefaultModel(t *testing.T) {
+	needMagick(t)
+	d := pins.DefaultImageModel()
+	var path string
+	t.Setenv(d.KeyEnv, "test-key-not-real")
+	img := base64.StdEncoding.EncodeToString(pngOf(t, 4, 4, color.NRGBA{0, 0, 255, 255}))
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		path = r.URL.Path + string(b)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(imageAnswer(img, 0.04))
+	}))
+	defer srv.Close()
+	t.Setenv("PLATE_GENAI_"+strings.ToUpper(d.Provider)+"_URL", srv.URL)
+	dir := t.TempDir()
+	pose := filepath.Join(dir, "wave")
+	code, _, e := gen(t, "--pose", pose, "--prompt", "p", "--ref", writeRef(t, dir, "front.png"), "--n", "1")
+	if code != 0 {
+		t.Fatalf("code %d: %s", code, e)
 	}
-	if strings.Count(errs, "google") != 1 {
-		t.Errorf("providers not deduplicated: %q", errs)
+	if !strings.Contains(path, d.ID) {
+		t.Errorf("request did not name the default model %s: %.200s", d.ID, path)
+	}
+	recs, err := LoadPose(pose)
+	if err != nil || len(recs) != 1 || recs[0].Provider != d.Provider || recs[0].Model != d.ID {
+		t.Errorf("record %+v, err %v", recs, err)
 	}
 }
 
@@ -676,6 +697,33 @@ func TestListModels(t *testing.T) {
 	}
 	if code, _, _ := gen(t, "--list-models", "--provider", "nobody"); code != 2 {
 		t.Errorf("unknown provider: code %d, want 2", code)
+	}
+}
+
+func TestListModelsAllProviders(t *testing.T) {
+	code, o, e := gen(t, "--list-models")
+	if code != 0 || e != "" {
+		t.Fatalf("code %d, stderr %q", code, e)
+	}
+	lines := strings.Split(strings.TrimSuffix(o, "\n"), "\n")
+	if len(lines) != len(pins.ImageModels) {
+		t.Fatalf("%d lines for %d models:\n%s", len(lines), len(pins.ImageModels), o)
+	}
+	d := pins.DefaultImageModel()
+	marked := 0
+	for i, m := range pins.ImageModels {
+		if !strings.HasPrefix(lines[i], m.Provider+" "+m.ID) {
+			t.Errorf("line %d = %q", i, lines[i])
+		}
+		if strings.Contains(lines[i], "default") {
+			marked++
+			if m.ID != d.ID || m.Provider != d.Provider {
+				t.Errorf("default marked on %q", lines[i])
+			}
+		}
+	}
+	if marked != 1 {
+		t.Errorf("%d lines marked default", marked)
 	}
 }
 

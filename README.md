@@ -47,7 +47,7 @@ the exceptions listed under [Platforms](#platforms). What comes next is in
 | `animate` | Captures a page's own animation frame by frame as a muted MP4, WebM, poster, WebP or GIF, with a JSON of its measurements, skipped when nothing changed | `plate animate --size WxH [--scale F] --duration S [--fps N] [--format mp4,webm,poster,webp,gif] [--loop none\|crossfade\|dip] [--budget-kb N] [--budget MS] --out DIR [--name N] [--fail-if TEXT]... [--force] <page.html\|http(s) or file URL>` |
 | `fonts` | Embeds web fonts, from files or from Google Fonts by family name, into a CSS file so a page renders from the filesystem, optionally cut to the characters a language uses | `plate fonts [--display block] [--subset latin] [--google FAMILY:WEIGHT:STYLE]... -o fonts.css [FILE:FAMILY:WEIGHT:STYLE]...` |
 | `qr` | Makes a QR code SVG that any phone camera decodes | `plate qr [--ec L\|M\|Q\|H] [--fg RRGGBB] [--bg RRGGBB] -o out.svg <text>` |
-| `generate` ⚠ | Makes a round of attempts at a character pose from reference images through a hosted image model, each with a provenance record, and redraws the pose's contact sheet | `plate generate --pose DIR --prompt TEXT --ref IMG [--ref IMG]... --provider P [--model ID] [--n 4] [--size 1K\|2K\|4K] [--aspect W:H]` or `plate generate --list-models --provider P` |
+| `generate` ⚠ | Makes a round of attempts at a character pose from reference images through a hosted image model, each with a provenance record, and redraws the pose's contact sheet | `plate generate --pose DIR --prompt TEXT --ref IMG [--ref IMG]... [--provider P [--model ID]] [--n 4] [--size 1K\|2K\|4K] [--aspect W:H]` or `plate generate --list-models [--provider P]` |
 | `generate accept` | Copies the attempt you picked out of a pose folder, with its provenance beside it | `plate generate accept --pose DIR <rNN-aMM> <out.png>` |
 | `doctor` | Checks every engine against its pin, installs the ones plate manages, prints the install command for the rest, and says which providers' API keys are set | `plate doctor [--install]` |
 | `version` | Prints plate's version | `plate version` |
@@ -249,13 +249,14 @@ provider reads its key from an environment variable; set it only for the
 providers you use. A round without one stops before anything is sent and
 names the variable, `plate doctor` says which providers have a key set
 (never the value), and no key is ever a flag or written to a file.
-`--provider` has no default yet; `--model` defaults to the provider's first
-model in `--list-models`.
+Without `--provider` a run uses the default model, marked in
+`--list-models`; with `--provider`, `--model` defaults to that provider's
+first model, and `--model` always needs `--provider`.
 
 The loop, for one pose in a gitignored working folder of your own repo:
 
 1. **Run a round.** `plate generate --pose work/pointing --ref hero.png
-   --prompt "…" --provider P` sends `--n` attempts (default 4) and writes
+   --prompt "…"` sends `--n` attempts (default 4) and writes
    `rounds/NN/aMM.png`, each with `aMM.json` beside it: provider, model,
    prompt, size, the sha256 of each reference, cost and date. It prints
    each path, the pose's total spend, and `sheet.html` and `sheet.png`.
