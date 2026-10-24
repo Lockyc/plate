@@ -31,8 +31,8 @@ type Record struct {
 }
 
 // RefRecord is one reference an attempt was made from. Path is as it was
-// given on the command line; SHA256 is of that file as read, before any
-// normalisation. Attempt is set when the ref was itself an attempt (in any
+// given on the command line, a label only; SHA256 is the ref's identity, of
+// the file as read before any normalisation. Attempt is set when the ref was itself an attempt (in any
 // pose folder), and carries that attempt's own chain.
 type RefRecord struct {
 	Path    string  `json:"path"`
