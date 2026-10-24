@@ -138,12 +138,12 @@ func check(ctx context.Context, e pins.Engine) status {
 	return s
 }
 
-// keyReport prints whether each image provider's API key is set. A missing
-// key never fails doctor: only `generate` needs one, and the value is never
-// printed.
+// keyReport prints whether each image provider's API key is set, and the
+// environment variable it is read from. A missing key never fails doctor:
+// only `generate` needs one, and the value is never printed.
 func keyReport(out io.Writer) {
 	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "\nprovider\tkey")
+	fmt.Fprintln(tw, "\nprovider\tvariable\tkey")
 	seen := map[string]bool{}
 	for _, m := range pins.ImageModels {
 		if seen[m.KeyEnv] {
@@ -154,7 +154,7 @@ func keyReport(out io.Writer) {
 		if _, err := m.Key(); err != nil {
 			state = "not set"
 		}
-		fmt.Fprintf(tw, "%s\t%s\n", m.Provider, state)
+		fmt.Fprintf(tw, "%s\t%s\t%s\n", m.Provider, m.KeyEnv, state)
 	}
 	tw.Flush()
 }
