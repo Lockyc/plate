@@ -25,6 +25,37 @@ test:
 quality:
     go test -tags quality -count=1 -timeout 0 -v ./quality/
 
+# Provider bake-off for `plate generate`: spends real money (about US$10-20) and needs GEMINI_API_KEY, OPENAI_API_KEY, BFL_API_KEY; not part of gate or quality
+[group("check")]
+bakeoff:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    declare -a sheets=()
+    total=0
+    for entry in google:GEMINI_API_KEY openai:OPENAI_API_KEY bfl:BFL_API_KEY; do
+      provider="${entry%%:*}"; keyvar="${entry#*:}"
+      if [ -z "${!keyvar:-}" ]; then
+        echo "skipped $provider: $keyvar is not set"
+        continue
+      fi
+      n=0
+      while IFS= read -r line || [ -n "$line" ]; do
+        [ -n "$line" ] || continue
+        n=$((n + 1))
+        pose="quality/bakeoff/out/$provider/$n"
+        if out="$(go run . generate --pose "$pose" --ref quality/assets/bunny-reference.png --n 4 --provider "$provider" --prompt "$line")"; then
+          echo "$out"
+          cost="$(printf '%s\n' "$out" | sed -n -E 's/^pose total \$([0-9.]+)$/\1/p' | tail -n 1)"
+          total="$(awk -v a="$total" -v b="${cost:-0}" 'BEGIN { printf "%.2f", a + b }')"
+          sheets+=("$pose/sheet.png")
+        else
+          echo "failed $provider pose $n: $line" >&2
+        fi
+      done < quality/bakeoff/poses.txt
+    done
+    printf '%s\n' "${sheets[@]+"${sheets[@]}"}"
+    echo "grand total \$$total"
+
 # go vet static checks
 [group("check")]
 vet:
