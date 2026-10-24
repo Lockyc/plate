@@ -35,12 +35,12 @@ independently of phase 5. Within a phase, order is open.
 
 ## Deferred
 
-- **generate has no default provider.** `--provider` is required.
-  Deferred because the default is chosen by measurement, not reputation:
-  `just bakeoff` runs every OpenRouter model over the same poses of an
-  openly licensed character. Unlock: a person's verdict on those sheets,
-  then the winner as the default, its commit body recording every
-  candidate's sheet and cost.
+- **generate's default model is provisional.** It is FLUX.2 pro via
+  OpenRouter. The bake-off reference (Big Buck Bunny) is likely in every
+  model's training data, so it measured recall more than reference-
+  following. Unlock for a firmer choice: a comparison on a character no
+  model has seen (a consuming project's own character, run case by case
+  with `--model`).
 - **generate has no masked repaint.** Every attempt redraws the whole
   image; a near-miss is fixed by another round with it as a reference.
   Deferred because whole-image rounds are enough to make new poses.
