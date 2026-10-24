@@ -18,9 +18,7 @@ type ImageModel struct {
 	MaxRefs                 int
 }
 
-// ImageModels is every model plate generate knows. The first entry for each
-// provider is that provider's default. Rates and IDs checked against the
-// providers' public docs on 2026-10-24 (no API keys: live model lists not
+// provider is that provider's default.
 // queried).
 var ImageModels = []ImageModel{
 	// Checked 2026-10-24 (Gemini pricing page).
@@ -28,10 +26,10 @@ var ImageModels = []ImageModel{
 		PerImage: map[string]float64{"1K": 0.067, "2K": 0.101, "4K": 0.151}, MaxRefs: 14},
 	// Checked 2026-10-24 (Gemini pricing page).
 	{Provider: "google", ID: "gemini-nano-banana-2.1", KeyEnv: "GEMINI_API_KEY",
-		PerImage: map[string]float64{"1K": 0.0336, "2K": 0.0504, "4K": 0.113}},
+		PerImage: map[string]float64{"1K": 0.0336, "2K": 0.0504, "4K": 0.113}, MaxRefs: 14},
 	// Checked 2026-10-24 (Gemini pricing page).
 	{Provider: "google", ID: "gemini-3-pro-image", KeyEnv: "GEMINI_API_KEY",
-		PerImage: map[string]float64{"1K": 0.134, "2K": 0.134, "4K": 0.24}},
+		PerImage: map[string]float64{"1K": 0.134, "2K": 0.134, "4K": 0.24}, MaxRefs: 14},
 	// Checked 2026-10-24: the ID is listed on OpenAI's model page; the rates are
 	// the design spec's, not confirmed on a docs page.
 	{Provider: "openai", ID: "gpt-image-2", KeyEnv: "OPENAI_API_KEY",

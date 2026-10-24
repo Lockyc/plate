@@ -201,6 +201,7 @@ func TestDoctorReportsProviderKeys(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	t.Setenv("OPENAI_API_KEY", "sk-test")
 	t.Setenv("GEMINI_API_KEY", "")
+	t.Setenv("BFL_API_KEY", "")
 	var out bytes.Buffer
 	code := run(ctx, nil, false, nil, &out)
 	if code != 0 {

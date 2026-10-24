@@ -119,6 +119,9 @@ func TestImageModelsHaveAKeyAndAPrice(t *testing.T) {
 		if m.KeyEnv == "" || m.Provider == "" || m.ID == "" {
 			t.Errorf("%+v: provider, id and key variable are required", m)
 		}
+		if m.MaxRefs <= 0 {
+			t.Errorf("%s/%s has MaxRefs %d, want > 0", m.Provider, m.ID, m.MaxRefs)
+		}
 		shapes := 0
 		if len(m.PerImage) > 0 {
 			shapes++
