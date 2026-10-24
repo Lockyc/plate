@@ -123,6 +123,12 @@ func roundMain(ctx context.Context, args []string, stdout, stderr io.Writer) int
 	if total > softLimit {
 		fmt.Fprintf(stderr, "plate generate: this pose has cost $%.2f, over $%.2f\n", total, softLimit)
 	}
+	// The sheet is a view of what is on disk; failing to draw it leaves the
+	// paid round as it is.
+	if err := writeSheet(ctx, *pose, refs); err != nil {
+		fmt.Fprintf(stderr, "plate generate: contact sheet: %v\n", err)
+		code = 1
+	}
 	return code
 }
 
