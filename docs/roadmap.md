@@ -35,12 +35,12 @@ independently of phase 5. Within a phase, order is open.
 
 ## Deferred
 
-- **generate's default model is provisional.** It is the `Default` pin in
-  internal/pins/imagemodels.go. The bake-off reference (Big Buck Bunny) is likely in every
-  model's training data, so it measured recall more than reference-
-  following. Unlock for a firmer choice: a comparison on a character no
-  model has seen (a consuming project's own character, run case by case
-  with `--model`).
+- **generate's default model rests on one character.** The `Default` pin in
+  internal/pins/imagemodels.go was judged on a single character no model had
+  seen, in four poses. `just bakeoff`'s reference (Big Buck Bunny) is likely
+  in every model's training data, so the recipe measures recall more than
+  reference-following. Unlock: an openly licensed character no model can
+  have seen as the bake-off reference, then the recipe rerun.
 - **generate has no masked repaint.** Every attempt redraws the whole
   image; a near-miss is fixed by another round with it as a reference.
   Deferred because whole-image rounds are enough to make new poses.

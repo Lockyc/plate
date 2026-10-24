@@ -93,13 +93,14 @@ var ImageModels = []ImageModel{
 		Reported: true, Sizes: []string{"1K", "2K", "4K"}, MaxRefs: 14},
 	// Checked 2026-10-24 (OpenAI's image generation guide): sides multiples
 	// of 16, neither over 3840, at most 8,294,400 pixels.
+	// The overall default, 2026-10-24: on a character no model had seen, it
+	// kept the character together across varied poses best (docs/roadmap.md).
 	{Provider: "openrouter", ID: "openai/gpt-image-2", KeyEnv: "OPENROUTER_API_KEY",
-		Reported: true, Params: map[string]string{"quality": "high"}, MaxRefs: 16,
+		Default: true, Reported: true, Params: map[string]string{"quality": "high"}, MaxRefs: 16,
 		SizeForm: "pixels", Sizes: []string{"1K", "2K", "4K"}, MaxPixels: 8294400, MaxEdge: 3840},
 	// FLUX.2 makes at most 4 MP (BFL's docs), so there is no 4K.
-	// The overall default, 2026-10-24 (provisional; see docs/roadmap.md).
 	{Provider: "openrouter", ID: "black-forest-labs/flux.2-pro", KeyEnv: "OPENROUTER_API_KEY",
-		Default: true, Reported: true, Params: map[string]string{"output_format": "png"}, MaxRefs: 8,
+		Reported: true, Params: map[string]string{"output_format": "png"}, MaxRefs: 8,
 		SizeForm: "pixels", Sizes: []string{"1K", "2K"}, MaxPixels: 4e6},
 	{Provider: "openrouter", ID: "black-forest-labs/flux.2-max", KeyEnv: "OPENROUTER_API_KEY",
 		Reported: true, Params: map[string]string{"output_format": "png"}, MaxRefs: 8,
