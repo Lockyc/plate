@@ -21,6 +21,7 @@ import (
 	"github.com/lockyc/plate/internal/doc"
 	"github.com/lockyc/plate/internal/doctor"
 	"github.com/lockyc/plate/internal/fonts"
+	"github.com/lockyc/plate/internal/generate"
 	"github.com/lockyc/plate/internal/grade"
 	"github.com/lockyc/plate/internal/impose"
 	"github.com/lockyc/plate/internal/infill"
@@ -68,6 +69,7 @@ var commands = []command{
 	{"inpaint", "fill a masked region with LaMa", inpaint.Main, true},
 	{"infill", "fill a hole in a flat ground from its surroundings", infill.Main, true},
 	{"upscale", "enlarge 4x with DAT", upscale.Main, true},
+	{"generate", "attempts at a character pose from reference images, through a hosted model", generate.Main, true},
 }
 
 func main() {
