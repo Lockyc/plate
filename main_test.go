@@ -101,4 +101,9 @@ func TestSynthesisPolicy(t *testing.T) {
 	if !strings.Contains(usage(), "upscale    enlarge 4x with DAT (synthesises pixels)") {
 		t.Errorf("usage does not mark the synthesising commands:\n%s", usage())
 	}
+	// A hosted model's image is pixels no source had.
+	var errb bytes.Buffer
+	if code := run(context.Background(), []string{"generate", "-h"}, &bytes.Buffer{}, &errb); code != 1 || !strings.Contains(errb.String(), "forbid") {
+		t.Errorf("generate under synthesis = forbid: code %d, %q", code, errb.String())
+	}
 }

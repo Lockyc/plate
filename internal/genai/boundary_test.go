@@ -56,9 +56,9 @@ func TestNoBuildPathReachesGenai(t *testing.T) {
 }
 
 func TestGuardSeesAReach(t *testing.T) {
-	c := reach(t, modulePath+"/internal/genai/testdata/reach", "testdata/reach", genaiPath)
+	c := reach(t, modulePath+"/internal/generate", "../generate", genaiPath)
 	if c == nil {
-		t.Fatal("walker did not see the fixture import genai")
+		t.Fatal("walker did not see internal/generate import genai")
 	}
 }
 
