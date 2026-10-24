@@ -270,7 +270,8 @@ colours, or renders what it is given.
   that was itself an attempt embeds that attempt's record (`RefRecord`), so
   an accepted record carries its whole chain once the pose folder is gone.
   A failed attempt the provider charged for, or may have
-  (`genai.Failure.Unreported`), lands in `failures.json` (`RoundFailures`)
+  (`genai.Failure.Unreported`, set by `openrouter.attempt`; the direct adapters'
+  gaps are in the roadmap), lands in `failures.json` (`RoundFailures`)
   and counts in the pose total, past `softLimit` of which each round warns.
   `WriteSheet` writes the contact sheet as HTML and renders the newest
   rounds that fit to PNG (`render.PNG`), so the agent sees what the person sees;
