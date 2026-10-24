@@ -16,6 +16,9 @@ import (
 
 const acceptUsage = "generate accept --pose DIR <rNN-aMM> <out.png>"
 
+// writeImage writes the accepted image; a var so tests can fail it.
+var writeImage = atomicfile.WriteFile
+
 // attemptID matches the id the contact sheet labels an attempt with, rNN-aMM.
 var attemptID = regexp.MustCompile(`^(?i)r([0-9]{2,})-a([0-9]{2,})$`)
 
@@ -49,10 +52,13 @@ func acceptMain(_ context.Context, args []string, stdout, stderr io.Writer) int 
 	if err != nil {
 		return cli.Fail(stderr, "generate accept", err)
 	}
-	if err := atomicfile.WriteFile(out, b, 0o644); err != nil {
+	// The record goes first: an image with no record is the one outcome a
+	// retry cannot repair, since an existing output is refused.
+	if err := writeRecord(prov, rec); err != nil {
 		return cli.Fail(stderr, "generate accept", err)
 	}
-	if err := writeRecord(prov, rec); err != nil {
+	if err := writeImage(out, b, 0o644); err != nil {
+		os.Remove(prov)
 		return cli.Fail(stderr, "generate accept", err)
 	}
 	fmt.Fprintln(stdout, out)

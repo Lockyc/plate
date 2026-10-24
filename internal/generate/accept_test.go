@@ -1,6 +1,7 @@
 package generate
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -89,7 +90,7 @@ func TestAcceptUnknownAttempt(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "x.png")
 	for _, id := range []string{"r01-a09", "r02-a01", "nonsense"} {
 		code, _, errs := accept(t, "--pose", pose, id, out)
-		if code == 0 || !strings.Contains(errs, "r01-a01") || !strings.Contains(errs, "r01-a02") || strings.Contains(errs, "r02-a01 ") {
+		if code == 0 || !strings.Contains(errs, "r01-a01") || !strings.Contains(errs, "r01-a02") || strings.Contains(errs[strings.Index(errs, "it has "):], "r02") {
 			t.Errorf("%s: code %d, stderr %q", id, code, errs)
 		}
 	}
@@ -124,5 +125,21 @@ func TestAcceptChainSurvivesDeletion(t *testing.T) {
 	got := recordAt(t, filepath.Join(root, "final.provenance.json"))
 	if got.Prompt != "second" || len(got.Refs) != 1 || got.Refs[0].Attempt == nil || got.Refs[0].Attempt.Prompt != "first" {
 		t.Errorf("chain lost: %+v", got)
+	}
+}
+
+func TestAcceptImageWriteFailureLeavesNothing(t *testing.T) {
+	pose := filepath.Join(t.TempDir(), "wave")
+	hand(t, pose, "01", 1, []byte("pixels"), Record{Round: 1, Attempt: 1})
+	prev := writeImage
+	writeImage = func(string, []byte, os.FileMode) error { return errors.New("disk full") }
+	t.Cleanup(func() { writeImage = prev })
+	dir := t.TempDir()
+	code, _, errs := accept(t, "--pose", pose, "r01-a01", filepath.Join(dir, "x.png"))
+	if code == 0 || !strings.Contains(errs, "disk full") {
+		t.Errorf("code %d, stderr %q", code, errs)
+	}
+	if es, _ := os.ReadDir(dir); len(es) != 0 {
+		t.Errorf("left behind: %v", es)
 	}
 }
