@@ -23,6 +23,7 @@ import (
 	"github.com/lockyc/plate/internal/fonts"
 	"github.com/lockyc/plate/internal/generate"
 	"github.com/lockyc/plate/internal/grade"
+	"github.com/lockyc/plate/internal/icon"
 	"github.com/lockyc/plate/internal/impose"
 	"github.com/lockyc/plate/internal/infill"
 	"github.com/lockyc/plate/internal/inpaint"
@@ -59,6 +60,7 @@ var commands = []command{
 	{"doc", "markdown or HTML to a PDF with a document stylesheet", doc.Main, false},
 	{"slides", "preview a Google Slides deck from its Slides API JSON, one PNG per slide", slides.Main, false},
 	{"shrink", "resize down to a small, sharp PNG or WebP for the web", shrink.Main, false},
+	{"icon", "a macOS .icns and PNGs from an edge-to-edge tile, in Apple's icon grid", icon.Main, false},
 	{"diff", "compare two images after lining them up vertically", diff.Main, false},
 	{"clip", "check a demo-clip script; render a recording into a looping clip", clip.Main, false},
 	{"animate", "capture a page's animation as a muted MP4, WebM, poster, WebP or GIF", animate.Main, false},
