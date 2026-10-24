@@ -67,7 +67,7 @@ func roundMain(ctx context.Context, args []string, stdout, stderr io.Writer) int
 	provider := fs.String("provider", "", "the hosted model's provider: "+strings.Join(providerNames(), ", ")+" (default: "+pins.DefaultImageModel().Provider+")")
 	model := fs.String("model", "", "the provider's model id; needs --provider (default: "+pins.DefaultImageModel().ID+" without --provider, else the provider's first)")
 	n := cli.Int(fs, "n", 4, "attempts in this round")
-	size := fs.String("size", "2K", "output size: 1K, 2K or 4K")
+	size := fs.String("size", "2K", "output size tier, such as 1K, 2K or 4K; the model's own tiers are checked")
 	aspect := fs.String("aspect", "", "aspect ratio W:H (default: the model's choice)")
 	list := fs.Bool("list-models", false, "print the model ids, one per line, and exit (every provider's as `provider id` without --provider)")
 	if _, code, ok := cli.Parse(fs, args, 0); !ok {
