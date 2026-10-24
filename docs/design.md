@@ -107,9 +107,9 @@ without `--provider` uses (`pins.DefaultImageModel`). A key is read
 only from the environment (`pins.ImageModel.Key`) and is never part of an
 error or a record.
 
-Nothing on a build, render or animate path may import `internal/genai`
-(`TestNoBuildPathReachesGenai` walks their imports), so a re-render never
-reaches the network for pixels.
+Only `internal/generate` and main may import `internal/genai`
+(`TestOnlyGenerateReachesGenai` walks every package's imports), so a
+re-render never reaches the network for pixels.
 
 ## Synthesis policy
 

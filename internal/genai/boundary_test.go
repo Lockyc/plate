@@ -1,7 +1,10 @@
 package genai
 
 import (
+	"errors"
 	"go/build"
+	"io/fs"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -47,11 +50,51 @@ func reach(t *testing.T, start, dir, target string) []string {
 	return walk(start, dir, nil)
 }
 
-func TestNoBuildPathReachesGenai(t *testing.T) {
-	for _, pkg := range []string{"build", "render", "animate"} {
-		if c := reach(t, modulePath+"/internal/"+pkg, "../"+pkg, genaiPath); c != nil {
-			t.Errorf("internal/%s reaches internal/genai: %s", pkg, strings.Join(c, " -> "))
+// reachesGenai lists every package of the module allowed to reach genai:
+// generate, the one command that calls a provider, and main, which
+// registers the commands. Every other package, build, render and animate
+// among them, must not.
+var reachesGenai = map[string]bool{
+	modulePath:                        true,
+	modulePath + "/internal/generate": true,
+}
+
+func TestOnlyGenerateReachesGenai(t *testing.T) {
+	walked := 0
+	err := filepath.WalkDir("../..", func(dir string, d fs.DirEntry, err error) error {
+		if err != nil || !d.IsDir() {
+			return err
 		}
+		name := d.Name()
+		if dir != "../.." && (name == "testdata" || strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_")) {
+			return filepath.SkipDir
+		}
+		if _, err := build.ImportDir(dir, 0); err != nil {
+			var none *build.NoGoError
+			if errors.As(err, &none) {
+				return nil
+			}
+			return err
+		}
+		rel, _ := filepath.Rel("../..", dir)
+		path := modulePath
+		if rel != "." {
+			path += "/" + filepath.ToSlash(rel)
+		}
+		if path == genaiPath {
+			return nil
+		}
+		walked++
+		if c := reach(t, path, dir, genaiPath); c != nil && !reachesGenai[path] {
+			t.Errorf("%s reaches internal/genai: %s", path, strings.Join(c, " -> "))
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if walked < 10 {
+		t.Fatalf("walked %d packages; the walk missed the module", walked)
 	}
 }
 
