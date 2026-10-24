@@ -42,16 +42,13 @@ bakeoff:
       echo "bakeoff: go build failed" >&2
       exit 1
     fi
-    # The model IDs live in internal/pins; an unknown --model lists them. The
-    # probe runs keyless, so it can never reach the network.
-    models="$(env -u OPENROUTER_API_KEY "$bin" generate --provider openrouter --model '?' --pose "$tmp/probe" --prompt p --ref "$tmp/probe.png" </dev/null 2>&1 \
-      | sed -n -E 's/.*; known: (.*)$/\1/p' | tr ',' '\n' | tr -d ' ')"
-    if [ -z "$models" ]; then
+    if ! models="$("$bin" generate --list-models --provider openrouter </dev/null)" || [ -z "$models" ]; then
       echo "bakeoff: could not list the openrouter models" >&2
       exit 1
     fi
     declare -a sheets=()
     total=0.00
+    unreported=0
     for model in $models; do
       n=0
       while IFS= read -r line || [ -n "$line" ]; do
@@ -63,6 +60,8 @@ bakeoff:
         echo "$out"
         cost="$(printf '%s\n' "$out" | sed -n -E 's/^pose total \$([0-9.]+)$/\1/p' | tail -n 1)"
         total="$(awk -v a="$total" -v b="${cost:-0}" 'BEGIN { printf "%.2f", a + b }')"
+        u="$(printf '%s\n' "$out" | sed -n -E 's/^unreported ([0-9]+)$/\1/p' | tail -n 1)"
+        unreported=$((unreported + ${u:-0}))
         if printf '%s\n' "$out" | grep -qxF "$pose/sheet.png"; then sheets+=("$pose/sheet.png"); fi
         if [ "$code" -ne 0 ]; then
           echo "failed (exit $code): $model pose $n: $line" >&2
@@ -70,7 +69,11 @@ bakeoff:
       done < quality/bakeoff/poses.txt
     done
     if [ "${#sheets[@]}" -gt 0 ]; then printf '%s\n' "${sheets[@]}"; fi
-    echo "grand total \$$total"
+    if [ "$unreported" -gt 0 ]; then
+      echo "grand total \$$total ($unreported attempts' cost not reported)"
+    else
+      echo "grand total \$$total"
+    fi
 
 # go vet static checks
 [group("check")]
