@@ -565,6 +565,37 @@ func TestSoftWarning(t *testing.T) {
 	}
 }
 
+func TestUnreportedCostWarns(t *testing.T) {
+	needMagick(t)
+	m, err := pins.ImageModelFor("openrouter", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(m.KeyEnv, "test-key-not-real")
+	out := base64.StdEncoding.EncodeToString(pngOf(t, 4, 4, color.NRGBA{0, 0, 255, 255}))
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"data": []any{map[string]any{"b64_json": out, "media_type": "image/png"}}})
+	}))
+	t.Cleanup(srv.Close)
+	t.Setenv("PLATE_GENAI_OPENROUTER_URL", srv.URL)
+	dir := t.TempDir()
+	pose := filepath.Join(dir, "wave")
+	code, o, e := gen(t, "--pose", pose, "--prompt", "p", "--ref", writeRef(t, dir, "front.png"), "--provider", "openrouter", "--n", "2")
+	if code != 0 {
+		t.Fatalf("code %d, stderr %q", code, e)
+	}
+	if strings.Count(e, "\n") != 1 || !strings.Contains(e, "did not report") || !strings.Contains(e, "2 attempts") {
+		t.Errorf("stderr is not one warning line about the 2 unreported attempts:\n%q", e)
+	}
+	if !strings.Contains(o, filepath.Join(pose, "rounds", "01", "a02.png")) {
+		t.Errorf("the paid images were not written:\n%s", o)
+	}
+	if r := recordAt(t, filepath.Join(pose, "rounds", "01", "a01.json")); r.CostBasis != "unreported" || r.CostUSD != 0 {
+		t.Errorf("record %+v", r)
+	}
+}
+
 func TestPoseTotal(t *testing.T) {
 	if got := PoseTotal([]Record{{CostUSD: 0.25}, {CostUSD: 1.5}}); got != 1.75 {
 		t.Errorf("PoseTotal = %v", got)
