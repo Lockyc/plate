@@ -41,6 +41,7 @@ the exceptions listed under [Platforms](#platforms). What comes next is in
 | `doc` | Renders markdown or HTML to a PDF with a plain document look: A4, a running head from the first heading, page numbers, ruled tables | `plate doc [--css FILE] <in.md\|in.html> <out.pdf>` |
 | `slides` | Previews a Google Slides deck that Drive will not export, from its Slides API JSON: one PNG per slide, in the fonts the deck names | `plate slides [--pages LIST] [--out DIR] [--scale S] <deck.json\|->` |
 | `shrink` | Resizes down to a small, sharp web asset: PNG at maximum lossless compression, or WebP, alpha kept, never enlarging | `plate shrink (--width PX \| --height PX \| --width PX --height PX \| --fit PX) [--quality Q] <in> <out.png\|out.webp>...` |
+| `icon` | Makes a macOS app icon (`.icns`) and PNGs from a tile drawn edge to edge, placed in Apple's icon grid and rendered natively at every size | `plate icon [--icns out.icns] [--png PX:out.png]... <tile.svg\|tile.png>` |
 | `diff` | Compares two images after lining them up, so a small shift doesn't fail everything | `plate diff [--tolerance N] [--max-shift PX] [--step PX] [--threshold PCT] [--out diff.png] <a> <b>` |
 | `clip check` | Validates a demo-clip script and prints it normalised, the form a runner reads | `plate clip check [--json] <clip.toml>` |
 | `clip render` | Turns a screen recording and its event log into a short looping clip: trimmed, framed by a fixed or following camera, with captions and touch, click, key or cursor overlays; MP4, WebM, poster, WebP or GIF, with a JSON of its measurements | `plate clip render --script clip.toml --master raw.mov --events events.jsonl --out DIR [--caption-css FILE]` |
@@ -157,6 +158,12 @@ refuses to replace an existing output unless given `--force`.
 `--fit` so its longest side is that size. Each output's extension picks its
 format; `o.png o.webp` writes both, so you can keep the smaller. WebP is
 lossy at `--quality` (default 90) with lossless alpha.
+
+`icon` takes the tile as it should look, rounded corners included, filling
+its square, and draws it in the 824 px box centred on a 1024 px canvas that
+every macOS app icon uses; an icon drawn to the canvas edge shows larger than
+every other app in the Dock. The `.icns` holds the ten sizes macOS reads,
+16 to 1024 px, and each `--png` is the same icon at PX px.
 
 `clip render` writes `<name>.<ext>` into `--out` for each format the script
 lists (`mp4`, `webm`, `poster.png` for `poster`, `webp`, `gif`), plus

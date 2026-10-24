@@ -24,7 +24,7 @@ wrapping it would add nothing; a resize down for the web goes through
 main.go              dispatch
 internal/<op>/       one package per command (cutout, inpaint, infill, upscale,
                      grade, render, build, press, pdf, impose, marks, doc,
-                     slides, shrink, diff, clip, animate, fonts, qr, generate,
+                     slides, shrink, icon, diff, clip, animate, fonts, qr, generate,
                      doctor)
 internal/genai/      the one way a hosted image model is called
 internal/cdp/        a DevTools-protocol session with Chrome over --remote-debugging-pipe
@@ -279,7 +279,7 @@ colours, or renders what it is given.
   rounds that fit to PNG (`render.PNG`), so the agent sees what the person sees;
   `generate accept` writes the record before the image. Every file a person
   keeps goes through `internal/atomicfile`.
-- **inpaint, fonts, qr, pdf, impose, marks, doc, slides** — as the README table and each package's
+- **inpaint, fonts, qr, icon, pdf, impose, marks, doc, slides** — as the README table and each package's
   doc comment describe.
 
 ## Platforms and errors
