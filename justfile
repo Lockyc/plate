@@ -69,7 +69,9 @@ bakeoff:
       done < quality/bakeoff/poses.txt
     done
     if [ "${#sheets[@]}" -gt 0 ]; then printf '%s\n' "${sheets[@]}"; fi
-    if [ "$unreported" -gt 0 ]; then
+    if [ "$unreported" -eq 1 ]; then
+      echo "grand total \$$total (1 attempt's cost not reported)"
+    elif [ "$unreported" -gt 1 ]; then
       echo "grand total \$$total ($unreported attempts' cost not reported)"
     else
       echo "grand total \$$total"
