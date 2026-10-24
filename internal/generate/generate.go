@@ -99,7 +99,7 @@ func roundMain(ctx context.Context, args []string, stdout, stderr io.Writer) int
 		fmt.Fprintf(stderr, "plate generate: %s holds an unfinished round; its images are kept\n", p)
 	}
 	r := run{pose: *pose, req: genai.Request{Model: m, Prompt: *prompt, N: *n, Size: *size, Aspect: *aspect}, refs: refs}
-	written, fails, err := r.round(ctx)
+	written, unreported, fails, err := r.round(ctx)
 	code := 0
 	if len(fails) > 0 {
 		fmt.Fprintf(stderr, "plate generate: %d of %d attempts failed:\n", len(fails), *n)
@@ -107,6 +107,13 @@ func roundMain(ctx context.Context, args []string, stdout, stderr io.Writer) int
 			fmt.Fprintf(stderr, "  %s\n", f.Reason)
 		}
 		code = 1
+	}
+	if unreported > 0 {
+		noun := "attempts"
+		if unreported == 1 {
+			noun = "attempt"
+		}
+		fmt.Fprintf(stderr, "plate generate: %s did not report the cost of %d %s; they were charged but are recorded at $0.00\n", m.Provider, unreported, noun)
 	}
 	if err != nil {
 		return cli.Fail(stderr, "generate", err)
@@ -146,36 +153,39 @@ type run struct {
 
 // round normalises the refs, claims a round, asks the provider for the
 // attempts and writes the ones that came back. It returns the paths
-// written, and the failures even alongside an error. A round in which no
+// written, how many attempts written carry CostBasis "unreported" (even
+// alongside an error, since they were charged), and the failures even
+// alongside an error. A round in which no
 // attempt succeeded leaves nothing. When an attempt cannot be written, every
 // other attempt still is, the round stays NN.partial, and the error names
 // each attempt that failed and the partial folder.
-func (r run) round(ctx context.Context) ([]string, []genai.Failure, error) {
+func (r run) round(ctx context.Context) ([]string, int, []genai.Failure, error) {
 	p, err := genai.For(r.req.Model.Provider)
 	if err != nil {
-		return nil, nil, err
+		return nil, 0, nil, err
 	}
 	rrs := make([]RefRecord, len(r.refs))
 	for i, ref := range r.refs {
 		if rrs[i], err = refRecord(ref); err != nil {
-			return nil, nil, err
+			return nil, 0, nil, err
 		}
 	}
 	if r.req.Refs, err = normalise(ctx, r.refs); err != nil {
-		return nil, nil, err
+		return nil, 0, nil, err
 	}
 	num, dir, err := claimRound(r.pose)
 	if err != nil {
-		return nil, nil, err
+		return nil, 0, nil, err
 	}
 	imgs, fails, err := p.Generate(ctx, r.req)
 	if err != nil || len(imgs) == 0 {
 		os.Remove(dir)
-		return nil, fails, err
+		return nil, 0, fails, err
 	}
 	created := now().UTC().Format(time.RFC3339)
 	var names []string
 	var errs []error
+	unreported := 0
 	for i, img := range imgs {
 		base := attemptBase(i + 1)
 		if err := atomicfile.WriteFile(filepath.Join(dir, base+".png"), img.PNG, 0o644); err != nil {
@@ -192,6 +202,9 @@ func (r run) round(ctx context.Context) ([]string, []genai.Failure, error) {
 			continue
 		}
 		names = append(names, base+".png", base+".json")
+		if img.CostBasis == "unreported" {
+			unreported++
+		}
 	}
 	final := filepath.Join(roundsDir(r.pose), roundName(num))
 	if len(errs) == 0 {
@@ -200,13 +213,13 @@ func (r run) round(ctx context.Context) ([]string, []genai.Failure, error) {
 		}
 	}
 	if len(errs) > 0 {
-		return nil, fails, fmt.Errorf("%w; the round so far is kept in %s", errors.Join(errs...), dir)
+		return nil, unreported, fails, fmt.Errorf("%w; the round so far is kept in %s", errors.Join(errs...), dir)
 	}
 	written := make([]string, len(names))
 	for i, n := range names {
 		written[i] = filepath.Join(final, n)
 	}
-	return written, fails, nil
+	return written, unreported, fails, nil
 }
 
 // normalise frames each ref as an 8-bit sRGB RGBA PNG and downscales any
