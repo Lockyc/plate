@@ -48,7 +48,7 @@ type sheetRound struct {
 	Number        int
 	Model, Prompt string
 	Cost          string
-	Failed        string // "2 failed, $0.13 charged", or "" when nothing failed was charged
+	Failed        string // "2 failed, $0.13 charged[, 1 cost not reported]", or "" when no failure was or may have been charged
 	Attempts      []sheetAttempt
 }
 
@@ -110,8 +110,11 @@ func writeSheetHTML(dir string, refs []string) error {
 		if len(rs) > 0 {
 			sr.Model, sr.Prompt = rs[0].Model, rs[0].Prompt
 		}
-		if c := rf.Charged(); c > 0 {
+		if c, u := rf.Charged(), rf.Unreported(); c > 0 || u > 0 {
 			sr.Failed = fmt.Sprintf("%d failed, %s charged", len(rf.Failures), money(c))
+			if u > 0 {
+				sr.Failed += fmt.Sprintf(", %d cost not reported", u)
+			}
 		}
 		for _, a := range rs {
 			sr.Attempts = append(sr.Attempts, sheetAttempt{

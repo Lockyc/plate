@@ -108,4 +108,18 @@ func TestSheetShowsChargedFailures(t *testing.T) {
 	if strings.Index(h, "Round 2") > strings.Index(h, "Round 1") {
 		t.Errorf("rounds not newest first")
 	}
+	// A round whose failure cost never came back says so.
+	os.MkdirAll(filepath.Join(roundsDir(pose), "03"), 0o755)
+	rf3 := RoundFailures{Provider: "openrouter", Model: "model-three", Prompt: "third", Round: 3,
+		Failures: []FailureRecord{{Index: 0, Reason: "timed out", Unreported: true}}}
+	if err := writeFailures(filepath.Join(roundsDir(pose), "03"), rf3); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeSheetHTML(pose, nil); err != nil {
+		t.Fatal(err)
+	}
+	b, _ = os.ReadFile(filepath.Join(pose, "sheet.html"))
+	if !strings.Contains(string(b), "1 failed, $0.00 charged, 1 cost not reported") {
+		t.Errorf("sheet.html lacks the unreported failure:\n%s", b)
+	}
 }

@@ -198,11 +198,13 @@ type run struct {
 
 // round normalises the refs, claims a round, asks the provider for the
 // attempts and writes the ones that came back, and failures.json when the
-// provider charged for a failed attempt. It returns the paths written, how
-// many attempts written carry CostBasis "unreported" (even alongside an
-// error, since they were charged), and the failures even alongside an
-// error. A round in which nothing came back and nothing was charged leaves
-// nothing; one with only charged failures is kept with only failures.json.
+// provider charged for a failed attempt or may have without reporting it
+// (Failure.Unreported). It returns the paths written, how many attempts
+// carry an unreported cost (images written with CostBasis "unreported" and
+// Unreported failures, even alongside an error, since they were charged),
+// and the failures even alongside an error. A round in which nothing came
+// back and nothing was or may have been charged leaves nothing; one with
+// only such failures is kept with only failures.json.
 // When a file cannot be written, every other one still is, the round stays
 // NN.partial, and the error names each one that failed and the partial
 // folder.
@@ -225,9 +227,12 @@ func (r run) round(ctx context.Context) ([]string, int, []genai.Failure, error) 
 		return nil, 0, nil, err
 	}
 	imgs, fails, err := p.Generate(ctx, r.req)
-	charged := false
+	charged, unreported := false, 0
 	for _, f := range fails {
-		charged = charged || f.CostUSD > 0
+		charged = charged || f.CostUSD > 0 || f.Unreported
+		if f.Unreported {
+			unreported++
+		}
 	}
 	if err != nil || (len(imgs) == 0 && !charged) {
 		os.Remove(dir)
@@ -236,11 +241,10 @@ func (r run) round(ctx context.Context) ([]string, int, []genai.Failure, error) 
 	created := now().UTC().Format(time.RFC3339)
 	var names []string
 	var errs []error
-	unreported := 0
 	if charged {
 		rf := RoundFailures{Provider: r.req.Model.Provider, Model: r.req.Model.ID, Prompt: r.req.Prompt, Round: num}
 		for _, f := range fails {
-			rf.Failures = append(rf.Failures, FailureRecord{Index: f.Index, Reason: f.Reason, CostUSD: f.CostUSD})
+			rf.Failures = append(rf.Failures, FailureRecord{Index: f.Index, Reason: f.Reason, CostUSD: f.CostUSD, Unreported: f.Unreported})
 		}
 		if err := writeFailures(dir, rf); err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", failuresName, err))
