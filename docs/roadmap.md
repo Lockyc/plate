@@ -60,6 +60,21 @@ independently of phase 5. Within a phase, order is open.
   Deferred because it works and the models plate pins are served there.
   Unlock: a retirement date, or a pinned model only the Interactions API
   serves, then the provider moved to it behind the same `genai.Provider`.
+- **The direct openai, bfl and google adapters have not been called live**;
+  only `openrouter` has, through the bake-off. Their request shapes come from
+  the providers' docs. Unlock: a key for one of them, then one live round.
+- **Some possibly billed attempts carry no record.** An openai request that
+  times out after it was sent is a round error, and a bfl submit that times
+  out after sending is not marked unreported; openrouter marks both cases.
+  Deferred because openrouter is the default. Unlock: either adapter in
+  regular use, then the same `Unreported` mark.
+- **google prices an attempt by the per-image rate,** ignoring reference
+  input tokens, a fraction of a cent. Unlock: the adapter in regular use,
+  then pricing from `usageMetadata`.
+- **`--aspect` is checked inside each provider,** after the round is claimed
+  and before any request, not by `genai.Check`, and google ignores it.
+  Unlock: a bad `--aspect` costing a round folder, then the check moved
+  into `genai.Check`.
 
 - **animate has no sound.** Every video plate writes is muted. Deferred
   because the first ads are captioned and silent. Unlock: an optional
