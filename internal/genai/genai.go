@@ -1,6 +1,6 @@
-// Package genai is the boundary to hosted image models. Nothing on a build,
-// render or animate path may import it: a build must never reach the network
-// for pixels (pinned by TestNoBuildPathReachesGenai).
+// Package genai is the boundary to hosted image models. Only internal/generate
+// (and main, which registers it) may import it: a build must never reach the
+// network for pixels (pinned by TestOnlyGenerateReachesGenai).
 package genai
 
 import (
