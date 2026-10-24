@@ -30,10 +30,15 @@ quality:
 bakeoff:
     #!/usr/bin/env bash
     set -uo pipefail
-    bin="$(mktemp -d)/plate"
-    go build -o "$bin" .
+    tmp="$(mktemp -d)"
+    trap 'rm -rf "$tmp"' EXIT
+    bin="$tmp/plate"
+    if ! go build -o "$bin" .; then
+      echo "bakeoff: go build failed" >&2
+      exit 1
+    fi
     declare -a sheets=()
-    total=0
+    total=0.00
     for entry in google:GEMINI_API_KEY openai:OPENAI_API_KEY bfl:BFL_API_KEY; do
       provider="${entry%%:*}"; keyvar="${entry#*:}"
       if [ -z "${!keyvar:-}" ]; then
@@ -45,12 +50,12 @@ bakeoff:
         [ -n "$line" ] || continue
         n=$((n + 1))
         pose="quality/bakeoff/out/$provider/$n"
-        out="$("$bin" generate --pose "$pose" --ref quality/assets/bunny-reference.png --n 4 --provider "$provider" --prompt "$line")"
+        out="$("$bin" generate --pose "$pose" --ref quality/assets/bunny-reference.png --n 4 --provider "$provider" --prompt "$line" </dev/null)"
         code=$?
         echo "$out"
         cost="$(printf '%s\n' "$out" | sed -n -E 's/^pose total \$([0-9.]+)$/\1/p' | tail -n 1)"
         total="$(awk -v a="$total" -v b="${cost:-0}" 'BEGIN { printf "%.2f", a + b }')"
-        [ -f "$pose/sheet.png" ] && sheets+=("$pose/sheet.png")
+        if printf '%s\n' "$out" | grep -qxF "$pose/sheet.png"; then sheets+=("$pose/sheet.png"); fi
         if [ "$code" -ne 0 ]; then
           echo "failed (exit $code): $provider pose $n: $line" >&2
         fi
