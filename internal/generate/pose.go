@@ -113,9 +113,15 @@ func PoseTotal(rs []Record) float64 {
 	return t
 }
 
-// newRound creates the next round's partial folder, numbered above every
-// complete and every partial round, and returns its number and path.
-func newRound(pose string) (int, string, error) {
+// claimTries bounds how many taken numbers claimRound steps past.
+const claimTries = 100
+
+// claimRound claims the next round, numbered above every complete and every
+// partial round, by creating its partial folder exclusively; it returns the
+// number and path. A number another run took first (its NN.partial or NN
+// already there) is skipped for the next. It runs before any request is
+// sent, so no paid image waits on a folder to land in.
+func claimRound(pose string) (int, string, error) {
 	complete, partial, err := scan(pose)
 	if err != nil {
 		return 0, "", err
@@ -129,9 +135,25 @@ func newRound(pose string) (int, string, error) {
 	if err := os.MkdirAll(roundsDir(pose), 0o755); err != nil {
 		return 0, "", err
 	}
-	dir := filepath.Join(roundsDir(pose), roundName(n)+partialSuffix)
-	if err := os.Mkdir(dir, 0o755); err != nil {
-		return 0, "", err
+	for range claimTries {
+		dir := filepath.Join(roundsDir(pose), roundName(n)+partialSuffix)
+		err := os.Mkdir(dir, 0o755)
+		if os.IsExist(err) {
+			n++
+			continue
+		}
+		if err != nil {
+			return 0, "", err
+		}
+		if _, err := os.Lstat(filepath.Join(roundsDir(pose), roundName(n))); !os.IsNotExist(err) {
+			os.Remove(dir)
+			if err != nil {
+				return 0, "", err
+			}
+			n++
+			continue
+		}
+		return n, dir, nil
 	}
-	return n, dir, nil
+	return 0, "", fmt.Errorf("could not claim a round in %s: %d numbers in a row were taken", roundsDir(pose), claimTries)
 }
