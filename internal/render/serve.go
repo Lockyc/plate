@@ -3,6 +3,7 @@ package render
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"io"
@@ -14,21 +15,33 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
 
-// plateHost is the made-up host a rendered page is loaded from. Chrome sends
-// every request for it to the loopback proxy, which maps the URL path onto
-// the local file of the same absolute path. ".invalid" never resolves, so a
-// request that somehow bypassed the proxy fails rather than reaching a
-// real server.
+// plateHost is the canonical host of a local page's address — what a cache key
+// names (PlateURL). Chrome never loads it: each run's proxy serves files only
+// under its own random subdomain of it (server.host), so another process on
+// the machine that finds the proxy port cannot read files through it. ".invalid"
+// never resolves, so a request that somehow bypassed the proxy fails rather than
+// reaching a real server.
 const plateHost = "plate.invalid"
 
-// PlateURL is the URL Chrome loads for the local file at path local, with
-// query (including its "?") kept so a page can still be parameterised.
+// PlateURL is the canonical address of the local file at path local, with query
+// (including its "?") kept so a page can still be parameterised.
 func PlateURL(local, query string) string {
-	return "http://" + plateHost + (&url.URL{Path: local}).EscapedPath() + query
+	return plateURLAt(plateHost, local, query)
+}
+
+// PlatePath is local as the root-relative URL path a loaded page resolves on its
+// own host — what a page plate writes uses, so it loads under whichever run's host.
+func PlatePath(local string) string {
+	return (&url.URL{Path: local}).EscapedPath()
+}
+
+func plateURLAt(host, local, query string) string {
+	return "http://" + host + PlatePath(local) + query
 }
 
 // loadSet is everything a page asked for, each list sorted and deduplicated.
@@ -58,6 +71,7 @@ type loadSet struct {
 type server struct {
 	ln   net.Listener
 	srv  *http.Server
+	host string                                   // this run's host: 128 random bits under plateHost
 	read func(p string) ([]byte, time.Time, bool) // readRegular; a test counts through it
 
 	mu           sync.Mutex
@@ -91,18 +105,23 @@ func loadPage(ctx context.Context, u, local, query string, do func(context.Conte
 		return loadSet{}, nil, err
 	}
 	defer srv.Close()
-	hashes, err := do(ctx, Load{URL: PlateURL(local, query), ChromeArgs: baseArgs(srv.proxyFlag())})
+	hashes, err := do(ctx, Load{URL: srv.url(local, query), ChromeArgs: baseArgs(srv.proxyFlag())})
 	return srv.loads(), hashes, err
 }
 
-// serve starts the proxy on an ephemeral loopback port.
+// serve starts the proxy on an ephemeral loopback port, under a fresh host.
 func serve() (*server, error) {
+	var nonce [16]byte
+	if _, err := rand.Read(nonce[:]); err != nil {
+		return nil, err
+	}
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return nil, err
 	}
 	s := &server{
 		ln:      ln,
+		host:    hex.EncodeToString(nonce[:]) + "." + plateHost,
 		read:    readRegular,
 		content: map[string]*content{},
 		files:   map[string]string{},
@@ -143,6 +162,12 @@ func (s *server) untrack(c net.Conn) {
 	s.mu.Lock()
 	delete(s.tunnels, c)
 	s.mu.Unlock()
+}
+
+// url is the address Chrome loads local at for this run: PlateURL's path on the
+// run's own host.
+func (s *server) url(local, query string) string {
+	return plateURLAt(s.host, local, query)
 }
 
 // proxyFlag is the Chrome flag that routes the page through the proxy. The
@@ -205,8 +230,12 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case r.Method == http.MethodConnect:
 		s.tunnel(w, r)
-	case r.URL.IsAbs() && r.URL.Hostname() == plateHost:
+	case r.URL.IsAbs() && r.URL.Hostname() == s.host:
 		s.file(w, r)
+	case r.URL.IsAbs() && (r.URL.Hostname() == plateHost || strings.HasSuffix(r.URL.Hostname(), "."+plateHost)):
+		// Any other plate host is a guess, not this run's page: refuse it rather
+		// than forward it (it would only fail to resolve) or record it as external.
+		http.Error(w, "plate: not this run's host", http.StatusForbidden)
 	case r.URL.IsAbs():
 		s.forward(w, r)
 	default:

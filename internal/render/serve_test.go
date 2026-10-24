@@ -50,7 +50,7 @@ func TestServerServesFileAndRecords(t *testing.T) {
 		t.Fatal(err)
 	}
 	srv := startServer(t)
-	resp, err := proxied(t, srv).Get(PlateURL(p, ""))
+	resp, err := proxied(t, srv).Get(srv.url(p, ""))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,6 +64,34 @@ func TestServerServesFileAndRecords(t *testing.T) {
 	}
 	if got := srv.loads().Files; !reflect.DeepEqual(got, map[string]string{p: sumOf("body{}")}) {
 		t.Errorf("Files = %v", got)
+	}
+}
+
+// Only this run's host reads files: the canonical host, or any other guess at a
+// subdomain of it, is refused and reads nothing.
+func TestServerServesOnlyItsOwnHost(t *testing.T) {
+	tmp := t.TempDir()
+	p := filepath.Join(tmp, "secret.txt")
+	if err := os.WriteFile(p, []byte("s"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	srv := startServer(t)
+	other := startServer(t)
+	if srv.host == other.host || !strings.HasSuffix(srv.host, "."+plateHost) {
+		t.Fatalf("hosts must be fresh per run: %q %q", srv.host, other.host)
+	}
+	for _, u := range []string{PlateURL(p, ""), other.url(p, "")} {
+		resp, err := proxied(t, srv).Get(u)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusForbidden {
+			t.Errorf("%s: got %d, want 403", u, resp.StatusCode)
+		}
+	}
+	if got := srv.loads().Files; len(got) != 0 {
+		t.Errorf("a refused host must read nothing: %v", got)
 	}
 }
 
@@ -82,7 +110,7 @@ func TestServerKeepsFirstRead(t *testing.T) {
 	srv := startServer(t)
 	c := proxied(t, srv)
 	get := func(p string) (int, string) {
-		resp, err := c.Get(PlateURL(p, ""))
+		resp, err := c.Get(srv.url(p, ""))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -122,7 +150,7 @@ func TestServerReadsAFileOnce(t *testing.T) {
 	}
 	c := proxied(t, srv)
 	for _, tc := range []struct{ rng, want string }{{"bytes=0-3", "0123"}, {"bytes=6-", "6789"}} {
-		req, _ := http.NewRequest(http.MethodGet, PlateURL(p, ""), nil)
+		req, _ := http.NewRequest(http.MethodGet, srv.url(p, ""), nil)
 		req.Header.Set("Range", tc.rng)
 		resp, err := c.Do(req)
 		if err != nil {
@@ -148,7 +176,7 @@ func TestServerMissingAndDirectory(t *testing.T) {
 	srv := startServer(t)
 	c := proxied(t, srv)
 	for _, p := range []string{missing, tmp + "/"} {
-		resp, err := c.Get(PlateURL(p, ""))
+		resp, err := c.Get(srv.url(p, ""))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -170,7 +198,7 @@ func TestServerKeepsQuery(t *testing.T) {
 		t.Fatal(err)
 	}
 	srv := startServer(t)
-	resp, err := proxied(t, srv).Get(PlateURL(p, "?m=date"))
+	resp, err := proxied(t, srv).Get(srv.url(p, "?m=date"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,7 +229,7 @@ func TestServerNoExtensionIsSniffed(t *testing.T) {
 		t.Fatal(err)
 	}
 	srv := startServer(t)
-	resp, err := proxied(t, srv).Get(PlateURL(p, ""))
+	resp, err := proxied(t, srv).Get(srv.url(p, ""))
 	if err != nil {
 		t.Fatal(err)
 	}
