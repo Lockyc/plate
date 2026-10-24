@@ -29,7 +29,9 @@ type Request struct {
 }
 
 // Image is one generated attempt. CostBasis is "usage" when CostUSD comes from
-// the provider's reported token usage, "rate" when from the pinned rate.
+// the provider's reported token usage, "rate" when from the pinned rate,
+// "reported" when the provider stated the cost itself, and "unreported" when
+// it should have and did not (CostUSD is then 0, though the image was paid for).
 type Image struct {
 	PNG        []byte
 	CostUSD    float64
