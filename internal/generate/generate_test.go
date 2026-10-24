@@ -565,34 +565,117 @@ func TestSoftWarning(t *testing.T) {
 	}
 }
 
-func TestUnreportedCostWarns(t *testing.T) {
-	needMagick(t)
+// openrouterServer is a fake OpenRouter endpoint. answer(i, image) gives the
+// i-th request's (from 0) JSON answer; image is a PNG's base64 to put in it.
+func openrouterServer(t *testing.T, answer func(i int, image string) map[string]any) {
+	t.Helper()
 	m, err := pins.ImageModelFor("openrouter", "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv(m.KeyEnv, "test-key-not-real")
-	out := base64.StdEncoding.EncodeToString(pngOf(t, 4, 4, color.NRGBA{0, 0, 255, 255}))
+	img := base64.StdEncoding.EncodeToString(pngOf(t, 4, 4, color.NRGBA{0, 0, 255, 255}))
+	var n atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{"data": []any{map[string]any{"b64_json": out, "media_type": "image/png"}}})
+		json.NewEncoder(w).Encode(answer(int(n.Add(1)-1), img))
 	}))
 	t.Cleanup(srv.Close)
 	t.Setenv("PLATE_GENAI_OPENROUTER_URL", srv.URL)
+}
+
+func imageAnswer(image string, cost any) map[string]any {
+	v := map[string]any{"data": []any{map[string]any{"b64_json": image, "media_type": "image/png"}}}
+	if cost != nil {
+		v["usage"] = map[string]any{"cost": cost}
+	}
+	return v
+}
+
+func TestUnreportedCostWarns(t *testing.T) {
+	needMagick(t)
+	openrouterServer(t, func(i int, image string) map[string]any { return imageAnswer(image, nil) })
 	dir := t.TempDir()
 	pose := filepath.Join(dir, "wave")
 	code, o, e := gen(t, "--pose", pose, "--prompt", "p", "--ref", writeRef(t, dir, "front.png"), "--provider", "openrouter", "--n", "2")
 	if code != 0 {
 		t.Fatalf("code %d, stderr %q", code, e)
 	}
-	if strings.Count(e, "\n") != 1 || !strings.Contains(e, "did not report") || !strings.Contains(e, "2 attempts") {
+	if e != "plate generate: openrouter did not report the cost of 2 attempts; they were charged but are recorded at $0.00\n" {
 		t.Errorf("stderr is not one warning line about the 2 unreported attempts:\n%q", e)
+	}
+	if !strings.Contains(o, "\nunreported 2\n") {
+		t.Errorf("stdout lacks the unreported line:\n%s", o)
 	}
 	if !strings.Contains(o, filepath.Join(pose, "rounds", "01", "a02.png")) {
 		t.Errorf("the paid images were not written:\n%s", o)
 	}
 	if r := recordAt(t, filepath.Join(pose, "rounds", "01", "a01.json")); r.CostBasis != "unreported" || r.CostUSD != 0 {
 		t.Errorf("record %+v", r)
+	}
+	code, _, e = gen(t, "--pose", pose, "--prompt", "p", "--ref", writeRef(t, dir, "front.png"), "--provider", "openrouter", "--n", "1")
+	if code != 0 || e != "plate generate: openrouter did not report the cost of 1 attempt; it was charged but is recorded at $0.00\n" {
+		t.Errorf("one attempt: code %d, stderr %q", code, e)
+	}
+}
+
+func TestChargedFailuresReachTheTotal(t *testing.T) {
+	needMagick(t)
+	// Requests 0 and 1 make an image at $0.05; the rest make none, charged $0.04.
+	openrouterServer(t, func(i int, image string) map[string]any {
+		if i < 2 {
+			return imageAnswer(image, 0.05)
+		}
+		return map[string]any{"data": []any{}, "usage": map[string]any{"cost": 0.04}}
+	})
+	dir := t.TempDir()
+	pose := filepath.Join(dir, "wave")
+	code, o, e := gen(t, "--pose", pose, "--prompt", "p", "--ref", writeRef(t, dir, "front.png"), "--provider", "openrouter", "--n", "4")
+	if code != 1 || !strings.Contains(e, "2 of 4 attempts failed") {
+		t.Fatalf("code %d, stderr %q", code, e)
+	}
+	if !strings.Contains(o, "pose total $0.18\n") {
+		t.Errorf("pose total does not cover the charged failures:\n%s", o)
+	}
+	fs, err := LoadFailures(pose)
+	if err != nil || len(fs) != 1 || len(fs[0].Failures) != 2 || fs[0].Round != 1 || fs[0].Failures[0].CostUSD != 0.04 {
+		t.Fatalf("failures %+v, %v", fs, err)
+	}
+	// A round where every attempt failed, but was charged, is kept.
+	openrouterServer(t, func(i int, image string) map[string]any {
+		return map[string]any{"data": []any{}, "usage": map[string]any{"cost": 0.04}}
+	})
+	code, o, _ = gen(t, "--pose", pose, "--prompt", "p", "--ref", writeRef(t, dir, "front.png"), "--provider", "openrouter", "--n", "2")
+	if code != 1 || !strings.Contains(o, "pose total $0.26\n") {
+		t.Errorf("all failed: code %d, stdout:\n%s", code, o)
+	}
+	es, err := os.ReadDir(filepath.Join(pose, "rounds", "02"))
+	if err != nil || len(es) != 1 || es[0].Name() != "failures.json" {
+		t.Errorf("round 02 holds %v (%v), want only failures.json", es, err)
+	}
+	// A round whose failures cost nothing leaves nothing.
+	openrouterServer(t, func(i int, image string) map[string]any {
+		return map[string]any{"data": []any{}, "usage": map[string]any{"cost": 0}}
+	})
+	gen(t, "--pose", pose, "--prompt", "p", "--ref", writeRef(t, dir, "front.png"), "--provider", "openrouter", "--n", "1")
+	if _, err := os.Stat(filepath.Join(pose, "rounds", "03")); !os.IsNotExist(err) {
+		t.Errorf("an uncharged failed round was kept: %v", err)
+	}
+}
+
+func TestListModels(t *testing.T) {
+	code, o, e := gen(t, "--list-models", "--provider", "openrouter")
+	var want []string
+	for _, m := range pins.ImageModels {
+		if m.Provider == "openrouter" {
+			want = append(want, m.ID)
+		}
+	}
+	if code != 0 || e != "" || o != strings.Join(want, "\n")+"\n" {
+		t.Errorf("code %d, stdout %q, stderr %q", code, o, e)
+	}
+	if code, _, _ := gen(t, "--list-models", "--provider", "nobody"); code != 2 {
+		t.Errorf("unknown provider: code %d, want 2", code)
 	}
 }
 

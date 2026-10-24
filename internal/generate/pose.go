@@ -1,6 +1,7 @@
 package generate
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,7 +11,8 @@ import (
 )
 
 // A pose folder holds DIR/rounds/NN/aMM.png and aMM.json, NN and MM two
-// digits from 01. A round is written as NN.partial and renamed to NN once
+// digits from 01, and failures.json in a round where the provider charged
+// for an attempt that produced no image (alone, when no attempt did). A round is written as NN.partial and renamed to NN once
 // its records are in, so a round folder without the suffix is complete. A
 // partial round a failed run left is never deleted: it may hold images the
 // person paid for. It is not read as part of the pose, and no later round
@@ -109,6 +111,43 @@ func PoseTotal(rs []Record) float64 {
 	var t float64
 	for _, r := range rs {
 		t += r.CostUSD
+	}
+	return t
+}
+
+// LoadFailures reads the failures.json of every complete round under pose
+// that has one, in round order. A partial round is not read.
+func LoadFailures(pose string) ([]RoundFailures, error) {
+	ns, err := rounds(pose)
+	if err != nil {
+		return nil, err
+	}
+	var out []RoundFailures
+	for _, n := range ns {
+		p := filepath.Join(roundsDir(pose), roundName(n), failuresName)
+		b, err := os.ReadFile(p)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		var rf RoundFailures
+		if err := json.Unmarshal(b, &rf); err != nil {
+			return nil, fmt.Errorf("%s: %w", p, err)
+		}
+		rf.Round = n
+		out = append(out, rf)
+	}
+	return out, nil
+}
+
+// ChargedTotal is what the failed attempts in fs were charged, in USD. A
+// pose's spend is PoseTotal of its records plus this.
+func ChargedTotal(fs []RoundFailures) float64 {
+	var t float64
+	for _, rf := range fs {
+		t += rf.Charged()
 	}
 	return t
 }

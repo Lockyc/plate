@@ -79,3 +79,33 @@ func TestSheetHTML(t *testing.T) {
 		t.Errorf("script in sheet")
 	}
 }
+
+func TestSheetShowsChargedFailures(t *testing.T) {
+	pose := filepath.Join(t.TempDir(), "wave")
+	seedRound(t, pose, 1, "model-one", "first", 0.10)
+	rf := RoundFailures{Provider: "openrouter", Model: "model-one", Prompt: "first", Round: 1,
+		Failures: []FailureRecord{{Index: 1, Reason: "no image", CostUSD: 0.04}, {Index: 2, Reason: "no image", CostUSD: 0.03}}}
+	if err := writeFailures(filepath.Join(roundsDir(pose), "01"), rf); err != nil {
+		t.Fatal(err)
+	}
+	// A round where every attempt failed but was charged.
+	os.MkdirAll(filepath.Join(roundsDir(pose), "02"), 0o755)
+	rf2 := RoundFailures{Provider: "openrouter", Model: "model-two", Prompt: "second", Round: 2,
+		Failures: []FailureRecord{{Index: 0, Reason: "no image", CostUSD: 0.05}}}
+	if err := writeFailures(filepath.Join(roundsDir(pose), "02"), rf2); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeSheetHTML(pose, nil); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(filepath.Join(pose, "sheet.html"))
+	h := string(b)
+	for _, want := range []string{"Round 2", "model-two", "1 failed, $0.05 charged", "Round 1", "2 failed, $0.07 charged", "model-one · $0.17", "Pose total $0.22"} {
+		if !strings.Contains(h, want) {
+			t.Errorf("sheet.html lacks %q:\n%s", want, h)
+		}
+	}
+	if strings.Index(h, "Round 2") > strings.Index(h, "Round 1") {
+		t.Errorf("rounds not newest first")
+	}
+}
