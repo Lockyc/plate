@@ -83,52 +83,61 @@ func baseURL(provider, def string) string {
 	return def
 }
 
-// do sends req, retrying a 429 or 5xx after each backoff wait, and decodes the
-// JSON answer into out (unless out is nil). Each call has its own timeout. A
-// request with a body must be replayable (http.NewRequest sets GetBody for the
-// standard readers). Errors start "<provider>: " and carry the provider's own
-// message.
+// do sends req (see doRaw) and decodes the JSON answer into out, unless out is
+// nil.
 func do(ctx context.Context, provider string, req *http.Request, out any) error {
+	body, err := doRaw(ctx, provider, req)
+	if err != nil {
+		return err
+	}
+	if out == nil {
+		return nil
+	}
+	if err := json.Unmarshal(body, out); err != nil {
+		return fmt.Errorf("%s: decoding the response: %w", provider, err)
+	}
+	return nil
+}
+
+// doRaw sends req, retrying a 429 or 5xx after each backoff wait, and returns
+// the body of a 2xx answer. Each call has its own timeout. A request with a
+// body must be replayable (http.NewRequest sets GetBody for the standard
+// readers). Errors start "<provider>: " and carry the provider's own message.
+func doRaw(ctx context.Context, provider string, req *http.Request) ([]byte, error) {
 	for attempt := 0; ; attempt++ {
 		r := req
 		if attempt > 0 && req.Body != nil {
 			if req.GetBody == nil {
-				return fmt.Errorf("%s: request body cannot be replayed for a retry", provider)
+				return nil, fmt.Errorf("%s: request body cannot be replayed for a retry", provider)
 			}
 			body, err := req.GetBody()
 			if err != nil {
-				return fmt.Errorf("%s: %w", provider, err)
+				return nil, fmt.Errorf("%s: %w", provider, err)
 			}
 			r = req.Clone(ctx)
 			r.Body = body
 		}
 		body, status, hdr, err := call(ctx, r)
 		if err != nil {
-			return fmt.Errorf("%s: %w", provider, err)
+			return nil, fmt.Errorf("%s: %w", provider, err)
 		}
 		if status/100 == 2 {
-			if out == nil {
-				return nil
-			}
-			if err := json.Unmarshal(body, out); err != nil {
-				return fmt.Errorf("%s: decoding the response: %w", provider, err)
-			}
-			return nil
+			return body, nil
 		}
 		se := &statusError{provider: provider, status: status, msg: bodyMessage(body, status)}
 		retryable := status == http.StatusTooManyRequests || status >= 500
 		if !retryable || attempt >= len(backoff) {
-			return se
+			return nil, se
 		}
 		wait := backoff[attempt]
 		if ra, ok := retryAfter(hdr.Get("Retry-After")); ok {
 			if ra > callTimeout {
-				return se
+				return nil, se
 			}
 			wait = ra
 		}
 		if err := sleep(ctx, wait); err != nil {
-			return fmt.Errorf("%s: %w (waiting to retry after: %s)", provider, err, se.msg)
+			return nil, fmt.Errorf("%s: %w (waiting to retry after: %s)", provider, err, se.msg)
 		}
 	}
 }
