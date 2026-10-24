@@ -21,6 +21,7 @@ Phases in build order. Each ships when its acceptance gate passes.
 | 6 | Shipped | Documents and PDFs: a PDF inspect command (metadata with a text-layer check, text, page renders, embedded images) and markdown to PDF with a neutral default document stylesheet, pandoc pinned | unit tests with stub engines; a rendered document checked page by page |
 | 7 | Shipped | Demo clips: `clip check` (the clip-script schema a runner reads) and `clip render` (trim, idle compression, camera, overlays, a crossfaded or dipped loop, MP4/WebM/poster/WebP/GIF, measured checks), ffmpeg pinned | unit tests; `clip-*` quality cases at their recorded thresholds |
 | 8 | Shipped | Motion: `animate` (a page's animation captured on plate's clock, embedded video seeked with it), `internal/cdp`, clip's encode and checks moved to `internal/video`, video outputs and `dur=`/`fps=` in `plate build` | unit tests; `animate-*` quality cases: two captures frame-identical, thin moving text at clip's sharpness floor, embedded videos frame-matched to their sources, one started late, from partway in and looping, and a page whose animation never ran refused |
+| 9 | Shipped | Generation: `generate` and `generate accept` (character poses from reference images through hosted image models, `internal/genai` with four providers, a provenance record per attempt, a contact sheet per pose), kept off every build path | unit tests against httptest providers; `TestNoBuildPathReachesGenai` |
 
 **Phase 5 changes nothing in a consuming project until its owner approves
 that project's cutover.** The check runs plate beside the existing pipeline,
@@ -29,10 +30,36 @@ reading the project's assets without writing to its tree.
 ## Sequencing
 
 Phases run in order, except where one needs nothing from the phase before
-it: phases 6, 7 and 8 add commands and cut no project over, so they run
+it: phases 6 to 9 add commands and cut no project over, so they run
 independently of phase 5. Within a phase, order is open.
 
 ## Deferred
+
+- **generate has no default provider.** `--provider` is required.
+  Deferred because the default is chosen by measurement, not reputation:
+  `just bakeoff` runs every OpenRouter model over the same poses of an
+  openly licensed character. Unlock: a person's verdict on those sheets,
+  then the winner as the default, its commit body recording every
+  candidate's sheet and cost.
+- **generate has no masked repaint.** Every attempt redraws the whole
+  image; a near-miss is fixed by another round with it as a reference.
+  Deferred because whole-image rounds are enough to make new poses.
+  Unlock: a supplied image needing a local fix that a full regeneration
+  cannot make without drifting, then a `--mask` on the providers that take
+  one (OpenAI and FLUX do; Gemini does not).
+- **generate runs no local, open-weight model.** Deferred because hosted
+  models lead on keeping a character on-model and run in seconds. Unlock:
+  an open-weight model that a bake-off judges level with the default, then
+  it joins as another `genai.Provider`.
+- **Gemini 3 Pro Image through OpenRouter returns about 1K pixels** at any
+  `--size`, with or without `--aspect` (noted at its pin). Unlock:
+  OpenRouter honouring the size, or the bake-off choosing it, then routing
+  it through the direct `google` provider, which sends `imageSize` itself.
+- **The google provider calls `generateContent`,** which Google labels
+  legacy in favour of its Interactions API, with no retirement date.
+  Deferred because it works and the models plate pins are served there.
+  Unlock: a retirement date, or a pinned model only the Interactions API
+  serves, then the provider moved to it behind the same `genai.Provider`.
 
 - **animate has no sound.** Every video plate writes is muted. Deferred
   because the first ads are captioned and silent. Unlock: an optional
