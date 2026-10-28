@@ -6,7 +6,7 @@
 [![License](https://img.shields.io/github/license/lockyc/plate)](LICENSE)
 
 Image, render and document operations for print and web pipelines, as one
-command: lift a subject out of a photo, fill, enlarge or shrink artwork, render HTML to
+command: lift a subject out of a photo, fill, enlarge or shrink artwork, make a macOS app icon, render HTML to
 PNG, JPEG, PDF or its settled DOM, cut a screen recording into a short looping demo clip, animate a page into a short video, preview a Google Slides deck, turn markdown into a
 PDF, look inside a PDF, make a press-ready PDF, put an A5 flyer two-up on
 an A4 sheet to print and cut, match a colour grade, draw new poses of a
@@ -162,8 +162,9 @@ lossy at `--quality` (default 90) with lossless alpha.
 `icon` takes the tile as it should look, rounded corners included, filling
 its square, and draws it in the 824 px box centred on a 1024 px canvas that
 every macOS app icon uses; an icon drawn to the canvas edge shows larger than
-every other app in the Dock. The `.icns` holds the ten sizes macOS reads,
-16 to 1024 px, and each `--png` is the same icon at PX px.
+every other app in the Dock. The `.icns` holds the ten entries macOS reads,
+16 to 1024 px at 1x and 2x, and each `--png` is the same icon at PX px (1 to
+1024). Name `--icns`, `--png` or both.
 
 `clip render` writes `<name>.<ext>` into `--out` for each format the script
 lists (`mp4`, `webm`, `poster.png` for `poster`, `webp`, `gif`), plus
@@ -241,9 +242,7 @@ of its files for that name.
 `render` and `animate` run the page outside Chrome's sandbox with open
 network access. A local page, and any script it runs, including one loaded
 from the network, can read any file you can by absolute path through
-plate's proxy; a remote page cannot. The proxy listens on loopback for the
-render's duration, so another account on the machine could reach it too.
-Give them only pages you trust.
+plate's proxy; a remote page cannot. Give them only pages you trust.
 
 ⚠ `inpaint`, `infill`, `upscale` and `generate` create pixels the source never had. A
 project that forbids this puts `synthesis = "forbid"` in a `plate.toml`, and
@@ -305,7 +304,8 @@ plate doctor --install
 ```
 
 Run `plate doctor --install` first. It downloads the engine plate manages
-itself, chrome-headless-shell for `render` and `animate`, then checks every
+itself, chrome-headless-shell for every command that renders a page
+(`render`, `build`, `doc`, `slides`, `clip`, `animate`, `icon`), then checks every
 other engine against its pin (for ffmpeg, the encoders `clip` and `animate`
 need too) and prints the install command for any that is missing or too
 old, naming the commands that will not run until it is fixed.
@@ -329,7 +329,7 @@ chooses the PyTorch device instead.
   `cutout --coarse vision`, which needs Apple Vision (`clip` and `animate` run
   wherever ffmpeg at its pinned minimum is present); `cutout` uses
   `--coarse birefnet` there. On arm64, Chrome for Testing publishes no
-  chrome-headless-shell build, so `render` and `animate` need one supplied
+  chrome-headless-shell build, so the commands that render a page need one supplied
   through `PLATE_ENGINE_CHROME_HEADLESS_SHELL`. chrome-headless-shell needs
   the usual Chrome shared libraries (libnss3 and the like) from the
   distribution.
