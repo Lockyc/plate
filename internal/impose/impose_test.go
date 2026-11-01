@@ -119,6 +119,31 @@ func TestImposeTwoA5(t *testing.T) {
 	}
 }
 
+// TestImposeOneA5 is a single-sided flyer: one A4 side, the page in each
+// half.
+func TestImposeOneA5(t *testing.T) {
+	needEngines(t, "qpdf", "pdfinfo", "pdftotext")
+	in := writePDF(t, tpage{box: a5, content: "BT /F1 24 Tf 100 300 Td (FRONT) Tj ET"})
+	out := imposed(t, in)
+	pages, err := pdf.Pages(ctx, out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pages) != 1 {
+		t.Fatalf("%d pages, want 1", len(pages))
+	}
+	if w, h := pages[0].Size(); math.Abs(w-842) > 1 || math.Abs(h-595) > 1 {
+		t.Errorf("the sheet is %gx%g pt, want 842x595", w, h)
+	}
+	text, err := pdf.Text(ctx, out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(text, "FRONT"); n != 2 {
+		t.Errorf("FRONT appears %d times, want 2", n)
+	}
+}
+
 func TestImposeKeepsText(t *testing.T) {
 	needEngines(t, "qpdf", "pdfinfo", "pdftotext")
 	text, err := pdf.Text(ctx, imposed(t, flyer))
@@ -320,9 +345,9 @@ func TestImposeRefusesWrongInput(t *testing.T) {
 		pages []tpage
 		want  string
 	}{
-		{blank(a5, 1), "want 2 A5 pages, found 1 pages of 419.53x595.28pt"},
-		{blank(a5, 3), "want 2 A5 pages, found 3 pages of 419.53x595.28pt"},
-		{blank("0 0 595.28 841.89", 2), "want 2 A5 pages, found 2 pages of 595.28x841.89pt"},
+		{blank(a5, 3), "want 1 or 2 A5 pages, found 3 pages of 419.53x595.28pt"},
+		{blank("0 0 595.28 841.89", 2), "want 1 or 2 A5 pages, found 2 pages of 595.28x841.89pt"},
+		{blank("0 0 595.28 841.89", 1), "want 1 or 2 A5 pages, found 1 pages of 595.28x841.89pt"},
 		{[]tpage{{box: a5, content: "0 0 m"}, {box: "0 0 595.28 419.53", content: "0 0 m"}}, "the front is portrait and the back landscape"},
 	}
 	for _, c := range cases {
@@ -419,7 +444,7 @@ func TestImposeKeepsOutputIntents(t *testing.T) {
 }
 
 func TestCheckNoPages(t *testing.T) {
-	if err := check(nil); err == nil || !strings.Contains(err.Error(), "want 2 A5 pages, found 0 pages") {
+	if err := check(nil); err == nil || !strings.Contains(err.Error(), "want 1 or 2 A5 pages, found 0 pages") {
 		t.Errorf("check(nil) = %v", err)
 	}
 }

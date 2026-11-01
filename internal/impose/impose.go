@@ -1,7 +1,8 @@
-// Package impose puts two A5 pages, a flyer's front and back, two up on
-// both sides of an A4 sheet: printed double-sided with flip on short edge
-// and cut down the middle, one sheet makes two flyers. Each side draws its
-// source page twice, through package sheet.
+// Package impose puts an A5 flyer two up on an A4 sheet, cut down the
+// middle to make two flyers. Two pages are its front and back, on both
+// sides of the sheet, printed double-sided with flip on short edge; one
+// page is a single-sided flyer, on one side. Each side draws its source
+// page twice, through package sheet.
 package impose
 
 import (
@@ -69,11 +70,11 @@ func isA5(p pdf.Page) bool {
 
 func pt(v float64) string { return strconv.FormatFloat(math.Round(v*100)/100, 'f', -1, 64) }
 
-// check refuses anything but a front and a back, each A5, both portrait or
-// both landscape.
+// check refuses anything but one A5 page, or a front and a back, each A5,
+// both portrait or both landscape.
 func check(pages []pdf.Page) error {
 	if len(pages) == 0 {
-		return fmt.Errorf("want 2 A5 pages, found 0 pages")
+		return fmt.Errorf("want 1 or 2 A5 pages, found 0 pages")
 	}
 	bad := pages[0]
 	for _, p := range pages {
@@ -82,9 +83,12 @@ func check(pages []pdf.Page) error {
 			break
 		}
 	}
-	if len(pages) != 2 || !isA5(bad) {
+	if len(pages) > 2 || !isA5(bad) {
 		w, h := bad.Size()
-		return fmt.Errorf("want 2 A5 pages, found %d pages of %sx%spt", len(pages), pt(w), pt(h))
+		return fmt.Errorf("want 1 or 2 A5 pages, found %d pages of %sx%spt", len(pages), pt(w), pt(h))
+	}
+	if len(pages) == 1 {
+		return nil
 	}
 	orient := func(p pdf.Page) string {
 		if w, h := p.Size(); w > h {
@@ -118,7 +122,7 @@ func sideContent(p pdf.Page, back, cutMark bool) []byte {
 	return b.Bytes()
 }
 
-// layout is the two sides of the sheet, the front then the back.
+// layout is the sheet's sides, one per page: the front, then any back.
 func layout(cutMark bool) sheet.Layout {
 	return func(pages []pdf.Page) ([]sheet.Sheet, error) {
 		if err := check(pages); err != nil {
@@ -152,8 +156,8 @@ func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-// Run imposes the two A5 pages of in onto the A4 sheet out, as `plate
-// impose` does; an existing out is replaced only when force is set.
+// Run imposes the one or two A5 pages of in onto the A4 sheet out, as
+// `plate impose` does; an existing out is replaced only when force is set.
 func Run(ctx context.Context, in, out string, cutMark, force bool) error {
 	return sheet.Write(ctx, in, out, force, layout(cutMark))
 }

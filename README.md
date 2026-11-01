@@ -36,7 +36,7 @@ the exceptions listed under [Platforms](#platforms). What comes next is in
 | `pdf text` | Extracts a PDF's text with its layout | `plate pdf text [--pages N\|N-M] <in.pdf>` |
 | `pdf pages` | Renders PDF pages to PNG and prints each path | `plate pdf pages [--pages N\|N-M] [--out DIR] [--dpi N] <in.pdf>` |
 | `pdf images` | Extracts a PDF's embedded images and prints each path | `plate pdf images [--pages N\|N-M] [--out DIR] <in.pdf>` |
-| `impose` | Puts an A5 flyer's front and back two-up on both sides of an A4 sheet: print double-sided, flip on short edge, cut down the middle | `plate impose [--cut-mark] [--force] -o out.pdf <in.pdf>` |
+| `impose` | Puts an A5 flyer two-up on an A4 sheet, cut down the middle: a single page on one side, or a front and back on both sides, printed double-sided with flip on short edge | `plate impose [--cut-mark] [--force] -o out.pdf <in.pdf>` |
 | `marks` | A print shop's copy of a PDF: each page unchanged at its trim size, with bleed (default 3 mm) and crop marks, TrimBox and BleedBox set | `plate marks [--bleed MM] [--force] -o out.pdf <in.pdf>` |
 | `doc` | Renders markdown or HTML to a PDF with a plain document look: A4, a running head from the first heading, page numbers, ruled tables | `plate doc [--css FILE] <in.md\|in.html> <out.pdf>` |
 | `slides` | Previews a Google Slides deck that Drive will not export, from its Slides API JSON: one PNG per slide, in the fonts the deck names | `plate slides [--pages LIST] [--out DIR] [--scale S] <deck.json\|->` |
@@ -137,7 +137,7 @@ was fetched, so run `slides` within that window. Lines, tables, videos, charts a
 it says which slides had them; bullets, autofit and a crop's rotation are not
 drawn either.
 
-`impose` takes exactly two pages, the front then the back, each A5 to
+`impose` takes one page, or two (the front then the back), each A5 to
 within 1 mm, both portrait or both landscape; anything else is refused with
 the page count and size it found. Each copy keeps the source's vectors,
 text, fonts and images, unscaled; a landscape flyer is turned a quarter to

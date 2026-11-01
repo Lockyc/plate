@@ -348,17 +348,17 @@ func TestBuildTwoUpUnchangedSkipsBoth(t *testing.T) {
 	}
 }
 
-func TestBuildTwoUpRefusesNotTwoA5(t *testing.T) {
+func TestBuildTwoUpRefusesThreePages(t *testing.T) {
 	needPDFEngines(t)
-	one := filepath.Join(t.TempDir(), "one.pdf")
-	if _, err := engine.Run(context.Background(), engine.Cmd{Engine: "qpdf", Args: []string{"--empty", "--pages", twoA5, "1", "--", one}, Inputs: []string{twoA5}, Outputs: []string{one}}); err != nil {
+	three := filepath.Join(t.TempDir(), "three.pdf")
+	if _, err := engine.Run(context.Background(), engine.Cmd{Engine: "qpdf", Args: []string{"--empty", "--pages", twoA5, "1-2,1", "--", three}, Inputs: []string{twoA5}, Outputs: []string{three}}); err != nil {
 		t.Fatal(err)
 	}
-	e := setupTwoUp(t, one)
+	e := setupTwoUp(t, three)
 	if code := e.run(e.manifest); code != 1 {
 		t.Fatalf("code %d: %s", code, e.stderr.String())
 	}
-	if s := e.stderr.String(); !strings.Contains(s, "failed f: 2up: want 2 A5 pages, found 1 pages") || !strings.HasSuffix(s, "0 rendered, 0 unchanged, 1 failed\n") {
+	if s := e.stderr.String(); !strings.Contains(s, "failed f: 2up: want 1 or 2 A5 pages, found 3 pages") || !strings.HasSuffix(s, "0 rendered, 0 unchanged, 1 failed\n") {
 		t.Errorf("stderr %q", s)
 	}
 	if _, err := os.Stat(filepath.Join(e.dir, "dist", "f-2up-a4.pdf")); err == nil {
@@ -391,11 +391,11 @@ func TestBuildMarksWritesTheCopy(t *testing.T) {
 // its marked copy is not left behind either.
 func TestBuildMarksGoesWhenTwoUpFails(t *testing.T) {
 	needPDFEngines(t)
-	one := filepath.Join(t.TempDir(), "one.pdf")
-	if _, err := engine.Run(context.Background(), engine.Cmd{Engine: "qpdf", Args: []string{"--empty", "--pages", twoA5, "1", "--", one}, Inputs: []string{twoA5}, Outputs: []string{one}}); err != nil {
+	three := filepath.Join(t.TempDir(), "three.pdf")
+	if _, err := engine.Run(context.Background(), engine.Cmd{Engine: "qpdf", Args: []string{"--empty", "--pages", twoA5, "1-2,1", "--", three}, Inputs: []string{twoA5}, Outputs: []string{three}}); err != nil {
 		t.Fatal(err)
 	}
-	e := setupTwoUp(t, one)
+	e := setupTwoUp(t, three)
 	os.WriteFile(e.manifest, []byte("f  f.html  560x792  1  pdf  2up marks\n"), 0o644)
 	if code := e.run(e.manifest); code != 1 || !strings.Contains(e.stderr.String(), "failed f: 2up:") {
 		t.Fatalf("code %d: %s", code, e.stderr.String())
