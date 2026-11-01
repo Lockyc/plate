@@ -97,7 +97,7 @@ The page is relative to the manifest and may carry a `?query`; each output
 manifest, as `name.pdf`, `name.png`, `name.jpg` or `name.html`. The options
 are `blank-margin=PX`, `transparent`, `budget=MS`, `quality=Q`, `2up`,
 which imposes the target's PDF onto `name-2up-a4.pdf` as `impose --force`
-does (the PDF must be an A5 front and back), and `marks`, which writes it to
+does (the PDF must be one or two A5 pages), and `marks`, which writes it to
 `name-marks.pdf` as `marks --force` does. A line with `dur=S` (seconds, e.g. `8s` or `2.5`)
 is captured as `animate` does: its outputs are `mp4`, `webm`, `gif`, `webp`
 and `poster` (`name.poster.png`), with `png` and `jpeg` the last frame and
