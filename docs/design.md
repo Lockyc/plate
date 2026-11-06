@@ -261,7 +261,7 @@ colours, or renders what it is given.
     a still. On such a line `png` and `jpeg` are the last frame of the same
     capture, so an ad's still and its video always end alike, and
     `<name>.json` lands beside them. `pdf`, `html`, `transparent`,
-    `blank-margin`, `2up` and `marks` are refused there: each reads a
+    `blank-margin`, `2up`, `marks` and `trim` are refused there: each reads a
     settled page, which an animation has only at its end.
 - **generate** — an iteration tool, never a build step: a person picks
   among attempts, and the accepted image, not a re-run, is the source. A

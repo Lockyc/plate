@@ -182,3 +182,63 @@ func TestMarksPlacesPageOnTrim(t *testing.T) {
 		t.Errorf("no crop mark at %g,%g", edge, y)
 	}
 }
+
+// TestMarksBledPageFillsBleed marks a page drawn with its bleed, inked to its
+// edge, and checks the trim is the size given, the bleed past it is ink, and
+// beyond the bleed is paper.
+func TestMarksBledPageFillsBleed(t *testing.T) {
+	needEngines(t, "qpdf", "pdfinfo", "pdftoppm")
+	// A5 plus 3 mm a side, a little off as Chrome's 8 px grid leaves it.
+	w, h := mm(148+6)-1, mm(210+6)+1
+	in := writePDF(t, fmt.Sprintf("0 0 %g %g", w, h), "/Resources << >>", fmt.Sprintf("0 0 0 rg 0 0 %g %g re f", w, h))
+	out := marked(t, in, "--trim", "148x210")
+	res, err := engine.Run(ctx, engine.Cmd{Engine: "pdfinfo", Args: []string{"-box", "-f", "1", "-l", "1", out}, Inputs: []string{out}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	trim := box(t, string(res.Stdout), "TrimBox", 1)
+	if tw, th := trim[2]-trim[0], trim[3]-trim[1]; math.Abs(tw-mm(148)) > 0.05 || math.Abs(th-mm(210)) > 0.05 {
+		t.Fatalf("trim %gx%g pt, want 148 x 210 mm", tw, th)
+	}
+	pngs, err := pdf.RenderPages(ctx, out, filepath.Join(t.TempDir(), "pages"), 72)
+	if err != nil {
+		t.Fatal(err)
+	}
+	img, err := raster.Load(pngs[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	dark := func(x, y float64) bool {
+		r, g, b, _ := color.GrayModel.Convert(img.At(int(x), img.Bounds().Dy()-1-int(y))).RGBA()
+		return r+g+b < 3*0x8000
+	}
+	b := mm(DefaultBleed)
+	midX, midY := (trim[0]+trim[2])/2, (trim[1]+trim[3])/2
+	for _, p := range []struct {
+		name    string
+		x, y    float64
+		wantInk bool
+	}{
+		{"left bleed", trim[0] - b/2, midY, true},
+		{"right bleed", trim[2] + b/2, midY, true},
+		{"bottom bleed", midX, trim[1] - b/2, true},
+		{"top bleed", midX, trim[3] + b/2, true},
+		{"past the left bleed", trim[0] - b - 3, midY, false},
+		{"past the top bleed", midX, trim[3] + b + 3, false},
+	} {
+		if dark(p.x, p.y) != p.wantInk {
+			t.Errorf("%s at %g,%g: ink %v, want %v", p.name, p.x, p.y, !p.wantInk, p.wantInk)
+		}
+	}
+}
+
+func TestParseTrim(t *testing.T) {
+	if tr, err := ParseTrim("600x900"); err != nil || tr != (Trim{600, 900}) {
+		t.Errorf("600x900: %v, %v", tr, err)
+	}
+	for _, bad := range []string{"", "600", "600x", "x900", "0x900", "600x-1", "axb"} {
+		if _, err := ParseTrim(bad); err == nil {
+			t.Errorf("%q: no error", bad)
+		}
+	}
+}

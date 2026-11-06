@@ -54,7 +54,7 @@ func (t Target) derivations() []derivation {
 	}
 	if t.Marks != "" {
 		ds = append(ds, derivation{"marks", "marked", t.Marks, func(ctx context.Context, in, out string) error {
-			return marks.Run(ctx, in, out, marks.DefaultBleed, true)
+			return marks.Run(ctx, in, out, marks.DefaultBleed, t.Trim, true)
 		}})
 	}
 	return ds

@@ -13,6 +13,7 @@ import (
 
 	"github.com/lockyc/plate/internal/animate"
 	"github.com/lockyc/plate/internal/cli"
+	"github.com/lockyc/plate/internal/marks"
 	"github.com/lockyc/plate/internal/render"
 	"github.com/lockyc/plate/internal/video"
 )
@@ -31,6 +32,9 @@ type Target struct {
 	// Marks is the print shop's copy of Opts.PDF the marks option writes,
 	// with bleed and crop marks, or "".
 	Marks string
+	// Trim is the finished size the trim option gives a page drawn with its
+	// bleed, for marks; the zero Trim when the page is its own trim.
+	Trim marks.Trim
 }
 
 // kinds maps each output kind a manifest names to its file extension and
@@ -55,7 +59,8 @@ var kinds = map[string]struct {
 // the options are blank-margin=PX, transparent, budget=MS, quality=Q, 2up,
 // which imposes the target's PDF onto outDir/name-2up-a4.pdf as `plate
 // impose` does, and marks, which writes it to outDir/name-marks.pdf with
-// bleed and crop marks as `plate marks` does.
+// bleed and crop marks as `plate marks` does; trim=WxH (mm, with marks)
+// says the page is drawn with its bleed, as `plate marks --trim` does.
 //
 // A line with dur=S (seconds, e.g. 8s or 2.5) is a video line, captured as `plate
 // animate` does: its outputs are mp4, webm, gif, webp and poster (poster
@@ -211,6 +216,13 @@ func parseLine(fields []string, dir, outDir string, failIf []string) (Target, er
 			}
 			loop = val
 			continue
+		case "trim":
+			tr, err := marks.ParseTrim(val)
+			if err != nil || !hasVal {
+				return Target{}, fmt.Errorf("trim=%q: want WxH in mm, as trim=600x900", val)
+			}
+			t.Trim = tr
+			continue
 		case "fps":
 			num = &fps
 		case "budget-kb":
@@ -236,7 +248,7 @@ func parseLine(fields []string, dir, outDir string, failIf []string) (Target, er
 			o.Quality = new(int)
 			num = o.Quality
 		default:
-			return Target{}, fmt.Errorf("option %q: want blank-margin=PX, transparent, budget=MS, quality=Q, 2up, marks, dur=S, fps=N, loop=L or budget-kb=N", opt)
+			return Target{}, fmt.Errorf("option %q: want blank-margin=PX, transparent, budget=MS, quality=Q, 2up, marks, trim=WxH, dur=S, fps=N, loop=L or budget-kb=N", opt)
 		}
 		v, err := strconv.ParseInt(val, 10, strconv.IntSize)
 		if !hasVal || err != nil {
@@ -265,6 +277,9 @@ func parseLine(fields []string, dir, outDir string, failIf []string) (Target, er
 	}
 	if t.Marks != "" && o.PDF == "" {
 		return Target{}, errors.New("marks needs the pdf output: it marks the target's PDF")
+	}
+	if t.Trim != (marks.Trim{}) && t.Marks == "" {
+		return Target{}, errors.New("trim needs marks: it is the trim marks sets a page drawn with its bleed at")
 	}
 	if err := o.Validate(); err != nil {
 		return Target{}, err
@@ -312,7 +327,7 @@ func videoLine(t Target, o render.Options, formats []string, dur float64, fps in
 		opt string
 		set bool
 	}{{"pdf", o.PDF != ""}, {"html", o.HTML != ""}, {"transparent", o.Transparent}, {"blank-margin", seen["blank-margin"]},
-		{"2up", t.TwoUp != ""}, {"marks", t.Marks != ""}} {
+		{"2up", t.TwoUp != ""}, {"marks", t.Marks != ""}, {"trim", t.Trim != (marks.Trim{})}} {
 		if r.set {
 			return Target{}, fmt.Errorf("%s reads a settled page; a video line has one only at its end", r.opt)
 		}

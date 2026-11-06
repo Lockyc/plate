@@ -7,6 +7,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/lockyc/plate/internal/marks"
 )
 
 func manifest(t *testing.T, body string) (path, dir string) {
@@ -184,12 +186,26 @@ func TestManifestMarks(t *testing.T) {
 	}
 }
 
+func TestManifestTrim(t *testing.T) {
+	path, dir := manifest(t, "f f.html 2288x3424 1 pdf marks trim=600x900\n")
+	ts, err := ParseManifest(path, filepath.Join(dir, "dist"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ts[0].Trim != (marks.Trim{W: 600, H: 900}) {
+		t.Errorf("trim %v", ts[0].Trim)
+	}
+}
+
 func TestManifestMarksBadLines(t *testing.T) {
 	for _, line := range []string{
 		"a a.html 560x792 1 png marks",
 		"a a.html 560x792 1 pdf marks=3",
 		"a a.html 560x792 1 pdf marks marks",
 		"OK-marks b.html 560x792 1 pdf",
+		"a a.html 560x792 1 pdf trim=148x210",
+		"a a.html 560x792 1 pdf marks trim=148",
+		"a a.html 560x792 1 pdf marks trim",
 	} {
 		path, _ := manifest(t, "ok ok.html 560x792 1 pdf marks\n"+line+"\n")
 		_, err := ParseManifest(path, t.TempDir(), nil)

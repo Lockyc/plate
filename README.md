@@ -37,7 +37,7 @@ the exceptions listed under [Platforms](#platforms). What comes next is in
 | `pdf pages` | Renders PDF pages to PNG and prints each path | `plate pdf pages [--pages N\|N-M] [--out DIR] [--dpi N] <in.pdf>` |
 | `pdf images` | Extracts a PDF's embedded images and prints each path | `plate pdf images [--pages N\|N-M] [--out DIR] <in.pdf>` |
 | `impose` | Puts an A5 flyer two-up on an A4 sheet, cut down the middle: a single page on one side, or a front and back on both sides, printed double-sided with flip on short edge | `plate impose [--cut-mark] [--force] -o out.pdf <in.pdf>` |
-| `marks` | A print shop's copy of a PDF: each page unchanged at its trim size, with bleed (default 3 mm) and crop marks, TrimBox and BleedBox set | `plate marks [--bleed MM] [--force] -o out.pdf <in.pdf>` |
+| `marks` | A print shop's copy of a PDF: each page unchanged at its trim size, with bleed (default 3 mm) and crop marks, TrimBox and BleedBox set | `plate marks [--bleed MM] [--trim WxH] [--force] -o out.pdf <in.pdf>` |
 | `doc` | Renders markdown or HTML to a PDF with a plain document look: A4, a running head from the first heading, page numbers, ruled tables | `plate doc [--css FILE] <in.md\|in.html> <out.pdf>` |
 | `slides` | Previews a Google Slides deck that Drive will not export, from its Slides API JSON: one PNG per slide, in the fonts the deck names | `plate slides [--pages LIST] [--out DIR] [--scale S] <deck.json\|->` |
 | `shrink` | Resizes down to a small, sharp web asset: PNG at maximum lossless compression, or WebP, alpha kept, never enlarging | `plate shrink (--width PX \| --height PX \| --width PX --height PX \| --fit PX) [--quality Q] <in> <out.png\|out.webp>...` |
@@ -98,13 +98,14 @@ manifest, as `name.pdf`, `name.png`, `name.jpg` or `name.html`. The options
 are `blank-margin=PX`, `transparent`, `budget=MS`, `quality=Q`, `2up`,
 which imposes the target's PDF onto `name-2up-a4.pdf` as `impose --force`
 does (the PDF must be one or two A5 pages), and `marks`, which writes it to
-`name-marks.pdf` as `marks --force` does. A line with `dur=S` (seconds, e.g. `8s` or `2.5`)
+`name-marks.pdf` as `marks --force` does, with `trim=WxH` for a page drawn
+with its bleed, as `marks --trim` takes it. A line with `dur=S` (seconds, e.g. `8s` or `2.5`)
 is captured as `animate` does: its outputs are `mp4`, `webm`, `gif`, `webp`
 and `poster` (`name.poster.png`), with `png` and `jpeg` the last frame and
 `name.json` beside them, and `fps=N`, `loop=none|crossfade|dip` and
 `budget-kb=N` tune it. A video output needs `dur=`, and `fps=`, `loop=` and
-`budget-kb=` need it too; `pdf`, `html`, `transparent`, `blank-margin`, `2up`
-and `marks` are refused on a video line. Naming targets renders only
+`budget-kb=` need it too; `pdf`, `html`, `transparent`, `blank-margin`, `2up`,
+`marks` and `trim` are refused on a video line. Naming targets renders only
 those. It logs `rendered NAME`, `rendered NAME (not cached: REASON)`,
 `unchanged NAME` or `failed NAME: ERROR` for each target in manifest order,
 with `imposed NAME-2up-a4.pdf` and `marked NAME-marks.pdf` after a target
@@ -150,7 +151,9 @@ Chrome prints it, 594 x 840 pt, becomes exactly 210 x 297 mm), or at its own
 size, in the middle of a sheet with the bleed round it and hairline crop
 marks in registration colour starting at the bleed's edge. The bleed holds
 nothing past the page's edge, which is right for a page with a white
-margin; a page inked to its edge needs its artwork extended first. Like
+margin. A page inked to its edge is drawn with its bleed instead, its
+artwork running past the trim, and given `--trim WxH` (mm): the whole page
+becomes the trim plus the bleed, so the bleed carries the artwork. Like
 `impose`, it keeps the source's vectors, text, fonts and images, and
 refuses to replace an existing output unless given `--force`.
 
