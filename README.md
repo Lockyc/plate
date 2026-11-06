@@ -31,7 +31,7 @@ the exceptions listed under [Platforms](#platforms). What comes next is in
 | `grade apply` | Applies that lookup table, keeping transparency | `plate grade apply --clut hald.png <in> <out.png>` |
 | `render` | HTML to PNG, JPEG, PDF or settled HTML with headless Chrome, guarded against Chrome's silent failures, skipped when nothing changed | `plate render [--png out.png [--transparent]] [--jpeg out.jpg [--quality Q]] [--pdf out.pdf] [--html out.html] [--size WxH] [--scale S] [--blank-margin PX] [--budget MS] [--fail-if TEXT]... [--force] <page.html\|http(s) or file URL>` |
 | `build` | Renders every target in a manifest in parallel, skipping the unchanged ones | `plate build [--out DIR] [--jobs N] [--force] [--fail-if TEXT]... <manifest> [NAME...]` |
-| `press` | Converts a PDF to a print master (text as outlines, CMYK colour) and checks it against a soft proof | `plate press --icc profile.icc [--max-ppi N] [--max-rmse R] [--region x,y,w,h:max]... [--proof-width PX] <in.pdf> <out.pdf>` |
+| `press` | Converts a PDF to a print master (text as outlines, CMYK colour, brand colours at the exact CMYK given) and checks it against a soft proof | `plate press --icc profile.icc [--cmyk RRGGBB=C,M,Y,K]... [--max-ppi N] [--max-rmse R] [--region x,y,w,h:max]... [--proof-width PX] <in.pdf> <out.pdf>` |
 | `pdf info` | Prints a PDF's metadata and whether it has a text layer, which says whether to read its text or render its pages | `plate pdf info <in.pdf>` |
 | `pdf text` | Extracts a PDF's text with its layout | `plate pdf text [--pages N\|N-M] <in.pdf>` |
 | `pdf pages` | Renders PDF pages to PNG and prints each path | `plate pdf pages [--pages N\|N-M] [--out DIR] [--dpi N] <in.pdf>` |

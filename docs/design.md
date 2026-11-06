@@ -168,7 +168,10 @@ colours, or renders what it is given.
   rendered or the file is missing or older (`build.derive`).
 - **press** — Ghostscript pdfwrite with outlined text, CMYK conversion to a
   supplied ICC, fixed media from the input's page box, and images downsampled
-  only above 1.5 × `--max-ppi`. It then checks the result has no fonts, no
+  only above 1.5 × `--max-ppi`. A `--cmyk` brand colour is written into the
+  input's vector fills and strokes as its own CMYK first (QDF, padded to the
+  same length so offsets hold), and gs keeps it, its default CMYK profile
+  being the output's. It then checks the result has no fonts, no
   RGB, and unchanged page boxes, and compares a soft proof against the source
   by RMSE over the page and any `--region`.
 - **grade** — `fit` registers the image to the reference (SIFT + RANSAC),

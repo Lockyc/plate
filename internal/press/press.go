@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -29,7 +30,118 @@ import (
 	"github.com/lockyc/plate/internal/raster"
 )
 
-const usage = "press --icc profile.icc [--max-ppi N] [--max-rmse R] [--region x,y,w,h:max]... [--proof-width PX] <in.pdf> <out.pdf>"
+const usage = "press --icc profile.icc [--cmyk RRGGBB=C,M,Y,K]... [--max-ppi N] [--max-rmse R] [--region x,y,w,h:max]... [--proof-width PX] <in.pdf> <out.pdf>"
+
+// spot is a brand colour with its own CMYK: a vector fill or stroke drawn in
+// rgb is written as cmyk (percentages) instead of converted through the
+// profile, so the master carries the values the brand specifies.
+type spot struct {
+	rgb  [3]int
+	cmyk [4]float64
+}
+
+// parseSpot reads RRGGBB=C,M,Y,K, each of C, M, Y and K a percentage.
+func parseSpot(s string) (spot, error) {
+	hex, vals, ok := strings.Cut(strings.TrimPrefix(s, "#"), "=")
+	parts := strings.Split(vals, ",")
+	if !ok || len(hex) != 6 || len(parts) != 4 {
+		return spot{}, fmt.Errorf("--cmyk %q: want RRGGBB=C,M,Y,K, as 17458f=100,84,12,3", s)
+	}
+	var sp spot
+	for i := range 3 {
+		v, err := strconv.ParseUint(hex[2*i:2*i+2], 16, 8)
+		if err != nil {
+			return spot{}, fmt.Errorf("--cmyk %q: %s is not a hex colour", s, hex)
+		}
+		sp.rgb[i] = int(v)
+	}
+	for i, p := range parts {
+		v, ok := cli.Finite(strings.TrimSpace(p))
+		if !ok || v < 0 || v > 100 {
+			return spot{}, fmt.Errorf("--cmyk %q: %s is not a percentage", s, p)
+		}
+		sp.cmyk[i] = v / 100
+	}
+	return sp, nil
+}
+
+// rgbOp is an rgb fill (rg) or stroke (RG) in a content stream.
+var rgbOp = regexp.MustCompile(`(^|[\s\[\]])([0-9]*\.?[0-9]+) ([0-9]*\.?[0-9]+) ([0-9]*\.?[0-9]+) (rg|RG)\b`)
+
+// frac writes v in [0,1] as briefly as a content stream allows: 1, 0, .84.
+func frac(v float64) string {
+	s := strconv.FormatFloat(math.Round(v*1e4)/1e4, 'f', -1, 64)
+	if strings.HasPrefix(s, "0.") {
+		return s[1:]
+	}
+	return s
+}
+
+// withSpots rewrites every rg or RG in qdf whose colour is a spot's as that
+// spot's k or K, outside image data. Each replacement is padded with spaces
+// to the length it replaces, so QDF's stream lengths and offsets still hold;
+// it returns how many it made.
+func withSpots(qdf []byte, spots []spot) ([]byte, int, error) {
+	var n int
+	var failed error
+	out := rewriteContent(qdf, func(stream []byte) []byte {
+		return rgbOp.ReplaceAllFunc(stream, func(m []byte) []byte {
+			g := rgbOp.FindSubmatch(m)
+			var c [3]int
+			for i := range 3 {
+				v, _ := strconv.ParseFloat(string(g[2+i]), 64)
+				c[i] = int(math.Round(v * 255))
+			}
+			for _, sp := range spots {
+				if sp.rgb != c {
+					continue
+				}
+				op := "k"
+				if string(g[5]) == "RG" {
+					op = "K"
+				}
+				rep := fmt.Sprintf("%s%s %s %s %s %s", g[1], frac(sp.cmyk[0]), frac(sp.cmyk[1]), frac(sp.cmyk[2]), frac(sp.cmyk[3]), op)
+				if len(rep) > len(m) {
+					if failed == nil {
+						failed = fmt.Errorf("the CMYK for %02x%02x%02x is longer than the rgb it replaces (%q)", c[0], c[1], c[2], m)
+					}
+					return m
+				}
+				n++
+				return append([]byte(rep), bytes.Repeat([]byte(" "), len(m)-len(rep))...)
+			}
+			return m
+		})
+	})
+	return out, n, failed
+}
+
+// rewriteContent applies f to the data of every stream in qdf but images'.
+func rewriteContent(qdf []byte, f func([]byte) []byte) []byte {
+	var out []byte
+	for {
+		i := bytes.Index(qdf, []byte("\nstream\n"))
+		if i < 0 {
+			return append(out, qdf...)
+		}
+		head := i + len("\nstream\n")
+		out = append(out, qdf[:head]...)
+		dict := qdf[:i]
+		if o := bytes.LastIndex(dict, []byte(" obj\n")); o >= 0 {
+			dict = dict[o:]
+		}
+		end := bytes.Index(qdf[head:], []byte("\nendstream"))
+		if end < 0 {
+			return append(out, qdf[head:]...)
+		}
+		data := qdf[head : head+end]
+		if !imageDict.Match(dict) {
+			data = f(data)
+		}
+		out = append(out, data...)
+		qdf = qdf[head+end:]
+	}
+}
 
 // defaultMaxRMSE separated clean masters (at most 0.066) from masters with a
 // hidden element (0.083 and above) on the print artboards press was built
@@ -55,6 +167,7 @@ type job struct {
 	maxPPI, maxRMSE float64
 	proofWidth      int
 	regions         []region
+	spots           []spot
 	log             io.Writer
 }
 
@@ -67,6 +180,8 @@ func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	proofWidth := cli.Int(fs, "proof-width", 3000, "soft-proof render width in px; RMSE settles by about 3000")
 	var specs cli.Multi
 	fs.Var(&specs, "region", "x,y,w,h:max: a page region, as fractions, held to its own RMSE (repeatable)")
+	var cmyks cli.Multi
+	fs.Var(&cmyks, "cmyk", "RRGGBB=C,M,Y,K: vector fills in this colour get exactly this CMYK, in percent (repeatable)")
 	rest, code, ok := cli.Parse(fs, args, 2)
 	if !ok {
 		return code
@@ -90,6 +205,13 @@ func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 			return cli.Usage(stderr, "press", "%v", err)
 		}
 		j.regions = append(j.regions, r)
+	}
+	for _, s := range cmyks {
+		sp, err := parseSpot(s)
+		if err != nil {
+			return cli.Usage(stderr, "press", "%v", err)
+		}
+		j.spots = append(j.spots, sp)
 	}
 	var err error
 	if j.icc, err = filepath.Abs(*icc); err == nil {
@@ -149,6 +271,33 @@ func (j job) run(ctx context.Context) (err error) {
 			return fmt.Errorf("page %d is %gx%g pt and page 1 is %gx%g pt; press fixes one media size for the whole file", i+1, s[0], s[1], sizes[0][0], sizes[0][1])
 		}
 	}
+	// The spots go in before the pass: gs converts rgb through the profile
+	// and keeps a cmyk already in the output profile's space as it is.
+	gsIn := j.in
+	if len(j.spots) > 0 {
+		tmp, err := os.MkdirTemp("", "press-spots-")
+		if err != nil {
+			return err
+		}
+		defer os.RemoveAll(tmp)
+		qdf := filepath.Join(tmp, "in.qdf.pdf")
+		if _, err := engine.Run(ctx, engine.Cmd{Engine: "qpdf", Args: []string{"--qdf", "--object-streams=disable", j.in, qdf}, Inputs: []string{j.in}, Outputs: []string{qdf}}); err != nil {
+			return err
+		}
+		b, err := os.ReadFile(qdf)
+		if err != nil {
+			return err
+		}
+		b, n, err := withSpots(b, j.spots)
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(qdf, b, 0o644); err != nil {
+			return err
+		}
+		fmt.Fprintf(j.log, "%d fill(s) and stroke(s) set to their brand CMYK\n", n)
+		gsIn = qdf
+	}
 	ppi := pt(j.maxPPI)
 	// gs imposes its own media and shifts the artwork onto it unless the
 	// source's box is forced. Its pdfwrite defaults downsample to 72 dpi and
@@ -168,8 +317,13 @@ func (j job) run(ctx context.Context) (err error) {
 		"-dColorImageResolution=" + ppi, "-dGrayImageResolution=" + ppi,
 		"-dColorImageDownsampleThreshold=1.5", "-dGrayImageDownsampleThreshold=1.5",
 		"-dDownsampleMonoImages=false",
-		"-sOutputFile=" + gsLiteral(j.out), j.in}
-	if _, err := engine.Run(ctx, engine.Cmd{Engine: "gs", Args: args, StderrFatal: true, Inputs: []string{j.in, j.icc}, Outputs: []string{j.out}, Timeout: gsTimeout}); err != nil {
+		"-sOutputFile=" + gsLiteral(j.out)}
+	if len(j.spots) > 0 {
+		// The spots' cmyk is in the output profile's space, so gs keeps it.
+		args = append(args, "-sDefaultCMYKProfile="+j.icc)
+	}
+	args = append(args, gsIn)
+	if _, err := engine.Run(ctx, engine.Cmd{Engine: "gs", Args: args, StderrFatal: true, Inputs: []string{gsIn, j.icc}, Outputs: []string{j.out}, Timeout: gsTimeout}); err != nil {
 		return err
 	}
 	return j.verify(ctx, src)

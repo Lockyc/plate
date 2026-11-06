@@ -270,3 +270,36 @@ func TestPressRejectsNonPositiveLimits(t *testing.T) {
 		}
 	}
 }
+
+func TestParseSpot(t *testing.T) {
+	sp, err := parseSpot("17458f=100,84,12,3")
+	if err != nil || sp.rgb != [3]int{0x17, 0x45, 0x8f} || sp.cmyk != [4]float64{1, .84, .12, .03} {
+		t.Errorf("17458f=100,84,12,3: %+v, %v", sp, err)
+	}
+	for _, bad := range []string{"17458f", "17458f=1,2,3", "1745=1,2,3,4", "zz458f=1,2,3,4", "17458f=101,0,0,0", "17458f=-1,0,0,0"} {
+		if _, err := parseSpot(bad); err == nil {
+			t.Errorf("%q: no error", bad)
+		}
+	}
+}
+
+// TestWithSpots rewrites a spot's rg and RG as k and K at the same length,
+// leaves other colours and image data alone, and writes fractions as a
+// content stream reads them.
+func TestWithSpots(t *testing.T) {
+	sp, _ := parseSpot("17458f=100,84,12,3")
+	in := "1 0 obj\n<< /Length 2 0 R >>\nstream\nq .0902 .2706 .5608 rg 0 0 9 9 re f .0902 .2706 .5608 RG 1 1 1 rg\nendstream\nendobj\n" +
+		"3 0 obj\n<< /Subtype /Image /Length 4 0 R >>\nstream\n.0902 .2706 .5608 rg\nendstream\nendobj\n"
+	out, n, err := withSpots([]byte(in), []spot{sp})
+	if err != nil || n != 2 {
+		t.Fatalf("n %d, err %v", n, err)
+	}
+	if len(out) != len(in) {
+		t.Errorf("length %d, want %d", len(out), len(in))
+	}
+	for _, want := range []string{"q 1 .84 .12 .03 k   ", " 1 .84 .12 .03 K   ", " 1 1 1 rg", "stream\n.0902 .2706 .5608 rg\nendstream"} {
+		if !strings.Contains(string(out), want) {
+			t.Errorf("no %q in:\n%s", want, out)
+		}
+	}
+}
