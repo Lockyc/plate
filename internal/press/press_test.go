@@ -283,21 +283,19 @@ func TestParseSpot(t *testing.T) {
 	}
 }
 
-// TestWithSpots rewrites a spot's rg and RG as k and K at the same length,
-// leaves other colours and image data alone, and writes fractions as a
-// content stream reads them.
+// TestWithSpots rewrites a spot's rg and RG as k and K, black's longer than
+// the rgb it replaces, leaves other colours and image data alone, and writes
+// fractions as a content stream reads them.
 func TestWithSpots(t *testing.T) {
 	sp, _ := parseSpot("17458f=100,84,12,3")
-	in := "1 0 obj\n<< /Length 2 0 R >>\nstream\nq .0902 .2706 .5608 rg 0 0 9 9 re f .0902 .2706 .5608 RG 1 1 1 rg\nendstream\nendobj\n" +
+	black, _ := parseSpot("000000=0,0,0,100")
+	in := "1 0 obj\n<< /Length 2 0 R >>\nstream\nq .0902 .2706 .5608 rg 0 0 9 9 re f .0902 .2706 .5608 RG 1 1 1 rg 0 0 0 rg\nendstream\nendobj\n" +
 		"3 0 obj\n<< /Subtype /Image /Length 4 0 R >>\nstream\n.0902 .2706 .5608 rg\nendstream\nendobj\n"
-	out, n, err := withSpots([]byte(in), []spot{sp})
-	if err != nil || n != 2 {
-		t.Fatalf("n %d, err %v", n, err)
+	out, n := withSpots([]byte(in), []spot{sp, black})
+	if n != 3 {
+		t.Fatalf("n %d, want 3", n)
 	}
-	if len(out) != len(in) {
-		t.Errorf("length %d, want %d", len(out), len(in))
-	}
-	for _, want := range []string{"q 1 .84 .12 .03 k   ", " 1 .84 .12 .03 K   ", " 1 1 1 rg", "stream\n.0902 .2706 .5608 rg\nendstream"} {
+	for _, want := range []string{"q 1 .84 .12 .03 k 0", " 1 .84 .12 .03 K 1", " 1 1 1 rg", " 0 0 0 1 k\n", "stream\n.0902 .2706 .5608 rg\nendstream"} {
 		if !strings.Contains(string(out), want) {
 			t.Errorf("no %q in:\n%s", want, out)
 		}

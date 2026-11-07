@@ -78,12 +78,11 @@ func frac(v float64) string {
 }
 
 // withSpots rewrites every rg or RG in qdf whose colour is a spot's as that
-// spot's k or K, outside image data. Each replacement is padded with spaces
-// to the length it replaces, so QDF's stream lengths and offsets still hold;
-// it returns how many it made.
-func withSpots(qdf []byte, spots []spot) ([]byte, int, error) {
+// spot's k or K, outside image data, and returns how many it made. A
+// replacement may be longer than the rgb it replaces (black's 0 0 0 1 k is),
+// so the caller repairs QDF's stream lengths and offsets with fix-qdf.
+func withSpots(qdf []byte, spots []spot) ([]byte, int) {
 	var n int
-	var failed error
 	out := rewriteContent(qdf, func(stream []byte) []byte {
 		return rgbOp.ReplaceAllFunc(stream, func(m []byte) []byte {
 			g := rgbOp.FindSubmatch(m)
@@ -100,20 +99,13 @@ func withSpots(qdf []byte, spots []spot) ([]byte, int, error) {
 				if string(g[5]) == "RG" {
 					op = "K"
 				}
-				rep := fmt.Sprintf("%s%s %s %s %s %s", g[1], frac(sp.cmyk[0]), frac(sp.cmyk[1]), frac(sp.cmyk[2]), frac(sp.cmyk[3]), op)
-				if len(rep) > len(m) {
-					if failed == nil {
-						failed = fmt.Errorf("the CMYK for %02x%02x%02x is longer than the rgb it replaces (%q)", c[0], c[1], c[2], m)
-					}
-					return m
-				}
 				n++
-				return append([]byte(rep), bytes.Repeat([]byte(" "), len(m)-len(rep))...)
+				return fmt.Appendf(nil, "%s%s %s %s %s %s", g[1], frac(sp.cmyk[0]), frac(sp.cmyk[1]), frac(sp.cmyk[2]), frac(sp.cmyk[3]), op)
 			}
 			return m
 		})
 	})
-	return out, n, failed
+	return out, n
 }
 
 // rewriteContent applies f to the data of every stream in qdf but images'.
@@ -288,15 +280,16 @@ func (j job) run(ctx context.Context) (err error) {
 		if err != nil {
 			return err
 		}
-		b, n, err := withSpots(b, j.spots)
-		if err != nil {
-			return err
-		}
+		b, n := withSpots(b, j.spots)
 		if err := os.WriteFile(qdf, b, 0o644); err != nil {
 			return err
 		}
+		fixed := filepath.Join(tmp, "spots.pdf")
+		if _, err := engine.Run(ctx, engine.Cmd{Engine: "fix-qdf", Args: []string{qdf, fixed}, Inputs: []string{qdf}, Outputs: []string{fixed}}); err != nil {
+			return err
+		}
 		fmt.Fprintf(j.log, "%d fill(s) and stroke(s) set to their brand CMYK\n", n)
-		gsIn = qdf
+		gsIn = fixed
 	}
 	ppi := pt(j.maxPPI)
 	// gs imposes its own media and shifts the artwork onto it unless the

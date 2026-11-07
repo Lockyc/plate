@@ -125,6 +125,12 @@ var Engines = []Engine{
 		UsedBy:  []string{"press", "impose", "build"},
 	},
 	{
+		Name: "fix-qdf", Kind: Minimum,
+		VersionArgs: []string{"--version"}, VersionRe: `qpdf version (\d+\.\d+\.\d+)`, Min: "11.0.0",
+		Install: map[string]string{"darwin": "brew install qpdf", "linux": "sudo apt install qpdf"},
+		UsedBy:  []string{"press"},
+	},
+	{
 		Name: "qrencode", Kind: Minimum,
 		VersionArgs: []string{"--version"}, VersionRe: `qrencode version (\d+\.\d+\.\d+)`, Min: "4.0.0",
 		Install: map[string]string{"darwin": "brew install qrencode", "linux": "sudo apt install qrencode"},
