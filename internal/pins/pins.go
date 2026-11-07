@@ -105,6 +105,7 @@ var Engines = []Engine{
 	poppler("pdfimages", "press", "pdf"),
 	poppler("pdftotext", "render", "build", "pdf"),
 	poppler("pdftoppm", "render", "build", "pdf"),
+	poppler("pdftocairo", "pdf"),
 	{
 		Name: "pandoc", Kind: Minimum,
 		VersionArgs: []string{"--version"}, VersionRe: `pandoc (\d+\.\d+(?:\.\d+)*)`, Min: "3.0",

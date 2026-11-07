@@ -3,6 +3,7 @@ package pdf
 import (
 	"bytes"
 	"context"
+	"image/png"
 	"os"
 	"path/filepath"
 	"slices"
@@ -10,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lockyc/plate/internal/engine"
 	"github.com/lockyc/plate/internal/enginetest"
 )
 
@@ -107,6 +109,55 @@ func TestPagesNamesEachPage(t *testing.T) {
 	slices.SortFunc(calls, func(a, b []string) int { return strings.Compare(a[4], b[4]) })
 	if want := []string{"-png", "-r", "200", "-f", "3", "-l", "3", "-singlefile", in, filepath.Join(out, "page-03")}; !slices.Equal(calls[0], want) {
 		t.Errorf("args %q, want %q", calls[0], want)
+	}
+}
+
+// pdftoppm always paints the ground white, so --transparent renders through
+// pdftocairo, which can leave it unpainted.
+func TestPagesTransparentUsesPdftocairo(t *testing.T) {
+	in := fixture(t)
+	stubPages(t, "1")
+	log := enginetest.Stub(t, "pdftocairo", pdftoppmStub)
+	out := filepath.Join(t.TempDir(), "out")
+	var r run
+	if code := r.main("pages", "--transparent", "--dpi", "600", "--out", out, in); code != 0 {
+		t.Fatalf("code %d: %s", code, r.stderr.String())
+	}
+	calls := enginetest.Calls(t, log)
+	want := []string{"-png", "-transp", "-r", "600", "-f", "1", "-l", "1", "-singlefile", in, filepath.Join(out, "page-1")}
+	if len(calls) != 1 || !slices.Equal(calls[0], want) {
+		t.Errorf("pdftocairo calls %q, want one with %q", calls, want)
+	}
+}
+
+// The stub above checks what plate asks for; this asks the real pdftocairo,
+// so a flag it does not know fails here: an empty page must come out clear.
+func TestPagesTransparentLeavesGroundClear(t *testing.T) {
+	for _, n := range []string{"pdfinfo", "pdftocairo"} {
+		if _, err := engine.Resolve(n); err != nil {
+			t.Skip(err)
+		}
+	}
+	in := filepath.Join(t.TempDir(), "blank.pdf")
+	os.WriteFile(in, []byte("%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n"+
+		"2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n"+
+		"3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 72 72]>>endobj\n"+
+		"trailer<</Root 1 0 R>>\n%%EOF\n"), 0o644)
+	paths, err := renderPages(context.Background(), in, pageRange{}, t.TempDir(), 72, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Open(paths[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	img, err := png.Decode(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, a := img.At(0, 0).RGBA(); a != 0 {
+		t.Errorf("corner alpha %d, want 0: the ground was painted", a)
 	}
 }
 

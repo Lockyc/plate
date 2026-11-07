@@ -20,7 +20,7 @@ import (
 
 const usage = "pdf info <in.pdf>\n" +
 	"       plate pdf text [--pages N|N-M] <in.pdf>\n" +
-	"       plate pdf pages [--pages N|N-M] [--out DIR] [--dpi N] <in.pdf>\n" +
+	"       plate pdf pages [--pages N|N-M] [--out DIR] [--dpi N] [--transparent] <in.pdf>\n" +
 	"       plate pdf images [--pages N|N-M] [--out DIR] <in.pdf>"
 
 // maxDPI bounds --dpi. pdftoppm takes any -r in silence: 0 becomes its own
@@ -151,10 +151,11 @@ func textMain(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 }
 
 func pagesMain(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	fs := cli.Flags("pdf pages", "pdf pages [--pages N|N-M] [--out DIR] [--dpi N] <in.pdf>", stderr)
+	fs := cli.Flags("pdf pages", "pdf pages [--pages N|N-M] [--out DIR] [--dpi N] [--transparent] <in.pdf>", stderr)
 	pages := pagesFlag(fs)
 	out := fs.String("out", "", "write the PNGs here, creating it if missing (default: a fresh temporary directory)")
 	dpi := cli.Int(fs, "dpi", 150, fmt.Sprintf("render resolution, 1-%d", maxDPI))
+	transparent := fs.Bool("transparent", false, "leave the page's unpainted ground transparent instead of white, for artwork such as a white logo")
 	in, code, ok := input(fs, "pdf pages", args, stderr)
 	if !ok {
 		return code
@@ -162,7 +163,7 @@ func pagesMain(ctx context.Context, args []string, stdout, stderr io.Writer) int
 	if *dpi < 1 || *dpi > maxDPI {
 		return cli.Usage(stderr, "pdf pages", "--dpi %d: want 1-%d", *dpi, maxDPI)
 	}
-	paths, err := renderPages(ctx, in, *pages, *out, *dpi)
+	paths, err := renderPages(ctx, in, *pages, *out, *dpi, *transparent)
 	if err != nil {
 		return cli.Fail(stderr, "pdf pages", err)
 	}
@@ -172,8 +173,10 @@ func pagesMain(ctx context.Context, args []string, stdout, stderr io.Writer) int
 
 // renderPages renders one page per pdftoppm call with -singlefile, so plate
 // names each file: pdftoppm's own names pad the page number to the width of
-// the document's page count, which a caller cannot know in advance.
-func renderPages(ctx context.Context, in string, r pageRange, out string, dpi int) (paths []string, err error) {
+// the document's page count, which a caller cannot know in advance. A
+// transparent render goes through pdftocairo instead, the poppler renderer
+// that can leave the ground unpainted; pdftoppm always paints it white.
+func renderPages(ctx context.Context, in string, r pageRange, out string, dpi int, transparent bool) (paths []string, err error) {
 	info, err := Read(ctx, in)
 	if err != nil {
 		return nil, err
@@ -223,9 +226,14 @@ func renderPages(ctx context.Context, in string, r pageRange, out string, dpi in
 			n := strconv.Itoa(r.first + i)
 			png := filepath.Join(dir, name)
 			root := strings.TrimSuffix(png, ".png")
+			eng, args := "pdftoppm", []string{"-png"}
+			if transparent {
+				eng, args = "pdftocairo", []string{"-png", "-transp"}
+			}
+			args = append(args, "-r", strconv.Itoa(dpi), "-f", n, "-l", n, "-singlefile", in, root)
 			_, errs[i] = engine.Run(ctx, engine.Cmd{
-				Engine:  "pdftoppm",
-				Args:    []string{"-png", "-r", strconv.Itoa(dpi), "-f", n, "-l", n, "-singlefile", in, root},
+				Engine:  eng,
+				Args:    args,
 				Inputs:  []string{in},
 				Outputs: []string{png},
 			})
@@ -314,5 +322,5 @@ func extractImages(ctx context.Context, in string, r pageRange, out string) (pat
 // RenderPages renders every page of in as a PNG at dpi into the directory
 // out, creating it if missing, and returns the paths in page order.
 func RenderPages(ctx context.Context, in, out string, dpi int) ([]string, error) {
-	return renderPages(ctx, in, pageRange{}, out, dpi)
+	return renderPages(ctx, in, pageRange{}, out, dpi, false)
 }

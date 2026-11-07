@@ -34,7 +34,7 @@ the exceptions listed under [Platforms](#platforms). What comes next is in
 | `press` | Converts a PDF to a print master (text as outlines, CMYK colour, brand colours at the exact CMYK given) and checks it against a soft proof | `plate press --icc profile.icc [--cmyk RRGGBB=C,M,Y,K]... [--max-ppi N] [--max-rmse R] [--region x,y,w,h:max]... [--proof-width PX] <in.pdf> <out.pdf>` |
 | `pdf info` | Prints a PDF's metadata and whether it has a text layer, which says whether to read its text or render its pages | `plate pdf info <in.pdf>` |
 | `pdf text` | Extracts a PDF's text with its layout | `plate pdf text [--pages N\|N-M] <in.pdf>` |
-| `pdf pages` | Renders PDF pages to PNG and prints each path | `plate pdf pages [--pages N\|N-M] [--out DIR] [--dpi N] <in.pdf>` |
+| `pdf pages` | Renders PDF pages to PNG and prints each path; `--transparent` leaves the ground clear, for artwork such as a white logo | `plate pdf pages [--pages N\|N-M] [--out DIR] [--dpi N] [--transparent] <in.pdf>` |
 | `pdf images` | Extracts a PDF's embedded images and prints each path | `plate pdf images [--pages N\|N-M] [--out DIR] <in.pdf>` |
 | `impose` | Puts an A5 flyer two-up on an A4 sheet, cut down the middle: a single page on one side, or a front and back on both sides, printed double-sided with flip on short edge | `plate impose [--cut-mark] [--force] -o out.pdf <in.pdf>` |
 | `marks` | A print shop's copy of a PDF: each page unchanged at its trim size, with bleed (default 3 mm) and crop marks, TrimBox and BleedBox set | `plate marks [--bleed MM] [--trim WxH] [--force] -o out.pdf <in.pdf>` |
