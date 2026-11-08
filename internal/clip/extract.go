@@ -9,6 +9,7 @@ import (
 	"math"
 	"strconv"
 
+	"github.com/lockyc/plate/internal/frames"
 	"github.com/lockyc/plate/internal/video"
 )
 
@@ -28,7 +29,7 @@ func seconds(ms float64) string {
 // dir, for motion detection: frame i sits at i·1000/fps ms from the
 // master's first frame, where ffmpeg's output timeline starts.
 func ExtractActivity(ctx context.Context, master string, fps int, dir string) ([]*image.Gray, error) {
-	paths, err := video.Decode(ctx, master, fmt.Sprintf("fps=%d:round=down,scale=200:-2,format=gray", fps),
+	paths, err := frames.Decode(ctx, master, fmt.Sprintf("fps=%d:round=down,scale=200:-2,format=gray", fps),
 		[]string{"-fps_mode", "cfr"}, 0, master, "a", dir)
 	if err != nil {
 		return nil, err
@@ -88,6 +89,6 @@ func ExtractFrames(ctx context.Context, master string, c Colour, w Window, fps i
 		return nil, errEmptyWindow
 	}
 	vf := fmt.Sprintf("%stpad=stop_mode=clone:stop_duration=%s,fps=%d:round=down,%s", toBT709(c), seconds(w.End), fps, toRGB)
-	return video.Decode(ctx, master, vf, []string{"-fps_mode", "cfr", "-ss", seconds(w.Start), "-frames:v", strconv.Itoa(n)},
+	return frames.Decode(ctx, master, vf, []string{"-fps_mode", "cfr", "-ss", seconds(w.Start), "-frames:v", strconv.Itoa(n)},
 		n, master, "m", dir)
 }

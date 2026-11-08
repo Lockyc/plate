@@ -5,7 +5,9 @@
 // line below it and would otherwise score a correct page at a third
 // different. A pixel counts as changed when the luma of its per-channel
 // difference exceeds the tolerance, which keeps antialiasing and hinting
-// noise out of the count.
+// noise out of the count. Two clips are compared frame by frame, as a
+// viewer sees them decoded, and scored by their worst frame; clips of
+// different lengths differ outright.
 package diff
 
 import (
@@ -15,13 +17,17 @@ import (
 	"image"
 	"image/color"
 	"io"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/lockyc/plate/internal/cli"
 	"github.com/lockyc/plate/internal/engine"
+	"github.com/lockyc/plate/internal/frames"
 	"github.com/lockyc/plate/internal/raster"
 )
 
-const usage = "diff [--tolerance N] [--max-shift PX] [--step PX] [--threshold PCT] [--out diff.png] <a> <b>"
+const usage = "diff [--tolerance N] [--max-shift PX] [--step PX] [--threshold PCT] [--out diff.png] <a> <b>  (two images, or two clips: mp4, m4v, mov, webm, mkv, gif)"
 
 // Result is the best-aligned comparison. Shift is how many px lower b's
 // content sits than a's.
@@ -163,17 +169,57 @@ func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	if *outPath != "" && (engine.SameFile(*outPath, rest[0]) || engine.SameFile(*outPath, rest[1])) {
 		return fail(fmt.Errorf("--out must not be the same file as an input"))
 	}
-	a, err := raster.Load(rest[0])
-	if err != nil {
-		return fail(err)
+	if isClip(rest[0]) != isClip(rest[1]) {
+		return fail(fmt.Errorf("compare two clips or two images, not one of each"))
 	}
-	b, err := raster.Load(rest[1])
-	if err != nil {
-		return fail(err)
-	}
-	res, mask, rows, err := Compare(a, b, uint8(*tol), *maxShift, *step)
-	if err != nil {
-		return fail(err)
+	var (
+		res  Result
+		b    *image.RGBA64
+		mask *image.Gray
+		rows image.Rectangle
+		at   string // which frame scored res, for a clip
+	)
+	if isClip(rest[0]) {
+		pa, pb, cleanup, err := decodeBoth(ctx, rest[0], rest[1])
+		if err != nil {
+			return fail(err)
+		}
+		defer cleanup()
+		if len(pa) != len(pb) {
+			fmt.Fprintf(stdout, "OVER the clips differ in length: %d frames and %d\n", len(pa), len(pb))
+			return 1
+		}
+		worst := -1
+		for i := range pa {
+			fa, err := raster.Load(pa[i])
+			if err != nil {
+				return fail(err)
+			}
+			fb, err := raster.Load(pb[i])
+			if err != nil {
+				return fail(err)
+			}
+			r, m, rr, err := Compare(fa, fb, uint8(*tol), *maxShift, *step)
+			if err != nil {
+				return fail(fmt.Errorf("frame %d: %w", i, err))
+			}
+			if worst < 0 || r.Percent > res.Percent {
+				worst, res, b, mask, rows = i, r, fb, m, rr
+			}
+		}
+		at = fmt.Sprintf(" at worst (frame %d of %d, ", worst, len(pa))
+	} else {
+		a, err := raster.Load(rest[0])
+		if err != nil {
+			return fail(err)
+		}
+		if b, err = raster.Load(rest[1]); err != nil {
+			return fail(err)
+		}
+		if res, mask, rows, err = Compare(a, b, uint8(*tol), *maxShift, *step); err != nil {
+			return fail(err)
+		}
+		at = " ("
 	}
 	if *outPath != "" {
 		if err := raster.SavePNG(*outPath, picture(b, mask, rows)); err != nil {
@@ -181,13 +227,37 @@ func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		}
 	}
 	if !thresholdSet {
-		fmt.Fprintf(stdout, "%.1f%% differ (best fit at %+dpx vertical)\n", res.Percent, res.Shift)
+		fmt.Fprintf(stdout, "%.1f%% differ%sbest fit at %+dpx vertical)\n", res.Percent, at, res.Shift)
 		return 0
 	}
 	verdict, code := "ok", 0
 	if res.Percent > *threshold {
 		verdict, code = "OVER", 1
 	}
-	fmt.Fprintf(stdout, "%s %.1f%% differ (threshold %.1f%%, best fit at %+dpx vertical)\n", verdict, res.Percent, *threshold, res.Shift)
+	fmt.Fprintf(stdout, "%s %.1f%% differ%sthreshold %.1f%%, best fit at %+dpx vertical)\n", verdict, res.Percent, at, *threshold, res.Shift)
 	return code
+}
+
+// clipExts are the extensions diff reads as clips: what plate writes (mp4,
+// webm, gif) and the usual containers beside them.
+var clipExts = map[string]bool{".mp4": true, ".m4v": true, ".mov": true, ".webm": true, ".mkv": true, ".gif": true}
+
+func isClip(path string) bool { return clipExts[strings.ToLower(filepath.Ext(path))] }
+
+// decodeBoth decodes every frame of clips a and b as a viewer sees them
+// into one temporary directory, which cleanup removes.
+func decodeBoth(ctx context.Context, a, b string) (pa, pb []string, cleanup func(), err error) {
+	dir, err := os.MkdirTemp("", "plate-diff-")
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	cleanup = func() { os.RemoveAll(dir) }
+	if pa, err = frames.All(ctx, a, "a", dir); err == nil {
+		pb, err = frames.All(ctx, b, "b", dir)
+	}
+	if err != nil {
+		cleanup()
+		return nil, nil, nil, err
+	}
+	return pa, pb, cleanup, nil
 }

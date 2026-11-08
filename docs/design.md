@@ -29,6 +29,7 @@ internal/<op>/       one package per command (cutout, inpaint, infill, upscale,
 internal/genai/      the one way a hosted image model is called
 internal/cdp/        a DevTools-protocol session with Chrome over --remote-debugging-pipe
 internal/video/      the encode, checks and whole-set publish clip and animate share
+internal/frames/     the one clip decoder: video's measures, clip's extraction, diff's clips
 internal/sheet/      a PDF's pages redrawn as forms on new sheets (impose, marks)
 internal/cli/        flag, exit-code and error conventions every command shares
 internal/engine/     the one way an external tool is run
@@ -181,7 +182,8 @@ colours, or renders what it is given.
   which `-hald-clut` drops.
 - **diff** — crops both images to their overlap, searches a vertical shift,
   and scores the share of pixels whose per-channel difference has a luma above
-  the tolerance.
+  the tolerance. Two clips are decoded as a viewer sees them and scored by
+  their worst frame, so an encode's byte noise is not a difference.
 - **infill** — a blur pyramid over the known pixels, whose levels skip any
   other ground cut off from a hole by a strong edge (internal/infill/reach.go),
   then the ground's own grain transferred in patches from around each hole

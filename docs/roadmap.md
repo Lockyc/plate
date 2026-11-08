@@ -98,14 +98,21 @@ independently of phase 5. Within a phase, order is open.
   a video's `seeked`, a seek waits two `requestAnimationFrame`s for the
   frame to reach the compositor. Deferred because the quality cases pass.
   Unlock: a flake, then `requestVideoFrameCallback`.
-- **animate's frames are not reproducible for every scene.** Two captures of
-  a CSS-only scene (several keyframed transforms, staggered ghost copies with
-  an opacity smear, a whole-body shake) at 1080 px on one host differ on some
-  targets and not others: the reported sharpness moves in the fourth decimal
-  and the MP4 changes, so a consumer proving a migration by comparing builds
-  has to allow its clips. The `animate-*` frame-identity case covers its own
-  scene only. Unlock: such a scene reduced to a quality case, then the
-  differing frames found and their source pinned.
+- **animate's frames are not reproducible for every scene.** In a CSS-only
+  scene at 1080 px (keyframed transforms, ghost copies with an opacity smear,
+  a whole-body shake), one block of display text has two rasters a level
+  apart in a few pixels. Chrome usually moves to the second at the first
+  screenshot; under load (several captures at once) it keeps the first until
+  the scene's first large invalidation, so frame 0, or frames 0 to that
+  point, differ, and the encode spreads the change through the MP4's bytes.
+  Every later frame is identical. Measured over 24 captures under load: as
+  built, about half differ; one discarded screenshot at time 0 before frame
+  0, 1 in 24; `--disable-lcd-text`, about half; `--run-all-compositor-stages-before-draw`
+  (with or without threaded animation, checker imaging and partial raster
+  off), nearly every capture different. A consumer comparing builds compares
+  clips with `diff`, whose worst frame scores these at 0.1%. Unlock: the
+  scene reduced to a quality case that reproduces under load, then the
+  switch's trigger pinned in Chrome.
 
 - **doctor runs no managed engine.** `doctor` reports chrome-headless-shell
   ok once its pinned build is unpacked, without starting it, so a Linux host
