@@ -69,3 +69,7 @@ the README is curated at each release.
 ```bash
 just build | just test | just gate | just quality | just lock-ml | just install
 ```
+
+`just bakeoff` runs every OpenRouter model over the poses in `quality/bakeoff/` and writes each
+pose's contact sheet, for a person to compare. It spends real money, needs the OpenRouter key, and
+has no threshold. `just lock-ml` re-resolves the ML scripts' lockfiles after a PEP 723 header edit.

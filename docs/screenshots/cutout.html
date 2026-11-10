@@ -1,0 +1,34 @@
+<!doctype html>
+<!--
+  The README's cutout before/after. Regenerate from the repo root:
+    plate cutout quality/assets/fur-matching-ground.jpg /tmp/fox-cutout.png
+    plate shrink --fit 900 quality/assets/fur-matching-ground.jpg docs/screenshots/cutout-before.png
+    plate shrink --fit 900 /tmp/fox-cutout.png docs/screenshots/cutout-after.png
+    plate render --png docs/screenshots/cutout.png --size 1200x440 --force docs/screenshots/cutout.html
+  The photo is fur-matching-ground.jpg from quality/assets.toml (CC BY-SA 4.0), so these images are too.
+-->
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  html, body { margin: 0; background: #1b1d21; }
+  body { display: flex; gap: 24px; padding: 24px; box-sizing: border-box; height: 440px; }
+  figure { margin: 0; flex: 1; display: flex; flex-direction: column; gap: 10px; }
+  .frame { flex: 1; border-radius: 8px; overflow: hidden; display: flex; align-items: center; justify-content: center; }
+  .after {
+    background-color: #fff;
+    background-image: linear-gradient(45deg, #d9d9d9 25%, transparent 25%), linear-gradient(-45deg, #d9d9d9 25%, transparent 25%),
+      linear-gradient(45deg, transparent 75%, #d9d9d9 75%), linear-gradient(-45deg, transparent 75%, #d9d9d9 75%);
+    background-size: 24px 24px;
+    background-position: 0 0, 0 12px, 12px -12px, -12px 0;
+  }
+  img { max-width: 100%; max-height: 100%; display: block; }
+  figcaption { font: 600 15px/1 -apple-system, "Helvetica Neue", Arial, sans-serif; color: #c9ccd1; }
+  code { font: 500 14px/1 Menlo, monospace; color: #8fd1a6; }
+</style>
+</head>
+<body>
+  <figure><div class="frame"><img src="cutout-before.png" alt=""></div><figcaption>fur-matching-ground.jpg</figcaption></figure>
+  <figure><div class="frame after"><img src="cutout-after.png" alt=""></div><figcaption><code>plate cutout</code> → RGBA</figcaption></figure>
+</body>
+</html>

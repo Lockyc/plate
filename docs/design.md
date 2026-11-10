@@ -214,7 +214,7 @@ colours, or renders what it is given.
 - **animate** — a page's own animation, captured frame by frame on a clock
   plate owns, and encoded as `clip` encodes. Generic: the scene, its
   styles and its copy are the consuming project's HTML, CSS and JS; plate
-  ships no animation styles. Its flags are in the README's command table;
+  ships no animation styles. Its flags are in `docs/commands.md`;
   `--fps` defaults to 30, `--loop` to `none`, since an ad has an end; the
   poster is the last frame. `--scale` is the device scale factor, as in
   `render`: the video is WxH × scale pixels. `--budget` is render's settle
@@ -284,7 +284,7 @@ colours, or renders what it is given.
   rounds that fit to PNG (`render.PNG`), so the agent sees what the person sees;
   `generate accept` writes the record before the image. Every file a person
   keeps goes through `internal/atomicfile`.
-- **inpaint, fonts, qr, icon, pdf, impose, marks, doc, slides** — as the README table and each package's
+- **inpaint, fonts, qr, icon, pdf, impose, marks, doc, slides** — as `docs/commands.md` and each package's
   doc comment describe.
 
 ## Platforms and errors
