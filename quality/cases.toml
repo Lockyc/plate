@@ -60,6 +60,40 @@ setup  = [
 run    = ["press", "--icc", "{asset:Coated_Fogra39L_VIGC_300.icc}", "--region", "0,0.88,1,0.12:0.06", "{tmp:src.pdf}", "{tmp:press.pdf}"]
 stdout = "CMYK only"
 
+# press-jpeg: an A3 sign whose artwork is a large textured cut-out with
+# transparency, placed at about 330 ppi, as a character on an event sign
+# is. Kept lossless, the cut-out alone makes the master too big to email.
+[[case]]
+name   = "press-jpeg-size"
+why    = "a print master with a large cut-out must come small enough to email: lossless Flate made a real A3 sign 12.2 MB"
+files  = { "page.html" = '''<!doctype html><style>@page{size:1120px 1584px;margin:0}html,body{margin:0;width:1120px;height:1584px}body{background:#e4f1fa;font:bold 120px sans-serif;color:#062d5f}img{position:absolute;left:40px;top:300px;width:560px}</style><p>Sample sign</p><img src="cutout.png">''' }
+setup  = [
+  ["magick", "-size", "1900x4700", "gradient:#5fb4ef-#1d5fa8", "-seed", "11", "-attenuate", "0.4", "+noise", "Gaussian", "-blur", "0x1.2", "(", "-size", "1900x4700", "xc:black", "-fill", "white", "-draw", "ellipse 950,2350 900,2300 0,360", ")", "-alpha", "off", "-compose", "copy_opacity", "-composite", "PNG32:{tmp:cutout.png}"],
+  ["plate", "render", "--size", "1120x1584", "--pdf", "{tmp:src.pdf}", "{tmp:page.html}"],
+]
+run    = ["press", "--icc", "{asset:Coated_Fogra39L_VIGC_300.icc}", "--jpeg", "90", "{tmp:src.pdf}", "{tmp:press.pdf}"]
+metric = "bytes"
+params = { image = "{tmp:press.pdf}" }
+max    = 2900000
+
+[[case]]
+name   = "press-jpeg-fidelity"
+why    = "the JPEG master must print as the lossless one does: same cut-out, edges and colour at 150 dpi"
+files  = { "page.html" = '''<!doctype html><style>@page{size:1120px 1584px;margin:0}html,body{margin:0;width:1120px;height:1584px}body{background:#e4f1fa;font:bold 120px sans-serif;color:#062d5f}img{position:absolute;left:40px;top:300px;width:560px}</style><p>Sample sign</p><img src="cutout.png">''' }
+setup  = [
+  ["magick", "-size", "1900x4700", "gradient:#5fb4ef-#1d5fa8", "-seed", "11", "-attenuate", "0.4", "+noise", "Gaussian", "-blur", "0x1.2", "(", "-size", "1900x4700", "xc:black", "-fill", "white", "-draw", "ellipse 950,2350 900,2300 0,360", ")", "-alpha", "off", "-compose", "copy_opacity", "-composite", "PNG32:{tmp:cutout.png}"],
+  ["plate", "render", "--size", "1120x1584", "--pdf", "{tmp:src.pdf}", "{tmp:page.html}"],
+  ["plate", "press", "--icc", "{asset:Coated_Fogra39L_VIGC_300.icc}", "{tmp:src.pdf}", "{tmp:lossless.pdf}"],
+]
+run    = ["press", "--icc", "{asset:Coated_Fogra39L_VIGC_300.icc}", "--jpeg", "90", "{tmp:src.pdf}", "{tmp:press.pdf}"]
+post   = [
+  ["plate", "pdf", "pages", "--dpi", "150", "--out", "{tmp:a}", "{tmp:lossless.pdf}"],
+  ["plate", "pdf", "pages", "--dpi", "150", "--out", "{tmp:b}", "{tmp:press.pdf}"],
+]
+metric = "rmse"
+params = { a = "{tmp:a/page-1.png}", b = "{tmp:b/page-1.png}" }
+max    = 0.002
+
 [[case]]
 name   = "diff-ignores-shift"
 why    = "a 4 px vertical shift must not read as a broken page"

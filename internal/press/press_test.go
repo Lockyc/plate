@@ -107,6 +107,36 @@ func TestPressClean(t *testing.T) {
 	}
 }
 
+func TestPressJPEG(t *testing.T) {
+	e := setup(t)
+	if code := e.run("--jpeg", "90"); code != 0 {
+		t.Fatalf("code %d: %s", code, e.stderr.String())
+	}
+	write := enginetest.Calls(t, e.gs)[0]
+	params := "<< /ColorImageDict << /QFactor 0.2 /Blend 1 /HSamples [1 1 1 1] /VSamples [1 1 1 1] >> >> setdistillerparams"
+	i := slices.Index(write, params)
+	switch {
+	case !slices.Contains(write, "-dColorImageFilter=/DCTEncode"):
+		t.Error("colour images not switched to DCT")
+	case slices.Contains(write, "-dColorImageFilter=/FlateEncode"):
+		t.Error("Flate still asked for")
+	case !slices.Contains(write, "-dGrayImageFilter=/FlateEncode"):
+		t.Error("grey images, soft masks among them, must stay lossless")
+	case i < 1 || write[i-1] != "-c" || write[i+1] != "-f" || write[i+2] != e.in:
+		t.Errorf("quality not set before the input: %q", write)
+	}
+	for q, want := range map[int]string{100: "/QFactor 0 ", 50: "/QFactor 1 ", 25: "/QFactor 2 "} {
+		if !strings.Contains(jpegParams(q), want) {
+			t.Errorf("q %d: %s, want %s", q, jpegParams(q), want)
+		}
+	}
+	for _, bad := range []string{"-1", "101"} {
+		if code := setup(t).run("--jpeg", bad); code != 2 {
+			t.Errorf("--jpeg %s: code %d, want 2", bad, code)
+		}
+	}
+}
+
 func TestPressFailures(t *testing.T) {
 	cases := []struct {
 		name, env, val, want string

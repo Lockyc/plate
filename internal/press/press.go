@@ -1,7 +1,7 @@
 // Package press makes a print master from a PDF with one Ghostscript pass:
 // every glyph outlined, every colour converted to the supplied CMYK profile,
-// the page box forced from the source, images kept lossless and downsampled
-// only well above --max-ppi. It then proves the master: no fonts, no RGB
+// the page box forced from the source, images downsampled only well above
+// --max-ppi and kept lossless unless --jpeg sets a quality for colour ones. It then proves the master: no fonts, no RGB
 // anywhere, the same page boxes and count, and a soft proof of the master
 // that matches the source by RMSE over each page and each --region. The
 // master is a separate deliverable: outlining destroys the text a text
@@ -30,7 +30,7 @@ import (
 	"github.com/lockyc/plate/internal/raster"
 )
 
-const usage = "press --icc profile.icc [--cmyk RRGGBB=C,M,Y,K]... [--max-ppi N] [--max-rmse R] [--region x,y,w,h:max]... [--proof-width PX] <in.pdf> <out.pdf>"
+const usage = "press --icc profile.icc [--cmyk RRGGBB=C,M,Y,K]... [--max-ppi N] [--jpeg Q] [--max-rmse R] [--region x,y,w,h:max]... [--proof-width PX] <in.pdf> <out.pdf>"
 
 // spot is a brand colour with its own CMYK: a vector fill or stroke drawn in
 // rgb is written as cmyk (percentages) instead of converted through the
@@ -158,6 +158,7 @@ type job struct {
 	in, out, icc    string
 	maxPPI, maxRMSE float64
 	proofWidth      int
+	jpeg            int // colour images' JPEG quality; 0 keeps them lossless
 	regions         []region
 	spots           []spot
 	log             io.Writer
@@ -170,6 +171,7 @@ func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	maxPPI := cli.Float(fs, "max-ppi", 450, "downsample images above 1.5 × this resolution, to it")
 	maxRMSE := cli.Float(fs, "max-rmse", defaultMaxRMSE, "soft-proof RMSE allowed over a whole page")
 	proofWidth := cli.Int(fs, "proof-width", 3000, "soft-proof render width in px; RMSE settles by about 3000")
+	jpeg := cli.Int(fs, "jpeg", 0, "store colour images as JPEG at this `quality` (1-100), no chroma subsampling; 0 keeps them lossless")
 	var specs cli.Multi
 	fs.Var(&specs, "region", "x,y,w,h:max: a page region, as fractions, held to its own RMSE (repeatable)")
 	var cmyks cli.Multi
@@ -190,7 +192,10 @@ func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 			return cli.Usage(stderr, "press", "--%s must be greater than 0", c.flag)
 		}
 	}
-	j := job{maxPPI: *maxPPI, maxRMSE: *maxRMSE, proofWidth: *proofWidth, log: stdout}
+	if *jpeg < 0 || *jpeg > 100 {
+		return cli.Usage(stderr, "press", "--jpeg must be 1 to 100, or 0 for lossless")
+	}
+	j := job{maxPPI: *maxPPI, maxRMSE: *maxRMSE, proofWidth: *proofWidth, jpeg: *jpeg, log: stdout}
 	for _, s := range specs {
 		r, err := parseRegion(s)
 		if err != nil {
@@ -304,7 +309,7 @@ func (j job) run(ctx context.Context) (err error) {
 		"-dRenderIntent=1", "-dBlackPtComp=1",
 		"-dFIXEDMEDIA", "-dDEVICEWIDTHPOINTS=" + pt(src.W), "-dDEVICEHEIGHTPOINTS=" + pt(src.H),
 		"-dAutoFilterColorImages=false", "-dAutoFilterGrayImages=false",
-		"-dColorImageFilter=/FlateEncode", "-dGrayImageFilter=/FlateEncode",
+		"-dColorImageFilter=" + colorFilter(j.jpeg), "-dGrayImageFilter=/FlateEncode",
 		"-dDownsampleColorImages=true", "-dDownsampleGrayImages=true",
 		"-dColorImageDownsampleType=/Bicubic", "-dGrayImageDownsampleType=/Bicubic",
 		"-dColorImageResolution=" + ppi, "-dGrayImageResolution=" + ppi,
@@ -315,11 +320,37 @@ func (j job) run(ctx context.Context) (err error) {
 		// The spots' cmyk is in the output profile's space, so gs keeps it.
 		args = append(args, "-sDefaultCMYKProfile="+j.icc)
 	}
+	if j.jpeg > 0 {
+		args = append(args, "-c", jpegParams(j.jpeg), "-f")
+	}
 	args = append(args, gsIn)
 	if _, err := engine.Run(ctx, engine.Cmd{Engine: "gs", Args: args, StderrFatal: true, Inputs: []string{gsIn, j.icc}, Outputs: []string{j.out}, Timeout: gsTimeout}); err != nil {
 		return err
 	}
 	return j.verify(ctx, src)
+}
+
+// colorFilter is the colour images' encoding: lossless Flate unless --jpeg
+// asks for JPEG. Grey images, soft masks among them, always stay Flate.
+func colorFilter(jpeg int) string {
+	if jpeg > 0 {
+		return "/DCTEncode"
+	}
+	return "/FlateEncode"
+}
+
+// jpegParams is the PostScript that sets the JPEG quality q, run before the
+// input file: setdistillerparams is the one route pdfwrite reads a filter's
+// parameters from. Ghostscript takes the quality as a QFactor on its base
+// tables, the IJG scale: (200 - 2q) / 100 at q >= 50, 50 / q below. Samples
+// of 1 on every channel keep colour at full resolution, since a print
+// master's coloured edges matter as much as its brightness.
+func jpegParams(q int) string {
+	f := 50.0 / float64(q)
+	if q >= 50 {
+		f = float64(200-2*q) / 100
+	}
+	return fmt.Sprintf("<< /ColorImageDict << /QFactor %s /Blend 1 /HSamples [1 1 1 1] /VSamples [1 1 1 1] >> >> setdistillerparams", strconv.FormatFloat(f, 'f', -1, 64))
 }
 
 // gsLiteral escapes a path for -sOutputFile, where Ghostscript reads %d
