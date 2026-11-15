@@ -77,6 +77,19 @@ params = { image = "{tmp:press.pdf}" }
 max    = 2900000
 
 [[case]]
+name   = "press-jpeg-flat"
+why    = "--jpeg must leave flat artwork lossless: JPEG on every image tripled a map page (330 KB against 110 KB)"
+files  = { "page.html" = '''<!doctype html><style>@page{size:1120px 792px;margin:0}html,body{margin:0;width:1120px;height:792px}body{background:#fff;font:bold 40px sans-serif;color:#062d5f}img{position:absolute;left:40px;top:90px;width:1040px}</style><p>Sample map</p><img src="map.png">''' }
+setup  = [
+  ["magick", "-size", "2400x1560", "xc:#eef2e6", "-fill", "#d9e6c4", "-draw", "rectangle 100,100 900,700", "-fill", "#c8dcef", "-draw", "ellipse 1500,500 420,300 0,360", "-fill", "#f2c9a8", "-draw", "polygon 1000,900 1800,850 2200,1400 1200,1450", "-stroke", "#7a7a7a", "-strokewidth", "18", "-draw", "line 0,800 2400,760", "-draw", "line 1150,0 1100,1560", "-stroke", "#062d5f", "-strokewidth", "10", "-fill", "none", "-draw", "rectangle 300,300 700,500", "-draw", "circle 1500,500 1700,500", "PNG24:{tmp:map.png}"],
+  ["plate", "render", "--size", "1120x792", "--pdf", "{tmp:src.pdf}", "{tmp:page.html}"],
+]
+run    = ["press", "--icc", "{asset:Coated_Fogra39L_VIGC_300.icc}", "--jpeg", "90", "{tmp:src.pdf}", "{tmp:press.pdf}"]
+metric = "bytes"
+params = { image = "{tmp:press.pdf}" }
+max    = 121000
+
+[[case]]
 name   = "press-jpeg-fidelity"
 why    = "the JPEG master must print as the lossless one does: same cut-out, edges and colour at 150 dpi"
 files  = { "page.html" = '''<!doctype html><style>@page{size:1120px 1584px;margin:0}html,body{margin:0;width:1120px;height:1584px}body{background:#e4f1fa;font:bold 120px sans-serif;color:#062d5f}img{position:absolute;left:40px;top:300px;width:560px}</style><p>Sample sign</p><img src="cutout.png">''' }

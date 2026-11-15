@@ -97,7 +97,7 @@ func TestPressClean(t *testing.T) {
 	write := enginetest.Calls(t, e.gs)[0]
 	for _, want := range []string{"-dNoOutputFonts", "-sColorConversionStrategy=CMYK", "-sOutputICCProfile=" + e.icc,
 		"--permit-file-read=" + e.icc, "-dFIXEDMEDIA", "-dDEVICEWIDTHPOINTS=900", "-dDEVICEHEIGHTPOINTS=675",
-		"-dColorImageFilter=/FlateEncode", "-dColorImageResolution=450", "-dColorImageDownsampleThreshold=1.5", "-dSAFER"} {
+		"-dAutoFilterColorImages=false", "-dColorImageFilter=/FlateEncode", "-dColorImageResolution=450", "-dColorImageDownsampleThreshold=1.5", "-dSAFER"} {
 		if !slices.Contains(write, want) {
 			t.Errorf("pdfwrite args lack %s", want)
 		}
@@ -113,14 +113,12 @@ func TestPressJPEG(t *testing.T) {
 		t.Fatalf("code %d: %s", code, e.stderr.String())
 	}
 	write := enginetest.Calls(t, e.gs)[0]
-	params := "<< /ColorImageDict << /QFactor 0.2 /Blend 1 /HSamples [1 1 1 1] /VSamples [1 1 1 1] >> >> setdistillerparams"
+	params := "<< /ColorACSImageDict << /QFactor 0.2 /Blend 1 /HSamples [1 1 1 1] /VSamples [1 1 1 1] >> >> setdistillerparams"
 	i := slices.Index(write, params)
 	switch {
-	case !slices.Contains(write, "-dColorImageFilter=/DCTEncode"):
-		t.Error("colour images not switched to DCT")
-	case slices.Contains(write, "-dColorImageFilter=/FlateEncode"):
-		t.Error("Flate still asked for")
-	case !slices.Contains(write, "-dGrayImageFilter=/FlateEncode"):
+	case !slices.Contains(write, "-dAutoFilterColorImages=true"):
+		t.Error("colour images not left to the auto filter")
+	case !slices.Contains(write, "-dAutoFilterGrayImages=false") || !slices.Contains(write, "-dGrayImageFilter=/FlateEncode"):
 		t.Error("grey images, soft masks among them, must stay lossless")
 	case i < 1 || write[i-1] != "-c" || write[i+1] != "-f" || write[i+2] != e.in:
 		t.Errorf("quality not set before the input: %q", write)

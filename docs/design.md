@@ -170,7 +170,8 @@ colours, or renders what it is given.
 - **press** — Ghostscript pdfwrite with outlined text, CMYK conversion to a
   supplied ICC, fixed media from the input's page box, and images downsampled
   only above 1.5 × `--max-ppi`, lossless unless `--jpeg` sets a quality for
-  colour images (grey images and soft masks stay lossless). A `--cmyk` brand colour is written into the
+  photographic colour images (Ghostscript's auto filter judges each; flat
+  artwork, grey images and soft masks stay lossless). A `--cmyk` brand colour is written into the
   input's vector fills and strokes as its own CMYK first (QDF, padded to the
   same length so offsets hold), and gs keeps it, its default CMYK profile
   being the output's. It then checks the result has no fonts, no
