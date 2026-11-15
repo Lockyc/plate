@@ -21,7 +21,8 @@ import (
 const usage = "pdf info <in.pdf>\n" +
 	"       plate pdf text [--pages N|N-M] <in.pdf>\n" +
 	"       plate pdf pages [--pages N|N-M] [--out DIR] [--dpi N] [--transparent] <in.pdf>\n" +
-	"       plate pdf images [--pages N|N-M] [--out DIR] <in.pdf>"
+	"       plate pdf images [--pages N|N-M] [--out DIR] <in.pdf>\n" +
+	"       plate " + extractUsage
 
 // maxDPI bounds --dpi. pdftoppm takes any -r in silence: 0 becomes its own
 // 150, and a huge value writes a 1x1 PNG and exits 0.
@@ -42,6 +43,8 @@ func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 			return pagesMain(ctx, args[1:], stdout, stderr)
 		case "images":
 			return imagesMain(ctx, args[1:], stdout, stderr)
+		case "extract":
+			return extractMain(ctx, args[1:], stdout, stderr)
 		}
 	}
 	fmt.Fprintf(stderr, "usage: plate %s\n", usage)

@@ -54,7 +54,7 @@ var commands = []command{
 	{"render", "HTML to PNG, JPEG, PDF or settled HTML with headless Chrome", render.Main, false},
 	{"build", "render every target in a manifest, skipping the unchanged ones", build.Main, false},
 	{"press", "PDF to a print master: outlined text, CMYK, checked against a soft proof", press.Main, false},
-	{"pdf", "inspect a PDF: info with a text-layer check, text, page renders, embedded images", pdf.Main, false},
+	{"pdf", "inspect a PDF: info with a text-layer check, text, page renders, embedded images; extract pages to their own PDF", pdf.Main, false},
 	{"impose", "an A5 flyer two up on an A4 sheet, one side or both, to print and cut", impose.Main, false},
 	{"marks", "a print shop's PDF: each page at its trim size, with bleed and crop marks", marks.Main, false},
 	{"doc", "markdown or HTML to a PDF with a document stylesheet", doc.Main, false},
