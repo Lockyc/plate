@@ -242,3 +242,14 @@ func TestParseTrim(t *testing.T) {
 		}
 	}
 }
+
+// A Google Docs export can repeat a key in a dictionary; qpdf reads it,
+// warns, and exits 3, which is a success.
+func TestMarksTakesAPDFQpdfWarnsAbout(t *testing.T) {
+	needEngines(t, "qpdf", "pdfinfo")
+	in := writePDF(t, "0 0 595 842", "/Dup 1 /Dup 2", "0 0 1 rg 0 0 595 842 re f")
+	out := marked(t, in)
+	if fi, err := os.Stat(out); err != nil || fi.Size() == 0 {
+		t.Fatalf("no output: %v", err)
+	}
+}

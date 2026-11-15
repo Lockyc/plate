@@ -67,7 +67,7 @@ func setup(t *testing.T) *env {
 	enginetest.Stub(t, "pdfinfo", pdfinfoStub)
 	enginetest.Stub(t, "pdffonts", `printf 'name type encoding emb sub uni object ID\n---- ---- ---- --- --- --- ---\n%s' "$FONTS"`)
 	enginetest.Stub(t, "pdfimages", `printf 'page num type width height color comp bpc enc interp object ID x-ppi y-ppi size ratio\n----\n   1   0 %s 1200 900 %s 4 8 image no 12 0 300 300 100K 2.5%%\n' "${IMG_TYPE:-image}" "${IMG_COLOR:-cmyk}"`)
-	enginetest.Stub(t, "qpdf", `printf '%s\n' "${QDF:-/DeviceCMYK k}" > "$4"`)
+	enginetest.Stub(t, "qpdf", `printf '%s\n' "${QDF:-/DeviceCMYK k}" > "$5"`)
 	for _, k := range []string{"GS_STDERR", "FONTS", "IMG_TYPE", "IMG_COLOR", "QDF", "OUT_SIZE", "PAGES", "PAGE_LINES"} {
 		t.Setenv(k, "")
 	}

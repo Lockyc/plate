@@ -25,7 +25,7 @@ func TestExtractPassesRangeAndRenames(t *testing.T) {
 		t.Errorf("out %q", b)
 	}
 	call := enginetest.Calls(t, log)[0]
-	if want := []string{in, "--pages", ".", "3-3", "--"}; !slices.Equal(call[:5], want) {
+	if want := []string{"--warning-exit-0", in, "--pages", ".", "3-3", "--"}; !slices.Equal(call[:6], want) {
 		t.Errorf("args %q, want %q then the temporary output", call, want)
 	}
 	if left, _ := filepath.Glob(filepath.Join(filepath.Dir(out), ".extract-*")); len(left) != 0 {

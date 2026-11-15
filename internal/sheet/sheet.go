@@ -114,7 +114,7 @@ func Write(ctx context.Context, in, out string, force bool, layout Layout) error
 	// --deterministic-id derives the /ID from the content, so one input
 	// writes the same bytes every run.
 	if _, err := engine.Run(ctx, engine.Cmd{Engine: "qpdf", Args: []string{
-		"--deterministic-id", "--object-streams=generate", "--update-from-json=" + patchFile, in, result,
+		"--warning-exit-0", "--deterministic-id", "--object-streams=generate", "--update-from-json=" + patchFile, in, result,
 	}, Inputs: []string{in, patchFile}, Outputs: []string{result}}); err != nil {
 		return err
 	}
@@ -139,7 +139,7 @@ type source struct {
 }
 
 func readSource(ctx context.Context, in string) (*source, error) {
-	res, err := engine.Run(ctx, engine.Cmd{Engine: "qpdf", Args: []string{"--json=2", "--json-key=pages", "--json-key=qpdf", "--json-stream-data=none", in, "-"}, Inputs: []string{in}})
+	res, err := engine.Run(ctx, engine.Cmd{Engine: "qpdf", Args: []string{"--warning-exit-0", "--json=2", "--json-key=pages", "--json-key=qpdf", "--json-stream-data=none", in, "-"}, Inputs: []string{in}})
 	if err != nil {
 		return nil, err
 	}
@@ -261,7 +261,7 @@ func (s *source) form(ctx context.Context, in, ref string, p pdf.Page) (any, err
 	var content bytes.Buffer
 	for _, r := range refs {
 		id := strings.Join(strings.Fields(strings.TrimSuffix(r, " R")), ",")
-		res, err := engine.Run(ctx, engine.Cmd{Engine: "qpdf", Args: []string{in, "--show-object=" + id, "--filtered-stream-data"}, Inputs: []string{in}})
+		res, err := engine.Run(ctx, engine.Cmd{Engine: "qpdf", Args: []string{"--warning-exit-0", in, "--show-object=" + id, "--filtered-stream-data"}, Inputs: []string{in}})
 		if err != nil {
 			return nil, err
 		}

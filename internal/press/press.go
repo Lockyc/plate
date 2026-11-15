@@ -273,7 +273,7 @@ func (j job) run(ctx context.Context) (err error) {
 		}
 		defer os.RemoveAll(tmp)
 		qdf := filepath.Join(tmp, "in.qdf.pdf")
-		if _, err := engine.Run(ctx, engine.Cmd{Engine: "qpdf", Args: []string{"--qdf", "--object-streams=disable", j.in, qdf}, Inputs: []string{j.in}, Outputs: []string{qdf}}); err != nil {
+		if _, err := engine.Run(ctx, engine.Cmd{Engine: "qpdf", Args: []string{"--warning-exit-0", "--qdf", "--object-streams=disable", j.in, qdf}, Inputs: []string{j.in}, Outputs: []string{qdf}}); err != nil {
 			return err
 		}
 		b, err := os.ReadFile(qdf)
@@ -396,7 +396,7 @@ func (j job) verify(ctx context.Context, src pdf.Info) error {
 	}
 	defer os.RemoveAll(tmp)
 	qdf := filepath.Join(tmp, "qdf.pdf")
-	if _, err := engine.Run(ctx, engine.Cmd{Engine: "qpdf", Args: []string{"--qdf", "--object-streams=disable", j.out, qdf}, Inputs: []string{j.out}, Outputs: []string{qdf}}); err != nil {
+	if _, err := engine.Run(ctx, engine.Cmd{Engine: "qpdf", Args: []string{"--warning-exit-0", "--qdf", "--object-streams=disable", j.out, qdf}, Inputs: []string{j.out}, Outputs: []string{qdf}}); err != nil {
 		return err
 	}
 	b, err := os.ReadFile(qdf)

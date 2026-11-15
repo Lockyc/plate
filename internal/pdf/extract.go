@@ -56,7 +56,7 @@ func Extract(ctx context.Context, in, out string, r pageRange, force bool) error
 	defer os.Remove(tmp.Name())
 	_, err = engine.Run(ctx, engine.Cmd{
 		Engine:  "qpdf",
-		Args:    []string{in, "--pages", ".", r.String(), "--", tmp.Name()},
+		Args:    []string{"--warning-exit-0", in, "--pages", ".", r.String(), "--", tmp.Name()},
 		Inputs:  []string{in},
 		Outputs: []string{tmp.Name()},
 	})
