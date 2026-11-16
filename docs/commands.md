@@ -41,6 +41,8 @@ creates pixels the source never had (see *Synthesis* at the end).
 | `clip check` | Validates a demo-clip script and prints it normalised, the form a runner reads | `plate clip check [--json] <clip.toml>` |
 | `clip render` | Turns a screen recording and its event log into a short looping clip: trimmed, framed by a fixed or following camera, with captions and touch, click, key or cursor overlays; MP4, WebM, poster, WebP or GIF, with a JSON of its measurements | `plate clip render --script clip.toml --master raw.mov --events events.jsonl --out DIR [--caption-css FILE]` |
 | `animate` | Captures a page's own animation frame by frame as a muted MP4, WebM, poster, WebP or GIF, with a JSON of its measurements, skipped when nothing changed | `plate animate --size WxH [--scale F] --duration S [--fps N] [--format mp4,webm,poster,webp,gif] [--loop none\|crossfade\|dip] [--budget-kb N] [--budget MS] --out DIR [--name N] [--fail-if TEXT]... [--force] <page.html\|http(s) or file URL>` |
+| `walkthrough check` | Validates a walkthrough script and prints it normalised | `plate walkthrough check [--json] <walk.toml>` |
+| `walkthrough render` | Records a scripted tour of a live web app in headless Chrome, narrated by each step's audio file and captioned: MP4, poster, and a JSON of its measurements and step timings | `plate walkthrough render --script walk.toml --base-url URL [--warmup PATH]... --out DIR` |
 | `fonts` | Embeds web fonts, from files or from Google Fonts by family name, into a CSS file so a page renders from the filesystem, optionally cut to the characters a language uses | `plate fonts [--display block] [--subset latin] [--google FAMILY:WEIGHT:STYLE]... -o fonts.css [FILE:FAMILY:WEIGHT:STYLE]...` |
 | `qr` | Makes a QR code SVG that any phone camera decodes | `plate qr [--ec L\|M\|Q\|H] [--fg RRGGBB] [--bg RRGGBB] -o out.svg <text>` |
 | `generate` ⚠ | Makes a round of attempts at a character pose from reference images through a hosted image model, each with a provenance record, and redraws the pose's contact sheet | `plate generate --pose DIR --prompt TEXT --ref IMG [--ref IMG]... [--provider P [--model ID]] [--n 4] [--size TIER] [--aspect W:H]` or `plate generate --list-models [--provider P]` |
@@ -256,6 +258,48 @@ a page where no frame differs from the first, and a last frame whose
 markup contains a `--fail-if` string. A refusal before Chrome starts
 leaves an earlier run's files in place; a capture that fails leaves none
 of its files for that name.
+
+## `walkthrough`
+
+`walkthrough render` drives a live web app in headless Chrome in real
+time, from a TOML script, and writes `<name>.mp4` (H.264 and AAC),
+`<name>.poster.png` and `<name>.json` into `--out`. It prints `wrote <path>
+(<bytes> bytes)` for each. `--base-url` is the app's address; a step's
+`url` resolves against it. Each `--warmup PATH` (repeatable, resolved
+against `--base-url`) is opened before recording and never shown, so the
+recording starts from a blank page in the session the warmup left, cookies
+included.
+
+`walkthrough check` validates a script and prints it normalised, with every
+default filled in; `--json` prints only the JSON. It reports every fault
+at once, led by its key path.
+
+A script is `version = 1`, a `name` (the output files' name), optional
+`width` (default 1440) and `height` (default 900), both even, and optional
+`fps` (default 30, 1 to 120), then one `[[step]]` table per step:
+
+| `action` | Needs | Does |
+|---|---|---|
+| `goto` | `url` | Opens the page |
+| `click` | `selector` | Glides the cursor to the element and clicks it |
+| `type` | `selector`, `text` | Clicks the element and types the text |
+| `press` | `key` | Presses a key (the keys `clip` accepts) |
+| `wait_for` | `selector` | Waits for the element |
+
+Any step may also carry `caption`, shown in a bar from the step's start
+until the next step's caption; `audio`, a file relative to the script, laid
+over the step; and `timeout_ms` (default 10000), how long its target may
+take to appear. A selector must match exactly one visible, uncovered
+element within the timeout, or the render fails naming the step.
+
+Each step starts where the one before ended and ends once its action has
+played, the network has gone quiet and the step has been held for its
+audio's length plus 0.4 s, at least 0.8 s. Its audio starts 0.3 s after the
+step does, so narration follows the picture it describes. The sidecar
+holds the video's size, frame rate, frame count and duration, each file's
+size, its sharpness, and every step's `start_ms` and `end_ms` on the
+video's clock. The poster is the last frame of the first step. A render
+that fails leaves none of its name's earlier outputs behind.
 
 ## `generate` — making a pose
 

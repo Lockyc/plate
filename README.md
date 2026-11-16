@@ -69,6 +69,7 @@ plate build site.manifest                                    # every target, ski
 | | `pdf info` / `text` / `pages` / `images` / `extract` / `duplex` | Look inside a PDF: metadata, text, pages as PNG, embedded images; pull pages out as their own PDF; pair fronts with their back for double-sided printing |
 | **Video** | `clip check` / `clip render` | A screen recording and its event log into a short looping demo clip |
 | | `animate` | A page's own animation captured frame by frame as MP4, WebM, WebP or GIF |
+| | `walkthrough check` / `walkthrough render` | A scripted tour of a live web app recorded in headless Chrome as a narrated, captioned MP4 |
 | **Generate** | `generate` ⚠ / `generate accept` | Rounds of attempts at a character pose from reference images through a hosted image model, each with provenance |
 | | `doctor` | Checks every engine against its pin and installs the ones plate manages |
 
@@ -82,7 +83,7 @@ can reach it.
 
 ## Limits
 
-- **macOS 14 or later on Apple Silicon** runs every command; `clip` and `animate` need ffmpeg at
+- **macOS 14 or later on Apple Silicon** runs every command; `clip`, `animate` and `walkthrough` need ffmpeg at
   its pinned minimum.
 - **Linux (glibc 2.28+, x86_64 or arm64)** runs every command except `cutout --coarse vision`,
   which needs Apple Vision; `cutout` uses `--coarse birefnet` there. On arm64, Chrome for
