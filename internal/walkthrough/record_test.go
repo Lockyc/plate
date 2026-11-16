@@ -1,9 +1,14 @@
 package walkthrough
 
 import (
+	"bytes"
 	"context"
+	"image/color"
+	"image/png"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -12,22 +17,32 @@ import (
 	"github.com/lockyc/plate/internal/engine"
 )
 
+// slowPage is how long the fixture app takes to answer /slow, past
+// settleCap, so the step after a click to it starts mid-navigation.
+const slowPage = settleCap + 700*time.Millisecond
+
 // app serves the fixture app, or skips when Chrome is not installed.
 func app(t *testing.T) string {
 	t.Helper()
 	if _, err := engine.Resolve("chrome-headless-shell"); err != nil {
 		t.Skip(err)
 	}
-	srv := httptest.NewServer(http.FileServer(http.Dir("testdata/app")))
+	files := http.FileServer(http.Dir("testdata/app"))
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/slow" {
+			time.Sleep(slowPage)
+			r.URL.Path = "/detail.html"
+		}
+		files.ServeHTTP(w, r)
+	}))
 	t.Cleanup(srv.Close)
 	return srv.URL
 }
 
-// script is a small-viewport script over steps, every default filled.
+// script is a small-viewport script over steps, its defaults left for
+// Record to fill.
 func script(steps ...Step) *Script {
-	s := &Script{Version: 1, Name: "test", Width: 640, Height: 400, Steps: steps}
-	s.fillDefaults()
-	return s
+	return &Script{Version: 1, Name: "test", Width: 640, Height: 400, Steps: steps}
 }
 
 func timeout(ms int) *int { return &ms }
@@ -107,18 +122,24 @@ func TestRecordLayersSurviveNavigation(t *testing.T) {
 }
 
 func TestRecordRefusesAmbiguousSelector(t *testing.T) {
-	s := script(Step{Action: "click", Selector: ".dup", TimeoutMS: timeout(500)})
-	_, err := record(t, s, []string{"/index.html"}, []time.Duration{0})
-	if err == nil || !strings.Contains(err.Error(), "step 1 (click .dup): ") || !strings.Contains(err.Error(), "2 elements") {
-		t.Fatalf("err = %v, want step 1 refused for matching 2 elements", err)
+	s := script(
+		Step{Action: "goto", URL: "/index.html"},
+		Step{Action: "click", Selector: ".dup", TimeoutMS: timeout(500)},
+	)
+	_, err := record(t, s, nil, []time.Duration{0, 0})
+	if err == nil || !strings.Contains(err.Error(), "step 2 (click .dup): 2 elements match") {
+		t.Fatalf("err = %v, want step 2 refused for matching 2 elements", err)
 	}
 }
 
 func TestRecordRefusesHiddenTarget(t *testing.T) {
-	s := script(Step{Action: "click", Selector: "#hidden", TimeoutMS: timeout(500)})
-	_, err := record(t, s, []string{"/index.html"}, []time.Duration{0})
-	if err == nil || !strings.Contains(err.Error(), "step 1 (click #hidden): ") || !strings.Contains(err.Error(), "hidden") {
-		t.Fatalf("err = %v, want step 1 refused for a hidden target", err)
+	s := script(
+		Step{Action: "goto", URL: "/index.html"},
+		Step{Action: "click", Selector: "#hidden", TimeoutMS: timeout(500)},
+	)
+	_, err := record(t, s, nil, []time.Duration{0, 0})
+	if err == nil || !strings.Contains(err.Error(), "step 2 (click #hidden): the element it matches is still hidden") {
+		t.Fatalf("err = %v, want step 2 refused for a hidden target", err)
 	}
 }
 
@@ -150,10 +171,118 @@ func TestRecordWarmupNotRecorded(t *testing.T) {
 	if len(rec.Frames) == 0 {
 		t.Fatal("no frames")
 	}
+	// login.html, the warmup, is the only page painted #ff00ff.
 	for _, f := range rec.Frames {
-		if f.MS < rec.Steps[0].StartMS {
-			t.Fatalf("frame %s at %.1f ms precedes step 1 at %.1f", f.File, f.MS, rec.Steps[0].StartMS)
+		if showsColour(t, filepath.Join(rec.FramesDir, f.File), color.RGBA{0xff, 0x00, 0xff, 0xff}) {
+			t.Fatalf("frame %s at %.1f ms shows the warmup page", f.File, f.MS)
 		}
+	}
+}
+
+// showsColour is whether any pixel on a 16 px grid of the PNG at path is c.
+func showsColour(t *testing.T, path string, c color.RGBA) bool {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	img, err := png.Decode(bytes.NewReader(b))
+	if err != nil {
+		t.Fatal(err)
+	}
+	bounds := img.Bounds()
+	for y := bounds.Min.Y; y < bounds.Max.Y; y += 16 {
+		for x := bounds.Min.X; x < bounds.Max.X; x += 16 {
+			if color.RGBAModel.Convert(img.At(x, y)) == c {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// The frames' clock (Chrome's) and the steps' clock (plate's) are one: a
+// step's caption change is drawn within moments of the step's start, and
+// no frame falls outside the steps.
+func TestRecordFramesShareStepsClock(t *testing.T) {
+	s := script(
+		Step{Action: "goto", URL: "/index.html", Caption: "The jobs list"},
+		Step{Action: "wait_for", Selector: "#first", Caption: "The first job"},
+	)
+	durations := []time.Duration{0, time.Second}
+	rec, err := record(t, s, nil, durations)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, last := rec.Steps[0], rec.Steps[len(rec.Steps)-1]
+	if len(rec.Frames) == 0 {
+		t.Fatal("no frames")
+	}
+	if f := rec.Frames[0]; f.MS < first.StartMS {
+		t.Errorf("first frame at %.1f ms precedes step 1 at %.1f", f.MS, first.StartMS)
+	}
+	if f := rec.Frames[len(rec.Frames)-1]; f.MS < last.StartMS || f.MS > last.EndMS {
+		t.Errorf("last frame at %.1f ms is outside the last step, %.1f-%.1f", f.MS, last.StartMS, last.EndMS)
+	}
+	drawn := false
+	for _, f := range rec.Frames {
+		if f.MS >= last.StartMS && f.MS <= last.StartMS+500 {
+			drawn = true
+		}
+	}
+	if !drawn {
+		t.Errorf("no frame within 500 ms of step 2's start at %.1f ms, when its caption was drawn", last.StartMS)
+	}
+	for i, sp := range rec.Steps {
+		want := max(durations[i]+audioPad, minHold)
+		if got := sp.EndMS - sp.StartMS; got > float64((want + 3*time.Second).Milliseconds()) {
+			t.Errorf("step %d lasts %.0f ms against a %d ms hold: the clocks disagree", i+1, got, want.Milliseconds())
+		}
+	}
+}
+
+func TestRecordRefusesCoveredTarget(t *testing.T) {
+	s := script(
+		Step{Action: "goto", URL: "/modal.html"},
+		Step{Action: "click", Selector: "#under", TimeoutMS: timeout(500)},
+	)
+	_, err := record(t, s, nil, []time.Duration{0, 0})
+	if err == nil || !strings.Contains(err.Error(), "step 2 (click #under): the element it matches is still covered") {
+		t.Fatalf("err = %v, want step 2 refused for a covered target", err)
+	}
+}
+
+func TestRecordSameDocumentGoto(t *testing.T) {
+	s := script(
+		Step{Action: "goto", URL: "/index.html"},
+		Step{Action: "goto", URL: "/index.html#first", TimeoutMS: timeout(1000)},
+	)
+	if _, err := record(t, s, nil, []time.Duration{0, 0}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A step that starts while the last one's navigation is still loading
+// captions the page that loads.
+func TestRecordStepDuringSlowNavigation(t *testing.T) {
+	s := script(
+		Step{Action: "goto", URL: "/index.html"},
+		Step{Action: "click", Selector: "#slow"},
+		Step{Action: "wait_for", Selector: "#title", Caption: "The slow job"},
+	)
+	var caption string
+	afterStep = func(ctx context.Context, r *recorder, i int) error {
+		if i != 2 {
+			return nil
+		}
+		return r.eval(ctx, `document.querySelector("[data-plate-caption]").textContent`, &caption)
+	}
+	t.Cleanup(func() { afterStep = nil })
+	if _, err := record(t, s, nil, []time.Duration{0, 0, 0}); err != nil {
+		t.Fatal(err)
+	}
+	if caption != "The slow job" {
+		t.Errorf("caption = %q, want %q", caption, "The slow job")
 	}
 }
 

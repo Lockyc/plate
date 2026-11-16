@@ -74,7 +74,10 @@
 
     // find reports how many of the page's elements match sel (the layers'
     // own never count) and, for exactly one that is visible, scrolls it to
-    // the viewport's centre and returns its centre.
+    // the viewport's centre and returns its centre. A target whose centre
+    // another element covers (a modal over it) is not visible: a click
+    // there would land on the cover. The layers take no pointer events, so
+    // they never cover anything.
     find(sel) {
       const all = [...document.querySelectorAll(sel)].filter(
         (el) => !el.closest("[data-plate-cursor], [data-plate-caption]"),
@@ -88,7 +91,11 @@
       if (!visible) return { count: 1, visible: false };
       el.scrollIntoView({ block: "center", inline: "center", behavior: "instant" });
       const r = el.getBoundingClientRect();
-      return { count: 1, visible: true, x: r.left + r.width / 2, y: r.top + r.height / 2 };
+      const x = r.left + r.width / 2;
+      const y = r.top + r.height / 2;
+      const hit = document.elementFromPoint(x, y);
+      if (!hit || !el.contains(hit)) return { count: 1, visible: false, covered: true };
+      return { count: 1, visible: true, x, y };
     },
   };
 })();

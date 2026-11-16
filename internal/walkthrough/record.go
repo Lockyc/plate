@@ -12,6 +12,8 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -67,12 +69,18 @@ var afterStep func(ctx context.Context, r *recorder, i int) error
 // Record plays s against the app at baseURL in headless Chrome, in real
 // time, and writes every frame Chrome draws to dir. It first opens each of
 // warmup (resolved against baseURL), which is never recorded; the session it
-// leaves, cookies and all, is the one recorded. durations[i] is step i's
-// audio length, 0 when it has none.
+// leaves, cookies and all, is the one recorded, starting from a blank page.
+// durations[i] is step i's audio length, 0 when it has none. Omitted script
+// keys take their defaults; script itself is left as it is.
 //
-// A step whose target does not match exactly one visible element within
-// its timeout_ms ends the recording with an error naming the step.
-func Record(ctx context.Context, s *Script, baseURL string, warmup []string, durations []time.Duration, dir string) (_ *Recording, err error) {
+// A step whose target does not match exactly one visible, uncovered element
+// within its timeout_ms ends the recording with an error naming the step.
+// The recording ends with the last step's hold: no frame is stamped later.
+func Record(ctx context.Context, script *Script, baseURL string, warmup []string, durations []time.Duration, dir string) (_ *Recording, err error) {
+	sc := *script
+	sc.Steps = slices.Clone(script.Steps)
+	sc.fillDefaults()
+	s := &sc
 	if len(durations) != len(s.Steps) {
 		return nil, fmt.Errorf("%d durations for %d steps", len(durations), len(s.Steps))
 	}
@@ -106,6 +114,12 @@ func Record(ctx context.Context, s *Script, baseURL string, warmup []string, dur
 			return nil, fmt.Errorf("warmup %s: %w", u, err)
 		}
 	}
+	if len(warmup) > 0 {
+		// The warmup's landing page is not the recording's to show.
+		if err := r.navigate(ctx, "about:blank", time.Duration(DefaultTimeoutMS)*time.Millisecond); err != nil {
+			return nil, err
+		}
+	}
 	t0, err := r.startScreencast(ctx)
 	if err != nil {
 		return nil, err
@@ -132,8 +146,15 @@ func Record(ctx context.Context, s *Script, baseURL string, warmup []string, dur
 		}
 		start = end
 	}
-	if rec.Frames, err = r.stopScreencast(ctx); err != nil {
+	frames, err := r.stopScreencast(ctx)
+	if err != nil {
 		return nil, err
+	}
+	last := rec.Steps[len(rec.Steps)-1].EndMS
+	for _, f := range frames {
+		if f.MS <= last {
+			rec.Frames = append(rec.Frames, f)
+		}
 	}
 	return rec, nil
 }
@@ -239,7 +260,12 @@ func (r *recorder) setState(ctx context.Context, st pageState) error {
 	}
 	src := "window.__plateState = " + string(b) + ";"
 	if r.stateID != "" {
-		if err := r.call(ctx, "Page.removeScriptToEvaluateOnNewDocument", map[string]any{"identifier": r.stateID}, nil); err != nil {
+		// A navigation can drop the script before this removes it. A state
+		// script left behind is harmless either way: the one added below
+		// runs after it.
+		err := r.call(ctx, "Page.removeScriptToEvaluateOnNewDocument", map[string]any{"identifier": r.stateID}, nil)
+		var cerr *cdp.Error
+		if err != nil && !(errors.As(err, &cerr) && strings.Contains(cerr.Message, "not found")) {
 			return err
 		}
 	}
@@ -250,11 +276,25 @@ func (r *recorder) setState(ctx context.Context, st pageState) error {
 		return err
 	}
 	r.stateID, r.state = added.Identifier, st
-	return r.eval(ctx, src+" window.__plate && __plate.caption(__plateState.caption);", nil)
+	// A document mid-navigation has no context to evaluate in, and the
+	// document replacing it starts from the script above; so an eval that
+	// fails is retried until the next document can take it.
+	expr := src + " window.__plate && __plate.caption(__plateState.caption);"
+	deadline := time.Now().Add(time.Duration(DefaultTimeoutMS) * time.Millisecond)
+	for {
+		err := r.eval(ctx, expr, nil)
+		if err == nil || ctx.Err() != nil || time.Now().After(deadline) {
+			return err
+		}
+		if err := sleepUntil(ctx, time.Now().Add(pollTime)); err != nil {
+			return err
+		}
+	}
 }
 
 // navigate loads u, resolved against the base URL, and waits up to limit
-// for its load event.
+// for its load event. A same-document navigation (a new fragment) loads
+// nothing, so it has no load event to wait for.
 func (r *recorder) navigate(ctx context.Context, u string, limit time.Duration) error {
 	ref, err := url.Parse(u)
 	if err != nil {
@@ -263,6 +303,7 @@ func (r *recorder) navigate(ctx context.Context, u string, limit time.Duration) 
 	target := r.base.ResolveReference(ref).String()
 	loaded := r.conn.Expect(r.session, "Page.loadEventFired")
 	var nav struct {
+		LoaderID  string `json:"loaderId"`
 		ErrorText string `json:"errorText"`
 	}
 	if err := r.call(ctx, "Page.navigate", map[string]any{"url": target}, &nav); err != nil {
@@ -270,6 +311,9 @@ func (r *recorder) navigate(ctx context.Context, u string, limit time.Duration) 
 	}
 	if nav.ErrorText != "" {
 		return fmt.Errorf("%s: %s", target, nav.ErrorText)
+	}
+	if nav.LoaderID == "" {
+		return nil
 	}
 	wctx, cancel := context.WithTimeout(ctx, limit)
 	defer cancel()
@@ -324,7 +368,8 @@ func (r *recorder) step(ctx context.Context, st Step) error {
 	return r.settle(ctx, time.Now())
 }
 
-// find waits up to limit for sel to match exactly one visible element, and
+// find waits up to limit for sel to match exactly one visible, uncovered
+// element, and
 // returns its centre in CSS px once it is scrolled into view.
 func (r *recorder) find(ctx context.Context, sel string, limit time.Duration) (float64, float64, error) {
 	q, err := json.Marshal(sel)
@@ -336,6 +381,7 @@ func (r *recorder) find(ctx context.Context, sel string, limit time.Duration) (f
 		var f struct {
 			Count   int     `json:"count"`
 			Visible bool    `json:"visible"`
+			Covered bool    `json:"covered"`
 			X       float64 `json:"x"`
 			Y       float64 `json:"y"`
 		}
@@ -357,6 +403,8 @@ func (r *recorder) find(ctx context.Context, sel string, limit time.Duration) (f
 				return 0, 0, fmt.Errorf("no element matches within %d ms", ms)
 			case f.Count > 1:
 				return 0, 0, fmt.Errorf("%d elements match after %d ms; a target must match exactly one", f.Count, ms)
+			case f.Covered:
+				return 0, 0, fmt.Errorf("the element it matches is still covered by another element after %d ms", ms)
 			default:
 				return 0, 0, fmt.Errorf("the element it matches is still hidden after %d ms", ms)
 			}
