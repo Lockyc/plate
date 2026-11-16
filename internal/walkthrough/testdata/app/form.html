@@ -1,0 +1,21 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>New job</title>
+<style>body{margin:0;font:16px sans-serif;background:#fff}</style></head>
+<body>
+<h1>New job</h1>
+<form id="f">
+  <input id="name" autocomplete="off">
+  <button type="submit">Save</button>
+</form>
+<p id="saved" hidden></p>
+<script>
+document.getElementById("f").addEventListener("submit", e => {
+  e.preventDefault();
+  const out = document.getElementById("saved");
+  out.textContent = "Saved " + document.getElementById("name").value;
+  out.hidden = false;
+});
+</script>
+</body>
+</html>
