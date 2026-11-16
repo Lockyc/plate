@@ -1,0 +1,16 @@
+version = 1
+name    = "sample"
+
+[[step]]
+action  = "goto"
+url     = "/login"
+caption = "Open the login page"
+
+[[step]]
+action   = "type"
+selector = "#email"
+text     = "me@example.com"
+
+[[step]]
+action   = "press"
+key      = "return"

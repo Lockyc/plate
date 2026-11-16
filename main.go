@@ -36,6 +36,7 @@ import (
 	"github.com/lockyc/plate/internal/shrink"
 	"github.com/lockyc/plate/internal/slides"
 	"github.com/lockyc/plate/internal/upscale"
+	"github.com/lockyc/plate/internal/walkthrough"
 )
 
 type command struct {
@@ -63,6 +64,7 @@ var commands = []command{
 	{"icon", "a macOS .icns and PNGs from an edge-to-edge tile, in Apple's icon grid", icon.Main, false},
 	{"diff", "compare two images after lining them up vertically", diff.Main, false},
 	{"clip", "check a demo-clip script; render a recording into a looping clip", clip.Main, false},
+	{"walkthrough", "check a walkthrough script; record a narrated walkthrough of a web app", walkthrough.Main, false},
 	{"animate", "capture a page's animation as a muted MP4, WebM, poster, WebP or GIF", animate.Main, false},
 	{"fonts", "embed web fonts into a CSS file as data: URIs", fonts.Main, false},
 	{"qr", "a QR code SVG, dark on light, quiet zone included", qr.Main, false},
