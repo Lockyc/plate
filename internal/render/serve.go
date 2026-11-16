@@ -97,7 +97,7 @@ type content struct {
 // nothing local.
 func loadPage(ctx context.Context, u, local, query string, do func(context.Context, Load) ([]FileHash, error)) (loadSet, []FileHash, error) {
 	if local == "" {
-		hashes, err := do(ctx, Load{URL: u, ChromeArgs: baseArgs("")})
+		hashes, err := do(ctx, Remote(u))
 		return loadSet{}, hashes, err
 	}
 	srv, err := serve()
@@ -108,6 +108,10 @@ func loadPage(ctx context.Context, u, local, query string, do func(context.Conte
 	hashes, err := do(ctx, Load{URL: srv.url(local, query), ChromeArgs: baseArgs(srv.proxyFlag())})
 	return srv.loads(), hashes, err
 }
+
+// Remote is how Chrome loads a remote page: directly, with no proxy and no
+// record of what it loads.
+func Remote(u string) Load { return Load{URL: u, ChromeArgs: baseArgs("")} }
 
 // serve starts the proxy on an ephemeral loopback port, under a fresh host.
 func serve() (*server, error) {

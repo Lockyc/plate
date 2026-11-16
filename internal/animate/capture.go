@@ -8,7 +8,6 @@ import (
 	_ "embed"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"image/png"
 	"os"
@@ -98,7 +97,7 @@ func Open(ctx context.Context, l render.Load, w, h int, scale float64, budget, s
 // noteThrown runs on the reader goroutine for each uncaught exception.
 func (c *Capture) noteThrown(p json.RawMessage) {
 	var ev struct {
-		ExceptionDetails exceptionDetails `json:"exceptionDetails"`
+		ExceptionDetails cdp.ExceptionDetails `json:"exceptionDetails"`
 	}
 	if json.Unmarshal(p, &ev) != nil {
 		return
@@ -106,27 +105,6 @@ func (c *Capture) noteThrown(p json.RawMessage) {
 	c.mu.Lock()
 	c.thrown = append(c.thrown, ev.ExceptionDetails.String())
 	c.mu.Unlock()
-}
-
-type exceptionDetails struct {
-	Text      string `json:"text"`
-	URL       string `json:"url"`
-	Line      int    `json:"lineNumber"`
-	Exception *struct {
-		Description string `json:"description"`
-	} `json:"exception"`
-}
-
-// String is the exception's first line, and where it was thrown.
-func (d exceptionDetails) String() string {
-	msg := d.Text
-	if d.Exception != nil && d.Exception.Description != "" {
-		msg, _, _ = strings.Cut(d.Exception.Description, "\n")
-	}
-	if d.URL != "" {
-		msg += fmt.Sprintf(" (%s:%d)", d.URL, d.Line+1)
-	}
-	return msg
 }
 
 // Seek moves the page's clock to ms and returns once every video shows its
@@ -212,29 +190,7 @@ func (c *Capture) Frame(ctx context.Context, path string) error {
 // Eval evaluates expr in the page, awaiting a promise, and decodes its value
 // into out when out is not nil. A thrown exception is an error.
 func (c *Capture) Eval(ctx context.Context, expr string, out any) error {
-	var r struct {
-		Result struct {
-			Value json.RawMessage `json:"value"`
-		} `json:"result"`
-		ExceptionDetails *exceptionDetails `json:"exceptionDetails"`
-	}
-	params := map[string]any{"expression": expr, "awaitPromise": true, "returnByValue": true}
-	if err := c.conn.Call(ctx, c.session, "Runtime.evaluate", params, &r); err != nil {
-		return err
-	}
-	if r.ExceptionDetails != nil {
-		return fmt.Errorf("%s: %s", expr, r.ExceptionDetails)
-	}
-	if out == nil {
-		return nil
-	}
-	if len(r.Result.Value) == 0 {
-		return errors.New(expr + ": no value")
-	}
-	if err := json.Unmarshal(r.Result.Value, out); err != nil {
-		return fmt.Errorf("%s: %w", expr, err)
-	}
-	return nil
+	return c.conn.Eval(ctx, c.session, expr, out)
 }
 
 // Close ends the page and Chrome.

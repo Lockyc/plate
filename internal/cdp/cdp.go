@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -251,6 +252,56 @@ func (c *Conn) Subscribe(session, method string, fn func(json.RawMessage)) {
 	c.mu.Lock()
 	c.subs[k] = append(c.subs[k], fn)
 	c.mu.Unlock()
+}
+
+// ExceptionDetails is Runtime's account of a thrown exception.
+type ExceptionDetails struct {
+	Text      string `json:"text"`
+	URL       string `json:"url"`
+	Line      int    `json:"lineNumber"`
+	Exception *struct {
+		Description string `json:"description"`
+	} `json:"exception"`
+}
+
+// String is the exception's first line, and where it was thrown.
+func (d ExceptionDetails) String() string {
+	msg := d.Text
+	if d.Exception != nil && d.Exception.Description != "" {
+		msg, _, _ = strings.Cut(d.Exception.Description, "\n")
+	}
+	if d.URL != "" {
+		msg += fmt.Sprintf(" (%s:%d)", d.URL, d.Line+1)
+	}
+	return msg
+}
+
+// Eval evaluates expr in session's page, awaiting a promise, and decodes its
+// value into out when out is not nil. A thrown exception is an error.
+func (c *Conn) Eval(ctx context.Context, session, expr string, out any) error {
+	var r struct {
+		Result struct {
+			Value json.RawMessage `json:"value"`
+		} `json:"result"`
+		ExceptionDetails *ExceptionDetails `json:"exceptionDetails"`
+	}
+	params := map[string]any{"expression": expr, "awaitPromise": true, "returnByValue": true}
+	if err := c.Call(ctx, session, "Runtime.evaluate", params, &r); err != nil {
+		return err
+	}
+	if r.ExceptionDetails != nil {
+		return fmt.Errorf("%s: %s", expr, r.ExceptionDetails)
+	}
+	if out == nil {
+		return nil
+	}
+	if len(r.Result.Value) == 0 {
+		return errors.New(expr + ": no value")
+	}
+	if err := json.Unmarshal(r.Result.Value, out); err != nil {
+		return fmt.Errorf("%s: %w", expr, err)
+	}
+	return nil
 }
 
 // OpenPage creates a blank page target and attaches to it, returning its
