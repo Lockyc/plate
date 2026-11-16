@@ -302,9 +302,15 @@ func (j job) run(ctx context.Context) (err error) {
 	// re-encode JPEG; every image flag below undoes one of those.
 	// --permit-file-read: -dSAFER otherwise refuses the profile and reports
 	// it only after writing a plausible file.
+	// -dCompatibilityLevel=1.3 flattens transparency, painting each
+	// transparent area as a CMYK image at -r: left live, a soft-masked
+	// tiling pattern (Chrome's CSS gradient with a transparent stop) comes
+	// out with an XStep wider than its BBox, which macOS draws as seams and
+	// a second tile, and a print RIP may too.
 	args := []string{"-q", "-dBATCH", "-dNOPAUSE", "-dSAFER",
 		"--permit-file-read=" + j.icc,
 		"-sDEVICE=pdfwrite", "-dNoOutputFonts",
+		"-dCompatibilityLevel=1.3", "-r" + ppi,
 		"-sColorConversionStrategy=CMYK", "-sOutputICCProfile=" + j.icc,
 		"-dRenderIntent=1", "-dBlackPtComp=1",
 		"-dFIXEDMEDIA", "-dDEVICEWIDTHPOINTS=" + pt(src.W), "-dDEVICEHEIGHTPOINTS=" + pt(src.H),
