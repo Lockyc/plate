@@ -42,12 +42,11 @@ func renderMain(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	}
 	for _, f := range []struct{ name, v string }{{"script", o.Script}, {"base-url", o.BaseURL}, {"out", o.Out}} {
 		if f.v == "" {
-			fs.Usage()
 			return cli.Usage(stderr, "walkthrough render", "--%s is required", f.name)
 		}
 	}
 	o.Warmup = warmup
-	m, err := Render(ctx, o, stderr)
+	m, err := Render(ctx, o)
 	if err != nil {
 		return cli.Fail(stderr, "walkthrough render", err)
 	}

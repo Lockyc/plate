@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"math"
 	"os"
 	"path/filepath"
@@ -40,18 +39,20 @@ type RenderOptions struct {
 }
 
 // Render records the script against the app at o.BaseURL and writes its
-// narrated MP4 (H.264 and AAC), its poster and its sidecar to o.Out. A
-// script or audio file that fails its checks leaves an earlier run's
-// outputs alone; once they pass, those outputs are removed so a failed
-// recording leaves none that look current. The new outputs are published
-// only once every check has passed. Warnings are written to warn.
-func Render(ctx context.Context, o RenderOptions, warn io.Writer) (Measurement, error) {
+// narrated MP4 (H.264 and AAC), its poster and its sidecar to o.Out. Once
+// the script loads, an earlier run's outputs of its name are removed, so
+// any later failure leaves none that look current. The new outputs are
+// published only once every check has passed.
+func Render(ctx context.Context, o RenderOptions) (Measurement, error) {
 	s, err := Load(o.Script)
 	if err != nil {
 		return Measurement{}, err
 	}
 	out, _, err := outdir.Make(o.Out, "plate-walkthrough-")
 	if err != nil {
+		return Measurement{}, err
+	}
+	if err := video.RemoveOutputs(out, s.Name); err != nil {
 		return Measurement{}, err
 	}
 	if err := video.RequireEncoders(ctx, formats); err != nil {
@@ -69,9 +70,6 @@ func Render(ctx context.Context, o RenderOptions, warn io.Writer) (Measurement, 
 			return Measurement{}, fmt.Errorf("step %d audio: %w", i+1, err)
 		}
 		clips = append(clips, p)
-	}
-	if err := video.RemoveOutputs(out, s.Name); err != nil {
-		return Measurement{}, err
 	}
 
 	tmp, err := os.MkdirTemp(out, "."+s.Name+"-")
@@ -128,9 +126,6 @@ func Render(ctx context.Context, o RenderOptions, warn io.Writer) (Measurement, 
 			return Measurement{}, err
 		}
 		meas.Formats[f] = video.FormatResult{File: name, Bytes: st.Size()}
-	}
-	if meas.LoopSeam, err = video.LoopSeam(refs); err != nil {
-		return Measurement{}, err
 	}
 	// The checks read the silent encode: Check holds the mp4 to one video
 	// stream and its frame count, and the audio is muxed in after.

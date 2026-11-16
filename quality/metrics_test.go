@@ -7,6 +7,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/lockyc/plate/internal/raster"
@@ -337,8 +338,12 @@ func TestStepDriftMetric(t *testing.T) {
 	if v, err := Metrics["step-drift"](Params{"a": a, "b": b}); err != nil || math.Abs(v-1.8) > 1e-9 {
 		t.Errorf("step-drift = %v, %v; want 1.8", v, err)
 	}
-	if v, err := Metrics["step-drift"](Params{"a": a, "b": short}); err == nil {
-		t.Errorf("step-drift over unequal steps = %v, want an error", v)
+	if v, err := Metrics["step-drift"](Params{"a": a, "b": short}); err == nil || !strings.Contains(err.Error(), "same steps") {
+		t.Errorf("step-drift over unequal steps = %v, %v; want a steps error", v, err)
+	}
+	nofps := write("d.json", `{"steps":[{"start_ms":0,"end_ms":1400},{"start_ms":1400,"end_ms":2800}]}`)
+	if v, err := Metrics["step-drift"](Params{"a": nofps, "b": a}); err == nil || !strings.Contains(err.Error(), "no fps") {
+		t.Errorf("step-drift without fps = %v, %v; want an fps error", v, err)
 	}
 }
 

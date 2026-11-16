@@ -533,7 +533,10 @@ func stepDrift(p Params) (float64, error) {
 			return 0, fmt.Errorf("%s: %w", path, err)
 		}
 	}
-	if len(s[0].Steps) == 0 || len(s[0].Steps) != len(s[1].Steps) || s[0].FPS <= 0 {
+	if s[0].FPS <= 0 {
+		return 0, fmt.Errorf("step-drift: sidecar a has no fps")
+	}
+	if len(s[0].Steps) == 0 || len(s[0].Steps) != len(s[1].Steps) {
 		return 0, fmt.Errorf("step-drift: want two sidecars with the same steps, got %d and %d", len(s[0].Steps), len(s[1].Steps))
 	}
 	var worst float64

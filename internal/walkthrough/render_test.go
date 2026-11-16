@@ -38,7 +38,7 @@ func renderFixture(t *testing.T, body string) (Measurement, string, error) {
 	out := filepath.Join(dir, "out")
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
-	m, err := Render(ctx, RenderOptions{Script: script, BaseURL: base, Out: out}, os.Stderr)
+	m, err := Render(ctx, RenderOptions{Script: script, BaseURL: base, Out: out})
 	return m, out, err
 }
 
@@ -159,36 +159,62 @@ caption = "The jobs list"
 	}
 }
 
-func TestRenderFailureLeavesNoOutputs(t *testing.T) {
+// staleRun writes walk.toml (body after its header) into a temp dir, and an
+// earlier run's walk outputs into its out dir, which it returns with the
+// script's path.
+func staleRun(t *testing.T, body string) (script, out string) {
+	t.Helper()
 	if _, err := engine.Resolve("ffmpeg"); err != nil {
 		t.Skip(err)
 	}
 	dir := t.TempDir()
-	out := filepath.Join(dir, "out")
+	out = filepath.Join(dir, "out")
 	if err := os.MkdirAll(out, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	// An earlier run's outputs must not survive to look current.
-	for _, n := range []string{"walk.mp4", "walk.json"} {
+	for _, n := range []string{"walk.mp4", "walk.poster.png", "walk.json"} {
 		if err := os.WriteFile(filepath.Join(out, n), []byte("stale"), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
-	script := filepath.Join(dir, "walk.toml")
-	body := "version = 1\nname = \"walk\"\nwidth = 640\nheight = 400\n\n" +
-		"[[step]]\naction = \"goto\"\nurl = \"/index.html\"\n\n" +
-		"[[step]]\naction = \"wait_for\"\nselector = \"#nope\"\ntimeout_ms = 500\n"
-	if err := os.WriteFile(script, []byte(body), 0o644); err != nil {
+	script = filepath.Join(dir, "walk.toml")
+	head := "version = 1\nname = \"walk\"\nwidth = 640\nheight = 400\n\n"
+	if err := os.WriteFile(script, []byte(head+body), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, err := Render(context.Background(), RenderOptions{Script: script, BaseURL: app(t), Out: out}, os.Stderr)
-	if err == nil || !strings.Contains(err.Error(), "step 2 (wait_for #nope)") {
-		t.Fatalf("err = %v, want step 2 refused", err)
-	}
+	return script, out
+}
+
+// An earlier run's outputs must not survive a failed render to look current.
+func assertEmpty(t *testing.T, out string) {
+	t.Helper()
 	entries, _ := os.ReadDir(out)
 	for _, e := range entries {
 		t.Errorf("%s left in --out after a failed render", e.Name())
 	}
+}
+
+func TestRenderFailureLeavesNoOutputs(t *testing.T) {
+	script, out := staleRun(t, "[[step]]\naction = \"goto\"\nurl = \"/index.html\"\n\n"+
+		"[[step]]\naction = \"wait_for\"\nselector = \"#nope\"\ntimeout_ms = 500\n")
+	_, err := Render(context.Background(), RenderOptions{Script: script, BaseURL: app(t), Out: out})
+	if err == nil || !strings.Contains(err.Error(), "step 2 (wait_for #nope)") {
+		t.Fatalf("err = %v, want step 2 refused", err)
+	}
+	assertEmpty(t, out)
+}
+
+func TestRenderUnprobeableAudioLeavesNoOutputs(t *testing.T) {
+	script, out := staleRun(t, "[[step]]\naction = \"goto\"\nurl = \"/index.html\"\naudio = \"noise.wav\"\n")
+	if err := os.WriteFile(filepath.Join(filepath.Dir(script), "noise.wav"), []byte("not audio"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Probing fails before Chrome starts, so no app is needed.
+	_, err := Render(context.Background(), RenderOptions{Script: script, BaseURL: "http://127.0.0.1:1", Out: out})
+	if err == nil || !strings.Contains(err.Error(), "step 1 audio") {
+		t.Fatalf("err = %v, want step 1's audio refused", err)
+	}
+	assertEmpty(t, out)
 }
 
 func TestResampleHoldsLatestFrame(t *testing.T) {

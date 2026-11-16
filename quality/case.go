@@ -8,6 +8,7 @@ package quality
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -158,7 +159,7 @@ func (e Env) step(ctx context.Context, step []string) error {
 
 // RunCase writes the case's files, runs setup, run and post, and checks the
 // exit status, stderr, stdout and absent files. The metric is the caller's.
-func (e Env) RunCase(ctx context.Context, c Case) error {
+func (e Env) RunCase(ctx context.Context, c Case) (err error) {
 	for name, body := range c.Files {
 		if err := os.WriteFile(filepath.Join(e.Tmp, name), []byte(body), 0o644); err != nil {
 			return err
@@ -170,8 +171,16 @@ func (e Env) RunCase(ctx context.Context, c Case) error {
 			return err
 		}
 		srv := &http.Server{Handler: http.FileServer(http.Dir(e.Tmp))}
-		go srv.Serve(ln)
-		defer srv.Close()
+		served := make(chan error, 1)
+		go func() { served <- srv.Serve(ln) }()
+		// A server that stopped on its own fails the case, unless it
+		// already failed for another reason.
+		defer func() {
+			srv.Close()
+			if serr := <-served; !errors.Is(serr, http.ErrServerClosed) && err == nil {
+				err = fmt.Errorf("serving the case directory: %w", serr)
+			}
+		}()
 		e.URL = "http://" + ln.Addr().String()
 	}
 	for _, s := range c.Setup {
@@ -183,7 +192,7 @@ func (e Env) RunCase(ctx context.Context, c Case) error {
 	cmd.Dir = e.Tmp
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	err := cmd.Run()
+	err = cmd.Run()
 	code := 0
 	if ee, ok := err.(*exec.ExitError); ok {
 		code = ee.ExitCode()
