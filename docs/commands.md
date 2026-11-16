@@ -286,8 +286,8 @@ A script is `version = 1`, a `name` (the output files' name), optional
 | `press` | `key` | Presses a key (the keys `clip` accepts) |
 | `wait_for` | `selector` | Waits for the element |
 
-Any step may also carry `caption`, shown in a bar from the step's start
-until the next step's caption; `audio`, a file relative to the script, laid
+Any step may also carry `caption`, shown in a bar for the step (a step
+without one clears the bar); `audio`, a file relative to the script, laid
 over the step; and `timeout_ms` (default 10000), how long its target may
 take to appear. A selector must match exactly one visible, uncovered
 element within the timeout, or the render fails naming the step.
