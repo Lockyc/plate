@@ -505,6 +505,46 @@ func jsonField(p Params) (float64, error) {
 }
 
 func init() {
+	Metrics["step-drift"] = stepDrift
+}
+
+// stepDrift is the furthest any step's start or end in walkthrough sidecar
+// a lies from the same step's in sidecar b, in frames at a's fps: how far
+// two recordings of one script disagree on its timing.
+func stepDrift(p Params) (float64, error) {
+	type sidecar struct {
+		FPS   int `json:"fps"`
+		Steps []struct {
+			StartMS float64 `json:"start_ms"`
+			EndMS   float64 `json:"end_ms"`
+		} `json:"steps"`
+	}
+	var s [2]sidecar
+	for i, k := range []string{"a", "b"} {
+		path, err := p.Path(k)
+		if err != nil {
+			return 0, err
+		}
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return 0, err
+		}
+		if err := json.Unmarshal(b, &s[i]); err != nil {
+			return 0, fmt.Errorf("%s: %w", path, err)
+		}
+	}
+	if len(s[0].Steps) == 0 || len(s[0].Steps) != len(s[1].Steps) || s[0].FPS <= 0 {
+		return 0, fmt.Errorf("step-drift: want two sidecars with the same steps, got %d and %d", len(s[0].Steps), len(s[1].Steps))
+	}
+	var worst float64
+	for i, a := range s[0].Steps {
+		b := s[1].Steps[i]
+		worst = math.Max(worst, math.Max(math.Abs(a.StartMS-b.StartMS), math.Abs(a.EndMS-b.EndMS)))
+	}
+	return worst * float64(s[0].FPS) / 1000, nil
+}
+
+func init() {
 	Metrics["frame-code"] = frameCode
 }
 

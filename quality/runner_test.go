@@ -47,9 +47,21 @@ esac`)}
 	}
 }
 
+func TestRunCaseServes(t *testing.T) {
+	tmp := t.TempDir()
+	env := Env{Assets: "/assets", Tmp: tmp, Plate: fakePlate(t, `printf %s "$1" > "$2"`)}
+	c := Case{Name: "s", Serve: true, Run: []string{"{url}/page.html", "{tmp:url.txt}"}}
+	if err := env.RunCase(context.Background(), c); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(tmp, "url.txt")); !strings.HasPrefix(string(b), "http://127.0.0.1:") || !strings.HasSuffix(string(b), "/page.html") {
+		t.Errorf("{url} expanded to %q", b)
+	}
+}
+
 func TestExpand(t *testing.T) {
-	env := Env{Assets: "/a", Tmp: "/t", Plate: "/bin/plate"}
-	if got := env.Expand("{asset:p.jpg}:{tmp:o.png}"); got != "/a/p.jpg:/t/o.png" {
+	env := Env{Assets: "/a", Tmp: "/t", Plate: "/bin/plate", URL: "http://h"}
+	if got := env.Expand("{asset:p.jpg}:{tmp:o.png}:{url}/x"); got != "/a/p.jpg:/t/o.png:http://h/x" {
 		t.Errorf("Expand = %q", got)
 	}
 	p := env.ExpandParams(Params{"a": "{tmp:x.png}", "list": []any{"{asset:y}"}, "n": 3.0})

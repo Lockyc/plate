@@ -1914,3 +1914,88 @@ absent = ["{tmp:out/still.mp4}", "{tmp:out/still.poster.png}", "{tmp:out/still.j
 <meta charset="utf-8">
 <body style="margin:0;background:#224"><h1 style="color:#fff">Still</h1></body>
 '''
+
+# walkthrough: a fixture app served from the case directory, a 1 s tone on
+# each step so every step's hold (the tone plus its pad) outlasts its action.
+# The script is recorded twice, in setup and in run; the roadmap gate holds
+# the two recordings' step spans equal within a frame.
+
+[[case]]
+name   = "walkthrough-fixture"
+why    = "a walkthrough is recorded in real time, so two recordings of one script must keep the same step timings or narration drifts off its step"
+serve  = true
+setup  = [
+  ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-f", "lavfi", "-i", "sine=frequency=440:duration=1", "{tmp:tone.wav}"],
+  ["plate", "walkthrough", "render", "--script", "{tmp:walk.toml}", "--base-url", "{url}", "--out", "{tmp:a}"],
+]
+run    = ["walkthrough", "render", "--script", "{tmp:walk.toml}", "--base-url", "{url}", "--out", "{tmp:b}"]
+metric = "step-drift"
+params = { a = "{tmp:a/walk.json}", b = "{tmp:b/walk.json}" }
+max    = 1
+
+[case.files]
+"walk.toml" = '''
+version = 1
+name    = "walk"
+width   = 640
+height  = 400
+
+[[step]]
+action  = "goto"
+url     = "/index.html"
+caption = "The jobs list"
+audio   = "tone.wav"
+
+[[step]]
+action   = "click"
+selector = "#first"
+caption  = "Open a job"
+audio    = "tone.wav"
+
+[[step]]
+action   = "wait_for"
+selector = "#title"
+caption  = "The job"
+audio    = "tone.wav"
+'''
+"index.html" = '''
+<!doctype html>
+<meta charset="utf-8">
+<body style="margin:0;font:16px sans-serif"><h1>Jobs</h1><a id="first" href="detail.html">First job</a></body>
+'''
+"detail.html" = '''
+<!doctype html>
+<meta charset="utf-8">
+<body style="margin:0;font:16px sans-serif"><h1 id="title">First job</h1></body>
+'''
+
+[[case]]
+name   = "walkthrough-refuses-missing-target"
+why    = "a step whose target never appears must fail the render, naming the step, and leave no video"
+serve  = true
+run    = ["walkthrough", "render", "--script", "{tmp:walk.toml}", "--base-url", "{url}", "--out", "{tmp:out}"]
+exit   = 1
+stderr = "step 2 (wait_for #nope)"
+absent = ["{tmp:out/walk.mp4}", "{tmp:out/walk.poster.png}", "{tmp:out/walk.json}"]
+
+[case.files]
+"walk.toml" = '''
+version = 1
+name    = "walk"
+width   = 640
+height  = 400
+
+[[step]]
+action = "goto"
+url    = "/index.html"
+
+[[step]]
+action     = "wait_for"
+selector   = "#nope"
+timeout_ms = 500
+'''
+"index.html" = '''
+<!doctype html>
+<meta charset="utf-8">
+<body style="margin:0;font:16px sans-serif"><h1>Jobs</h1></body>
+'''

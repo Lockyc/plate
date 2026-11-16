@@ -321,6 +321,27 @@ func TestJSONMetric(t *testing.T) {
 	}
 }
 
+func TestStepDriftMetric(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, body string) string {
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	a := write("a.json", `{"fps":30,"steps":[{"start_ms":0,"end_ms":1400},{"start_ms":1400,"end_ms":2800}]}`)
+	b := write("b.json", `{"fps":30,"steps":[{"start_ms":0,"end_ms":1410},{"start_ms":1410,"end_ms":2860}]}`)
+	short := write("c.json", `{"fps":30,"steps":[{"start_ms":0,"end_ms":1400}]}`)
+	// The worst disagreement is step 2's end, 60 ms: 1.8 frames at 30 fps.
+	if v, err := Metrics["step-drift"](Params{"a": a, "b": b}); err != nil || math.Abs(v-1.8) > 1e-9 {
+		t.Errorf("step-drift = %v, %v; want 1.8", v, err)
+	}
+	if v, err := Metrics["step-drift"](Params{"a": a, "b": short}); err == nil {
+		t.Errorf("step-drift over unequal steps = %v, want an error", v)
+	}
+}
+
 // codeFrames writes one PNG per code into dir, prefix%05d.png: a 12-cell
 // code strip (bit 0 leftmost, white for a 1) in the top half over grey.
 func codeFrames(t *testing.T, dir, prefix string, codes []int) string {

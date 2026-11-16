@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"testing"
 )
 
@@ -77,6 +78,9 @@ func TestCasesAreWellFormed(t *testing.T) {
 			if c.Max == nil && c.Min == nil {
 				t.Errorf("%s: metric %s has no threshold", c.Name, c.Metric)
 			}
+		}
+		if !c.Serve && strings.Contains(c.text(), "{url}") {
+			t.Errorf("%s: {url} needs serve = true", c.Name)
 		}
 		for _, m := range ref.FindAllStringSubmatch(c.text(), -1) {
 			if !known[m[1]] {

@@ -9,6 +9,8 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -31,11 +33,14 @@ type Asset struct {
 
 // Case is one quality check. String fields and params may use {asset:NAME}
 // (a file in quality/assets/) and {tmp:NAME} (a file in the case's own
-// directory, which is also the working directory of every step).
+// directory, which is also the working directory of every step); setup, run
+// and post may use {url}, the address of the case directory served over
+// HTTP, when Serve is set.
 type Case struct {
 	Name   string            `toml:"name"`
 	Why    string            `toml:"why"`    // the shortfall this case pins
 	Files  map[string]string `toml:"files"`  // written into the case directory first
+	Serve  bool              `toml:"serve"`  // serve the case directory at {url} while setup, run and post run
 	Setup  [][]string        `toml:"setup"`  // steps before run; argv[0] "plate" or a pinned engine
 	Run    []string          `toml:"run"`    // plate arguments under test
 	Post   [][]string        `toml:"post"`   // steps after run, before the metric
@@ -84,18 +89,22 @@ func LoadCases(path string) ([]Case, error) {
 	return f.Case, nil
 }
 
-// Env is where a case runs.
-type Env struct{ Assets, Tmp, Plate string }
+// Env is where a case runs. URL is the served case directory, "" when the
+// case serves none.
+type Env struct{ Assets, Tmp, Plate, URL string }
 
-var placeholder = regexp.MustCompile(`\{(asset|tmp):([^}]+)\}`)
+var placeholder = regexp.MustCompile(`\{(asset|tmp):([^}]+)\}|\{url\}`)
 
 func (e Env) Expand(s string) string {
 	return placeholder.ReplaceAllStringFunc(s, func(m string) string {
 		p := placeholder.FindStringSubmatch(m)
-		if p[1] == "asset" {
+		switch p[1] {
+		case "asset":
 			return filepath.Join(e.Assets, p[2])
+		case "tmp":
+			return filepath.Join(e.Tmp, p[2])
 		}
-		return filepath.Join(e.Tmp, p[2])
+		return e.URL
 	})
 }
 
@@ -154,6 +163,16 @@ func (e Env) RunCase(ctx context.Context, c Case) error {
 		if err := os.WriteFile(filepath.Join(e.Tmp, name), []byte(body), 0o644); err != nil {
 			return err
 		}
+	}
+	if c.Serve {
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			return err
+		}
+		srv := &http.Server{Handler: http.FileServer(http.Dir(e.Tmp))}
+		go srv.Serve(ln)
+		defer srv.Close()
+		e.URL = "http://" + ln.Addr().String()
 	}
 	for _, s := range c.Setup {
 		if err := e.step(ctx, s); err != nil {
