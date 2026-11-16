@@ -28,7 +28,7 @@ func TestLoadRejects(t *testing.T) {
 		{"type no text", "version=1\nname=\"w\"\n[[step]]\naction=\"type\"\nselector=\"#a\"\n", "step[0].text"},
 		{"odd width", "version=1\nname=\"w\"\nwidth=641\n[[step]]\naction=\"goto\"\nurl=\"/\"\n", "width: must be even"},
 		{"odd height", "version=1\nname=\"w\"\nheight=401\n[[step]]\naction=\"goto\"\nurl=\"/\"\n", "height: must be even"},
-		{"unknown key","version=1\nname=\"w\"\nbogus=1\n[[step]]\naction=\"goto\"\nurl=\"/\"\n", "bogus"},
+		{"unknown key", "version=1\nname=\"w\"\nbogus=1\n[[step]]\naction=\"goto\"\nurl=\"/\"\n", "bogus"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
