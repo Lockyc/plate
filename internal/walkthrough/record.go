@@ -94,7 +94,11 @@ func Record(ctx context.Context, script *Script, baseURL string, warmup []string
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
 	}
-	conn, err := cdp.Launch(ctx, render.Remote(baseURL).ChromeArgs, sessionBudget(s, warmup, durations))
+	// The window starts at the viewport's size: a screencast frame Chrome
+	// composites before the metrics override lands is then already the
+	// size the frame sink requires.
+	args := append(render.Remote(baseURL).ChromeArgs, fmt.Sprintf("--window-size=%d,%d", s.Width, s.Height))
+	conn, err := cdp.Launch(ctx, args, sessionBudget(s, warmup, durations))
 	if err != nil {
 		return nil, err
 	}
