@@ -108,11 +108,16 @@ func (s *Script) validate(dir string) Problems {
 	if s.Name == "" {
 		add("name: required")
 	}
+	// The mp4 is H.264 4:2:0, which needs even sides.
 	if s.Width < 0 {
 		add("width: must be > 0")
+	} else if s.Width%2 != 0 {
+		add("width: must be even")
 	}
 	if s.Height < 0 {
 		add("height: must be > 0")
+	} else if s.Height%2 != 0 {
+		add("height: must be even")
 	}
 	if s.FPS != nil && (*s.FPS < 1 || *s.FPS > 120) {
 		add("fps: want an integer 1-120")
