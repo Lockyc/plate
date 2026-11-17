@@ -1,29 +1,26 @@
-name    = "plate"
+name = "plate"
 summary = "Go CLI that makes or inspects visual artefacts for print and web pipelines: cutout, inpaint, infill, upscale, colour grade, HTML→PNG/PDF render, markdown→PDF, press-ready PDF, diff, font embed, QR, demo-clip render — pinned engines, measured quality"
-kind    = "tool"
-status  = "active"
-tags    = ["images", "print", "render", "video", "cli", "pipelines"]
-stack   = ["go", "python"]
+status = "active"
+tags = ["images", "print", "render", "video", "cli", "pipelines"]
 
 [github]
 topics_extra = ["cli", "golang", "image-processing", "imagemagick", "headless-chrome", "ffmpeg", "ghostscript", "background-removal", "print"]
+description = "Go CLI that makes or inspects visual artefacts for print and web pipelines: cutout, inpaint, infill, upscale, colour grade, HTML→PNG/PDF render, markdown→PDF, press-ready PDF, diff, font embed, QR, demo-clip render — pinned engines, measured quality"
+topics = ["background-removal", "cli", "ghostscript", "go", "golang", "headless-chrome", "image-processing", "imagemagick", "images", "pipelines", "print", "python", "render", "ffmpeg", "video"]
 
 [[provides]]
-name    = "image-render-ops"
+name = "image-render-ops"
 summary = "go-installable `plate` binary: subject cutout to RGBA (Vision/BiRefNet + tiled ViTMatte), LaMa inpaint, blur-pyramid infill, DAT super-resolution upscale, HALD grade fit/apply, guarded headless-Chrome HTML→PNG/PDF, outlined-CMYK press PDF with soft-proof gate, aligned image diff, font data-URI CSS, QR SVG; `plate.toml` can forbid the pixel-synthesising ops"
-url     = "https://github.com/lockyc/plate"
-
+url = "https://github.com/lockyc/plate"
 [[provides]]
-name    = "web-screenshot"
+name = "web-screenshot"
 summary = "Screenshot a web page or localhost app by URL at a set viewport: `plate render --png out.png --size WxH --budget MS <URL>` on pinned chrome-headless-shell"
-url     = "https://github.com/lockyc/plate"
-
+url = "https://github.com/lockyc/plate"
 [[provides]]
-name    = "pdf-read-write"
+name = "pdf-read-write"
 summary = "Read PDFs (`plate pdf info|text|pages|images`: metadata with a text-layer check, layout text, page renders, embedded images) and produce them from markdown or HTML with a document stylesheet (`plate doc`)"
-url     = "https://github.com/lockyc/plate"
-
+url = "https://github.com/lockyc/plate"
 [[provides]]
-name    = "demo-clip-render"
+name = "demo-clip-render"
 summary = "Post-produce a screen recording into a short looping demo clip: `plate clip check [--json]` validates and normalises a clip script (the schema a runner reads); `plate clip render --script --master --events --out` trims, frames (full/fixed/follow camera with pinned strips, never past capture resolution), draws captions and touch/click/key/cursor overlays, and writes a loop-safe H.264 MP4, WebM, poster and optional WebP/GIF with a JSON of measured sharpness, loop seam and size"
-url     = "https://github.com/lockyc/plate"
+url = "https://github.com/lockyc/plate"
