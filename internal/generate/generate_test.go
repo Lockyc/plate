@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"flag"
 	"image"
 	"image/color"
 	"image/png"
@@ -920,7 +921,16 @@ func TestSheetFailureIsReported(t *testing.T) {
 
 // TestMain keeps every test off Chrome: the sheet is stubbed out unless a
 // test asks for the real one.
+// It also runs rapid's state-machine tests at 20 checks unless -rapid.checks
+// or RAPID_CHECKS asks for more: each round normalises its ref through magick,
+// so rapid's default 100 would add half a minute to the gate.
 func TestMain(m *testing.M) {
 	writeSheet = func(context.Context, string, []string) (int, error) { return 0, nil }
+	flag.Parse()
+	set := os.Getenv("RAPID_CHECKS") != ""
+	flag.Visit(func(f *flag.Flag) { set = set || f.Name == "rapid.checks" })
+	if !set {
+		flag.Set("rapid.checks", "20")
+	}
 	os.Exit(m.Run())
 }
