@@ -10,8 +10,8 @@ import (
 
 // geometry is a random capture: a region over a keyboard that rises and
 // drops, with up to two bars riding it from the screen's foot to its top,
-// flush (give or take a gap) only at the rects samples, and taps for a
-// follow camera to chase.
+// flush (give or take a gap) only at the rects samples, up to two header
+// bars above the region, and taps for a follow camera to chase.
 type geometry struct {
 	s    *Script
 	l    *Log
@@ -23,9 +23,34 @@ func drawGeometry(t *rapid.T, keyboard bool) geometry {
 	const sw, sh = 402.0, 874.0
 	width := rapid.SampledFrom([]int{600, 1080}).Draw(t, "width")
 	mode := rapid.SampledFrom([]string{"follow", "fixed"}).Draw(t, "mode")
+	// Up to two header bars sit above the region, stacked from the status
+	// bar down, the lower one a random gap (overlap, when negative) below
+	// the upper at each sample, so the strips above contest rows too.
+	nHead := 0
+	if keyboard {
+		nHead = rapid.IntRange(0, 2).Draw(t, "headers")
+	}
+	var headRest, headUp []Rect
+	headTop := rapid.Float64Range(0, 60).Draw(t, "header top")
+	restY, upY := headTop, headTop
+	for i := range nHead {
+		h := rapid.Float64Range(28, 62).Draw(t, fmt.Sprintf("header %d h", i))
+		if i > 0 {
+			restY += rapid.Float64Range(-12, 12).Draw(t, fmt.Sprintf("header %d rest gap", i))
+			upY += rapid.Float64Range(-12, 12).Draw(t, fmt.Sprintf("header %d up gap", i))
+		}
+		headRest = append(headRest, Rect{0, restY, sw, h})
+		headUp = append(headUp, Rect{0, upY, sw, h})
+		restY += h
+		upY += h
+	}
+	below := 0.0
+	if nHead > 0 {
+		below = math.Max(restY, upY)
+	}
 	minW := float64(width) / 3
 	rw := rapid.Float64Range(minW, sw).Draw(t, "region w")
-	region := Rect{rapid.Float64Range(0, sw-rw).Draw(t, "region x"), rapid.Float64Range(0, 300).Draw(t, "region y"), rw, 0}
+	region := Rect{rapid.Float64Range(0, sw-rw).Draw(t, "region x"), rapid.Float64Range(below, below+300).Draw(t, "region y"), rw, 0}
 	region.H = rapid.Float64Range(200, 760-region.Y).Draw(t, "region h")
 
 	home := rapid.Float64Range(0, 60).Draw(t, "home indicator")
@@ -36,7 +61,7 @@ func drawGeometry(t *rapid.T, keyboard bool) geometry {
 		nBars = rapid.IntRange(1, 2).Draw(t, "bars")
 	}
 	var rest, up []Rect
-	restY, upY := sh-rapid.Float64Range(0, 40).Draw(t, "bar foot"), kb.Y+rapid.Float64Range(-12, 12).Draw(t, "bar gap")
+	restY, upY = sh-rapid.Float64Range(0, 40).Draw(t, "bar foot"), kb.Y+rapid.Float64Range(-12, 12).Draw(t, "bar gap")
 	for i := range nBars {
 		h := rapid.Float64Range(28, 62).Draw(t, fmt.Sprintf("bar %d h", i))
 		restY -= h
@@ -47,7 +72,11 @@ func drawGeometry(t *rapid.T, keyboard bool) geometry {
 	// The bars sit below the region: rest is listed foot first, up flush
 	// on the keyboard; the stack is filter (top) then touchbar.
 	names := []string{"touchbar", "filter"}
+	heads := []string{"nav", "search"}
 	var pins []Target
+	for i := range nHead {
+		pins = append(pins, Target{Name: heads[i], Label: heads[i]})
+	}
 	for i := nBars - 1; i >= 0; i-- {
 		pins = append(pins, Target{Name: names[i], Label: names[i]})
 	}
@@ -64,6 +93,13 @@ func drawGeometry(t *rapid.T, keyboard bool) geometry {
 				r = up[i]
 			}
 			m[names[i]] = &r
+		}
+		for i := range nHead {
+			r := headRest[i]
+			if isUp {
+				r = headUp[i]
+			}
+			m[heads[i]] = &r
 		}
 		if keyboard {
 			m["kb"] = nil
@@ -93,7 +129,7 @@ func drawGeometry(t *rapid.T, keyboard bool) geometry {
 	}
 	l := camLog(evs...)
 	l.End = end
-	return geometry{s, l, Window{0, end}, fmt.Sprintf("%s %d px, region %+v, keyboard %+v, bars rest %v up %v", mode, width, region, kb, rest, up)}
+	return geometry{s, l, Window{0, end}, fmt.Sprintf("%s %d px, region %+v, keyboard %+v, headers rest %v up %v, bars rest %v up %v", mode, width, region, kb, headRest, headUp, rest, up)}
 }
 
 // pathOf is Path over g, or a skip for a geometry the layout or camera
