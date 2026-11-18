@@ -40,15 +40,21 @@ func extractMain(ctx context.Context, args []string, stdout, stderr io.Writer) i
 
 // Extract copies pages r of in to out through qpdf, which keeps each page's
 // content, boxes and fonts as they are. qpdf refuses a range past the last
-// page. out is written beside itself and renamed, so a failed run leaves no
-// partial file, and an existing out is replaced only when force is set.
+// page.
 func Extract(ctx context.Context, in, out string, r pageRange, force bool) error {
+	return qpdfTo(ctx, out, force, []string{in}, []string{in, "--pages", ".", r.String(), "--"})
+}
+
+// qpdfTo runs qpdf with args and then the output, which is written beside
+// out and renamed, so a failed run leaves no partial file; an existing out
+// is replaced only when force is set.
+func qpdfTo(ctx context.Context, out string, force bool, inputs, args []string) error {
 	if _, err := os.Stat(out); err == nil && !force {
 		return fmt.Errorf("%s exists (--force replaces it)", out)
 	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(out), ".extract-*.pdf")
+	tmp, err := os.CreateTemp(filepath.Dir(out), ".qpdf-*.pdf")
 	if err != nil {
 		return err
 	}
@@ -56,8 +62,8 @@ func Extract(ctx context.Context, in, out string, r pageRange, force bool) error
 	defer os.Remove(tmp.Name())
 	_, err = engine.Run(ctx, engine.Cmd{
 		Engine:  "qpdf",
-		Args:    []string{"--warning-exit-0", in, "--pages", ".", r.String(), "--", tmp.Name()},
-		Inputs:  []string{in},
+		Args:    append(append([]string{"--warning-exit-0"}, args...), tmp.Name()),
+		Inputs:  inputs,
 		Outputs: []string{tmp.Name()},
 	})
 	if err != nil {

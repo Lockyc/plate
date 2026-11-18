@@ -28,7 +28,7 @@ func TestExtractPassesRangeAndRenames(t *testing.T) {
 	if want := []string{"--warning-exit-0", in, "--pages", ".", "3-3", "--"}; !slices.Equal(call[:6], want) {
 		t.Errorf("args %q, want %q then the temporary output", call, want)
 	}
-	if left, _ := filepath.Glob(filepath.Join(filepath.Dir(out), ".extract-*")); len(left) != 0 {
+	if left, _ := filepath.Glob(filepath.Join(filepath.Dir(out), ".qpdf-*")); len(left) != 0 {
 		t.Errorf("temporary files left: %q", left)
 	}
 }
