@@ -236,10 +236,9 @@ func Main(ctx context.Context, args []string, _, stderr io.Writer) int {
 			if j := slices.IndexFunc(targets, func(o Target) bool { return o.Name == t.Back }); j >= 0 {
 				back = results[j]
 			}
-			var wrote bool
-			if wrote, r.err = writeDuplex(ctx, t, r, back); wrote {
-				r.derived = append(r.derived, "duplexed "+filepath.Base(t.Duplex))
-			}
+			var wrote []string
+			wrote, r.err = writeDuplex(ctx, t, r, back)
+			r.derived = append(r.derived, wrote...)
 		}
 		switch {
 		case r.err != nil:
@@ -270,46 +269,70 @@ func Main(ctx context.Context, args []string, _, stderr io.Writer) int {
 }
 
 // writeDuplex writes t's duplex file once its render and its back's are
-// done: when either PDF was rendered, or the file is missing or older than
-// either. back is the back target's result, or nil when it was not named
-// this run and its PDF from an earlier one is used. A failed render on
-// either side leaves no duplex file. Main calls it as it collects results,
-// so the back's render, in parallel or later in the manifest, is never read
-// half-written.
-func writeDuplex(ctx context.Context, t Target, own, back *result) (bool, error) {
-	fail := func(err error) (bool, error) {
-		if rmErr := os.Remove(t.Duplex); rmErr != nil && !errors.Is(rmErr, fs.ErrNotExist) {
-			return false, errors.Join(err, rmErr)
+// done, and its marked copy when t has marks, returning a log line for each
+// file written. Each is written when either PDF was rendered, or it is
+// missing or older than what it is made from. back is the back target's
+// result, or nil when it was not named this run and its PDF from an
+// earlier one is used. A failed render on either side leaves neither file.
+// Main calls it as it collects results, so the back's render, in parallel
+// or later in the manifest, is never read half-written.
+func writeDuplex(ctx context.Context, t Target, own, back *result) ([]string, error) {
+	fail := func(err error) ([]string, error) {
+		for _, p := range []string{t.Duplex, t.DuplexMarks} {
+			if rmErr := os.Remove(p); p != "" && rmErr != nil && !errors.Is(rmErr, fs.ErrNotExist) {
+				err = errors.Join(err, rmErr)
+			}
 		}
-		return false, err
+		return nil, err
 	}
 	if own.err != nil {
 		return fail(own.err)
 	}
-	stale := own.res.Outcome != render.Unchanged
+	rendered := own.res.Outcome != render.Unchanged
 	if back != nil {
 		<-back.done
 		if back.err != nil {
 			return fail(fmt.Errorf("back: %s failed", t.Back))
 		}
-		stale = stale || back.res.Outcome != render.Unchanged
+		rendered = rendered || back.res.Outcome != render.Unchanged
 	}
-	if out, err := os.Stat(t.Duplex); !stale && err == nil {
-		for _, p := range []string{t.Opts.PDF, t.BackPDF} {
-			in, err := os.Stat(p)
-			if err != nil {
-				return fail(fmt.Errorf("back: %w", err))
-			}
-			stale = stale || out.ModTime().Before(in.ModTime())
-		}
-		if !stale {
-			return false, nil
-		}
-	}
-	if err := pdf.Duplex(ctx, t.Opts.PDF, t.BackPDF, t.Duplex, true); err != nil {
+	var wrote []string
+	stale, err := older(t.Duplex, t.Opts.PDF, t.BackPDF)
+	if err != nil {
 		return fail(fmt.Errorf("back: %w", err))
 	}
-	return true, nil
+	if rendered || stale {
+		if err := pdf.Duplex(ctx, t.Opts.PDF, t.BackPDF, t.Duplex, true); err != nil {
+			return fail(fmt.Errorf("back: %w", err))
+		}
+		wrote = append(wrote, "duplexed "+filepath.Base(t.Duplex))
+	}
+	if t.DuplexMarks == "" {
+		return wrote, nil
+	}
+	if stale, err := older(t.DuplexMarks, t.Duplex); err != nil || (len(wrote) == 0 && !stale) {
+		return wrote, err
+	}
+	if err := marks.Run(ctx, t.Duplex, t.DuplexMarks, marks.DefaultBleed, t.Trim, true); err != nil {
+		return fail(fmt.Errorf("marks: %w", err))
+	}
+	return append(wrote, "marked "+filepath.Base(t.DuplexMarks)), nil
+}
+
+// older reports whether out is missing or older than any of ins, each of
+// which must exist.
+func older(out string, ins ...string) (bool, error) {
+	o, err := os.Stat(out)
+	for _, p := range ins {
+		in, inErr := os.Stat(p)
+		if inErr != nil {
+			return false, inErr
+		}
+		if err == nil && o.ModTime().Before(in.ModTime()) {
+			return true, nil
+		}
+	}
+	return err != nil, nil
 }
 
 // loadsOutput refuses t when one of its inputs is another target's output:

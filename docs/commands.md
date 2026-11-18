@@ -105,7 +105,8 @@ which imposes the target's PDF onto `name-2up-a4.pdf` as `impose --force`
 does (the PDF must be one or two A5 pages), and `marks`, which writes it to
 `name-marks.pdf` as `marks --force` does, with `trim=WxH` for a page drawn
 with its bleed, as `marks --trim` takes it, and `back=NAME`, which writes
-`name-duplex.pdf` as `pdf duplex` does with target `NAME`'s PDF on the back. A line with `dur=S` (seconds, e.g. `8s` or `2.5`)
+`name-duplex.pdf` as `pdf duplex` does with target `NAME`'s PDF on the back,
+and with `marks` its print shop's copy, `name-duplex-marks.pdf`. A line with `dur=S` (seconds, e.g. `8s` or `2.5`)
 is captured as `animate` does: its outputs are `mp4`, `webm`, `gif`, `webp`
 and `poster` (`name.poster.png`), with `png` and `jpeg` the last frame and
 `name.json` beside them, and `fps=N`, `loop=none|crossfade|dip` and

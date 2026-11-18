@@ -623,3 +623,22 @@ func TestBuildDuplexGoesWhenBackFails(t *testing.T) {
 		t.Error("the duplex file was left")
 	}
 }
+
+func TestBuildDuplexMarksWritesTheCopy(t *testing.T) {
+	e := setupDuplex(t)
+	os.WriteFile(e.manifest, []byte("f  f.html  560x792  1  pdf  marks back=b\nb  b.html  560x792  1  pdf\n"), 0o644)
+	if code := e.run(e.manifest); code != 0 {
+		t.Fatalf("code %d: %s", code, e.stderr.String())
+	}
+	if want := "rendered f\nmarked f-marks.pdf\nduplexed f-duplex.pdf\nmarked f-duplex-marks.pdf\nrendered b\n2 rendered, 0 unchanged\n"; e.stderr.String() != want {
+		t.Errorf("stderr %q, want %q", e.stderr.String(), want)
+	}
+	marked := filepath.Join(e.dir, "dist", "f-duplex-marks.pdf")
+	if pages, err := pdf.Pages(context.Background(), marked); err != nil || len(pages) != 4 {
+		t.Fatalf("%d pages, want 4: %v", len(pages), err)
+	}
+	os.Remove(marked)
+	if code := e.run(e.manifest); code != 0 || e.stderr.String() != "unchanged f\nmarked f-duplex-marks.pdf\nunchanged b\n0 rendered, 2 unchanged\n" {
+		t.Errorf("missing copy: code %d, stderr %q", code, e.stderr.String())
+	}
+}

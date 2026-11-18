@@ -38,8 +38,9 @@ type Target struct {
 	// Back is the target whose PDF the back option prints behind each page
 	// of Opts.PDF, and BackPDF that PDF, or "".
 	Back, BackPDF string
-	// Duplex is the double-sided file the back option writes, or "".
-	Duplex string
+	// Duplex is the double-sided file the back option writes, and
+	// DuplexMarks its print shop's copy when the target also has marks, or "".
+	Duplex, DuplexMarks string
 }
 
 // kinds maps each output kind a manifest names to its file extension and
@@ -67,7 +68,8 @@ var kinds = map[string]struct {
 // bleed and crop marks as `plate marks` does; trim=WxH (mm, with marks)
 // says the page is drawn with its bleed, as `plate marks --trim` does;
 // back=NAME writes outDir/name-duplex.pdf, each page followed by target
-// NAME's PDF as `plate pdf duplex` does, NAME being another pdf target.
+// NAME's PDF as `plate pdf duplex` does, NAME being another pdf target, and
+// with marks also its marked copy, outDir/name-duplex-marks.pdf.
 //
 // A line with dur=S (seconds, e.g. 8s or 2.5) is a video line, captured as `plate
 // animate` does: its outputs are mp4, webm, gif, webp and poster (poster
@@ -314,6 +316,9 @@ func parseLine(fields []string, dir, outDir string, failIf []string) (Target, er
 	if t.Back != "" && o.PDF == "" {
 		return Target{}, errors.New("back needs the pdf output: it prints behind the target's PDF")
 	}
+	if t.Back != "" && t.Marks != "" {
+		t.DuplexMarks = filepath.Join(outDir, name+duplexMarksSuffix)
+	}
 	if t.Trim != (marks.Trim{}) && t.Marks == "" {
 		return Target{}, errors.New("trim needs marks: it is the trim marks sets a page drawn with its bleed at")
 	}
@@ -330,16 +335,18 @@ const (
 	twoUpSuffix  = "-2up-a4.pdf"
 	marksSuffix  = "-marks.pdf"
 	duplexSuffix = "-duplex.pdf"
+
+	duplexMarksSuffix = "-duplex-marks.pdf"
 )
 
 // Outputs lists every file t writes: its render's outputs, then the 2up
-// sheet, the marked copy and the duplex file.
+// sheet, the marked copy, the duplex file and its marked copy.
 func (t Target) Outputs() []string {
 	if t.Anim != nil {
 		return t.Anim.Outputs()
 	}
 	out := t.Opts.Outputs()
-	for _, d := range []string{t.TwoUp, t.Marks, t.Duplex} {
+	for _, d := range []string{t.TwoUp, t.Marks, t.Duplex, t.DuplexMarks} {
 		if d != "" {
 			out = append(out, d)
 		}
