@@ -52,7 +52,8 @@ type ownership struct {
 	lines   map[string]*line
 	foreign map[string][]byte // path to its content
 	failing map[string]bool
-	pages   int // page edits so far
+	pages   int  // page edits so far
+	stale   bool // an edit or a failure has come since the last build
 }
 
 func (m *ownership) dist(n string) string { return filepath.Join(m.dir, "dist", n) }
@@ -117,7 +118,11 @@ func (m *ownership) set(t *rapid.T, n string) {
 }
 
 func (m *ownership) plant(t *rapid.T) {
-	n := rapid.SampledFrom(lineNames).Draw(t, "name")
+	m.plantAs(t, rapid.SampledFrom(lineNames).Draw(t, "name"))
+}
+
+// plantAs writes a random foreign file under line n's name.
+func (m *ownership) plantAs(t *rapid.T, n string) {
 	k := rapid.SampledFrom(foreignKinds).Draw(t, "kind")
 	p := m.dist(n + k.suffix)
 	body := []byte(strings.ReplaceAll(k.body, "NAME", n))
@@ -131,6 +136,7 @@ func (m *ownership) plant(t *rapid.T) {
 func (m *ownership) fail(t *rapid.T) {
 	n := rapid.SampledFrom(lineNames).Draw(t, "line")
 	m.failing[n] = !m.failing[n]
+	m.stale = true
 	// The page changes with it, so the render cache cannot answer for it.
 	m.pages++
 	os.WriteFile(filepath.Join(m.dir, n+".html"), []byte(fmt.Sprintf("<html>%s %d</html>", n, m.pages)), 0o644)
@@ -147,6 +153,7 @@ func (m *ownership) build(t *rapid.T) {
 	path := m.manifest()
 	var stderr bytes.Buffer
 	code := Main(context.Background(), []string{path}, io.Discard, &stderr)
+	m.stale = false
 	failed := false
 	for _, n := range lineNames {
 		l := m.lines[n]
@@ -213,10 +220,10 @@ for f in $FIXTURE_FAIL; do [ "$f" = "$n" ] && exit 1; done
 for a in "$@"; do [ "$a" = --dump-dom ] && printf '<html>%s</html>' "$n"; done
 ` + chromeStub
 
-// TestBuildNeverRemovesForeignFiles edits a manifest at random (lines with
-// any of pdf, png, jpeg and html, 2up, marks and back=), plants files under
-// the lines' names that plate never writes, makes lines' renders fail and
-// builds, and checks after every step that every planted file is as it was
+// TestBuildNeverRemovesForeignFiles builds a random manifest (lines with
+// any of pdf, png, jpeg and html, 2up, marks and back=) over a file under
+// each line's name that plate never writes, then edits it, plants more such
+// files, makes lines' renders fail and builds at random, and checks after every step that every planted file is as it was
 // and every listed line's outputs exist exactly when its last build of
 // them succeeded.
 func TestBuildNeverRemovesForeignFiles(t *testing.T) {
@@ -239,10 +246,21 @@ func TestBuildNeverRemovesForeignFiles(t *testing.T) {
 		for _, n := range lineNames {
 			os.WriteFile(filepath.Join(m.dir, n+".html"), []byte("<html>"+n+"</html>"), 0o644)
 			m.set(rt, n)
+			m.plantAs(rt, n)
 		}
+		// Every case starts built over a foreign file per line, and ends
+		// built when a render's failure has changed since, so a build that
+		// takes a foreign file, or a failure that leaves a stale output
+		// behind, is met within the gate's few checks.
+		m.build(rt)
+		m.check(rt)
 		actions := map[string]func(*rapid.T){"edit": m.edit, "plant": m.plant, "fail": m.fail, "build": m.build}
 		for range rapid.IntRange(1, 8).Draw(rt, "steps") {
 			actions[rapid.SampledFrom([]string{"build", "edit", "fail", "plant"}).Draw(rt, "action")](rt)
+			m.check(rt)
+		}
+		if m.stale {
+			m.build(rt)
 			m.check(rt)
 		}
 	})
