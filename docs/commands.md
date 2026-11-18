@@ -30,6 +30,7 @@ creates pixels the source never had (see *Synthesis* at the end).
 | `pdf pages` | Renders PDF pages to PNG and prints each path; `--transparent` leaves the ground clear, for artwork such as a white logo | `plate pdf pages [--pages N\|N-M] [--out DIR] [--dpi N] [--transparent] <in.pdf>` |
 | `pdf images` | Extracts a PDF's embedded images and prints each path | `plate pdf images [--pages N\|N-M] [--out DIR] <in.pdf>` |
 | `pdf extract` | Copies pages of a PDF, unchanged, to a PDF of their own: one artwork of a multi-page file, for a print shop that takes one file per item | `plate pdf extract --pages N\|N-M [--force] -o out.pdf <in.pdf>` |
+| `pdf duplex` | A double-sided print file: each front page followed by its back, unchanged; a one-page back repeats behind every front page (numbered cards with the same terms), or the back pairs page for page | `plate pdf duplex --back back.pdf [--force] -o out.pdf <front.pdf>` |
 | `impose` | Puts an A5 flyer two-up on an A4 sheet, cut down the middle: a single page on one side, or a front and back on both sides, printed double-sided with flip on short edge | `plate impose [--cut-mark] [--force] -o out.pdf <in.pdf>` |
 | `marks` | A print shop's copy of a PDF: each page unchanged at its trim size, with bleed (default 3 mm) and crop marks, TrimBox and BleedBox set | `plate marks [--bleed MM] [--trim WxH] [--force] -o out.pdf <in.pdf>` |
 | `doc` | Renders markdown or HTML to a PDF with a plain document look: A4, a running head from the first heading, page numbers, ruled tables | `plate doc [--css FILE] <in.md\|in.html> <out.pdf>` |
@@ -103,17 +104,18 @@ are `blank-margin=PX`, `transparent`, `budget=MS`, `quality=Q`, `2up`,
 which imposes the target's PDF onto `name-2up-a4.pdf` as `impose --force`
 does (the PDF must be one or two A5 pages), and `marks`, which writes it to
 `name-marks.pdf` as `marks --force` does, with `trim=WxH` for a page drawn
-with its bleed, as `marks --trim` takes it. A line with `dur=S` (seconds, e.g. `8s` or `2.5`)
+with its bleed, as `marks --trim` takes it, and `back=NAME`, which writes
+`name-duplex.pdf` as `pdf duplex` does with target `NAME`'s PDF on the back. A line with `dur=S` (seconds, e.g. `8s` or `2.5`)
 is captured as `animate` does: its outputs are `mp4`, `webm`, `gif`, `webp`
 and `poster` (`name.poster.png`), with `png` and `jpeg` the last frame and
 `name.json` beside them, and `fps=N`, `loop=none|crossfade|dip` and
 `budget-kb=N` tune it. A video output needs `dur=`, and `fps=`, `loop=` and
 `budget-kb=` need it too; `pdf`, `html`, `transparent`, `blank-margin`, `2up`,
-`marks` and `trim` are refused on a video line. Naming targets renders only
+`marks`, `trim` and `back` are refused on a video line. Naming targets renders only
 those. It logs `rendered NAME`, `rendered NAME (not cached: REASON)`,
 `unchanged NAME` or `failed NAME: ERROR` for each target in manifest order,
-with `imposed NAME-2up-a4.pdf` and `marked NAME-marks.pdf` after a target
-whose sheet or copy was written, then a count. Targets render in parallel, so a target
+with `imposed NAME-2up-a4.pdf`, `marked NAME-marks.pdf` and `duplexed
+NAME-duplex.pdf` after a target whose sheet or copy was written, then a count. Targets render in parallel, so a target
 that loads another target's output fails. A failed target exits 1, and so does an
 unreadable manifest; an invalid manifest line or an unknown target name
 exits 2 before anything renders.
