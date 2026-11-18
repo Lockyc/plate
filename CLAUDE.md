@@ -67,7 +67,7 @@ the README is curated at each release.
 ## Commands
 
 ```bash
-just build | just test | just gate | just quality | just lock-ml | just install
+just build | just test | just gate | just quality | just mutants | just lock-ml | just install
 ```
 
 `just bakeoff` runs every OpenRouter model over the poses in `quality/bakeoff/` and writes each

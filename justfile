@@ -25,6 +25,18 @@ test:
 quality:
     go test -tags quality -count=1 -timeout 0 -v ./quality/
 
+# Mutation run (gremlins) over the lines changed since BASE (default: the last release tag), or over PATH; prints surviving mutants; slow, not part of gate
+[group("check")]
+mutants base="" path=".":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    base="{{base}}"
+    if [ -z "$base" ] && [ "{{path}}" = "." ]; then base="$(git describe --tags --abbrev=0)"; fi
+    # gremlins times each mutant against its coverage run: a cached `go test`
+    # makes that run instant and every mutant time out.
+    GOFLAGS=-count=1 go run github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0 unleash \
+      --output-statuses lt --timeout-coefficient 5 ${base:+--diff "$base"} "{{path}}"
+
 # Provider bake-off for `plate generate`: every openrouter model over quality/bakeoff/poses.txt; spends real money (about US$10-20) and needs OPENROUTER_API_KEY; not part of gate or quality
 [group("check")]
 bakeoff:

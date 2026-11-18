@@ -105,6 +105,7 @@ just build    # ./plate
 just test
 just gate     # gofmt check + vet + tests
 just quality  # the quality cases over quality/ (needs every engine and model)
+just mutants  # mutation run over the lines changed since the last release
 ```
 
 The quality cases run plate over the openly licensed and synthetic images in `quality/` and
