@@ -22,6 +22,7 @@ import (
 	"github.com/lockyc/plate/internal/engine"
 	"github.com/lockyc/plate/internal/impose"
 	"github.com/lockyc/plate/internal/marks"
+	"github.com/lockyc/plate/internal/pdf"
 	"github.com/lockyc/plate/internal/render"
 	"github.com/lockyc/plate/internal/video"
 )
@@ -230,6 +231,16 @@ func Main(ctx context.Context, args []string, _, stderr io.Writer) int {
 				}
 			}
 		}
+		if t := targets[i]; t.Duplex != "" {
+			var back *result
+			if j := slices.IndexFunc(targets, func(o Target) bool { return o.Name == t.Back }); j >= 0 {
+				back = results[j]
+			}
+			var wrote bool
+			if wrote, r.err = writeDuplex(ctx, t, r, back); wrote {
+				r.derived = append(r.derived, "duplexed "+filepath.Base(t.Duplex))
+			}
+		}
 		switch {
 		case r.err != nil:
 			failed++
@@ -256,6 +267,49 @@ func Main(ctx context.Context, args []string, _, stderr io.Writer) int {
 	}
 	fmt.Fprintf(stderr, "%d rendered, %d unchanged\n", rendered, unchanged)
 	return 0
+}
+
+// writeDuplex writes t's duplex file once its render and its back's are
+// done: when either PDF was rendered, or the file is missing or older than
+// either. back is the back target's result, or nil when it was not named
+// this run and its PDF from an earlier one is used. A failed render on
+// either side leaves no duplex file. Main calls it as it collects results,
+// so the back's render, in parallel or later in the manifest, is never read
+// half-written.
+func writeDuplex(ctx context.Context, t Target, own, back *result) (bool, error) {
+	fail := func(err error) (bool, error) {
+		if rmErr := os.Remove(t.Duplex); rmErr != nil && !errors.Is(rmErr, fs.ErrNotExist) {
+			return false, errors.Join(err, rmErr)
+		}
+		return false, err
+	}
+	if own.err != nil {
+		return fail(own.err)
+	}
+	stale := own.res.Outcome != render.Unchanged
+	if back != nil {
+		<-back.done
+		if back.err != nil {
+			return fail(fmt.Errorf("back: %s failed", t.Back))
+		}
+		stale = stale || back.res.Outcome != render.Unchanged
+	}
+	if out, err := os.Stat(t.Duplex); !stale && err == nil {
+		for _, p := range []string{t.Opts.PDF, t.BackPDF} {
+			in, err := os.Stat(p)
+			if err != nil {
+				return fail(fmt.Errorf("back: %w", err))
+			}
+			stale = stale || out.ModTime().Before(in.ModTime())
+		}
+		if !stale {
+			return false, nil
+		}
+	}
+	if err := pdf.Duplex(ctx, t.Opts.PDF, t.BackPDF, t.Duplex, true); err != nil {
+		return fail(fmt.Errorf("back: %w", err))
+	}
+	return true, nil
 }
 
 // loadsOutput refuses t when one of its inputs is another target's output:

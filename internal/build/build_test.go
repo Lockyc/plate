@@ -573,3 +573,53 @@ func TestRemoveVideoSetRemovesOnlyACaptureOfTheLine(t *testing.T) {
 		}
 	})
 }
+
+// setupDuplex is a front f with back b, both rendering the two-page A5.
+func setupDuplex(t *testing.T) *env {
+	t.Helper()
+	e := setupTwoUp(t, twoA5)
+	os.WriteFile(filepath.Join(e.dir, "b.html"), []byte("<html>b</html>"), 0o644)
+	os.WriteFile(e.manifest, []byte("f  f.html  560x792  1  pdf  back=b\nb  b.html  560x792  1  pdf\n"), 0o644)
+	return e
+}
+
+func TestBuildDuplexInterleaves(t *testing.T) {
+	e := setupDuplex(t)
+	if code := e.run(e.manifest); code != 0 {
+		t.Fatalf("code %d: %s", code, e.stderr.String())
+	}
+	if want := "rendered f\nduplexed f-duplex.pdf\nrendered b\n2 rendered, 0 unchanged\n"; e.stderr.String() != want {
+		t.Errorf("stderr %q, want %q", e.stderr.String(), want)
+	}
+	duplex := filepath.Join(e.dir, "dist", "f-duplex.pdf")
+	if pages, err := pdf.Pages(context.Background(), duplex); err != nil || len(pages) != 4 {
+		t.Fatalf("%d pages, want 4: %v", len(pages), err)
+	}
+	if code := e.run(e.manifest); code != 0 || e.stderr.String() != "unchanged f\nunchanged b\n0 rendered, 2 unchanged\n" {
+		t.Errorf("unchanged: code %d, stderr %q", code, e.stderr.String())
+	}
+	// A back newer than the duplex file, rendered in an earlier run, is
+	// picked up when only the front is named.
+	later := time.Now().Add(time.Hour)
+	os.Chtimes(filepath.Join(e.dir, "dist", "b.pdf"), later, later)
+	if code := e.run(e.manifest, "f"); code != 0 || e.stderr.String() != "unchanged f\nduplexed f-duplex.pdf\n0 rendered, 1 unchanged\n" {
+		t.Errorf("stale back: code %d, stderr %q", code, e.stderr.String())
+	}
+}
+
+// TestBuildDuplexGoesWhenBackFails: a front whose back failed has failed,
+// and leaves no duplex file.
+func TestBuildDuplexGoesWhenBackFails(t *testing.T) {
+	e := setupDuplex(t)
+	if code := e.run(e.manifest); code != 0 {
+		t.Fatalf("code %d: %s", code, e.stderr.String())
+	}
+	os.Remove(filepath.Join(e.dir, "b.html"))
+	code := e.run("--force", e.manifest)
+	if code != 1 || !strings.Contains(e.stderr.String(), "failed f: back: b failed") {
+		t.Fatalf("code %d: %s", code, e.stderr.String())
+	}
+	if _, err := os.Stat(filepath.Join(e.dir, "dist", "f-duplex.pdf")); err == nil {
+		t.Error("the duplex file was left")
+	}
+}

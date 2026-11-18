@@ -316,3 +316,38 @@ func TestParseVideoQuality(t *testing.T) {
 		t.Errorf("Anim.Quality %v, want 80", q)
 	}
 }
+
+func TestManifestBack(t *testing.T) {
+	path, dir := manifest(t, "f f.html 1120x792 1 pdf,png back=b\nb b.html 1120x792 1 pdf\n")
+	out := filepath.Join(dir, "dist")
+	ts, err := ParseManifest(path, out, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ts[0].Duplex != filepath.Join(out, "f-duplex.pdf") || ts[0].BackPDF != filepath.Join(out, "b.pdf") || ts[1].Duplex != "" {
+		t.Errorf("f duplex %q back %q, b duplex %q", ts[0].Duplex, ts[0].BackPDF, ts[1].Duplex)
+	}
+	if o := ts[0].Outputs(); o[len(o)-1] != ts[0].Duplex {
+		t.Errorf("outputs %q", o)
+	}
+}
+
+func TestManifestBackBadLines(t *testing.T) {
+	for _, line := range []string{
+		"a a.html 560x792 1 png back=ok",
+		"a a.html 560x792 1 pdf back",
+		"a a.html 560x792 1 pdf back=",
+		"a a.html 560x792 1 pdf back=a",
+		"a a.html 560x792 1 pdf back=missing",
+		"a a.html 560x792 1 pdf back=png",
+		"OK-duplex b.html 560x792 1 pdf",
+		"a a.html 560x792 1 mp4 dur=2 back=ok",
+	} {
+		path, _ := manifest(t, "ok ok.html 560x792 1 pdf back=c\n"+line+"\npng png.html 560x792 1 png\nc c.html 560x792 1 pdf\n")
+		_, err := ParseManifest(path, t.TempDir(), nil)
+		var le *LineError
+		if !errors.As(err, &le) || le.Line != 2 {
+			t.Errorf("%q: %v", line, err)
+		}
+	}
+}

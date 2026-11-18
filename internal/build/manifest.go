@@ -35,6 +35,11 @@ type Target struct {
 	// Trim is the finished size the trim option gives a page drawn with its
 	// bleed, for marks; the zero Trim when the page is its own trim.
 	Trim marks.Trim
+	// Back is the target whose PDF the back option prints behind each page
+	// of Opts.PDF, and BackPDF that PDF, or "".
+	Back, BackPDF string
+	// Duplex is the double-sided file the back option writes, or "".
+	Duplex string
 }
 
 // kinds maps each output kind a manifest names to its file extension and
@@ -60,7 +65,9 @@ var kinds = map[string]struct {
 // which imposes the target's PDF onto outDir/name-2up-a4.pdf as `plate
 // impose` does, and marks, which writes it to outDir/name-marks.pdf with
 // bleed and crop marks as `plate marks` does; trim=WxH (mm, with marks)
-// says the page is drawn with its bleed, as `plate marks --trim` does.
+// says the page is drawn with its bleed, as `plate marks --trim` does;
+// back=NAME writes outDir/name-duplex.pdf, each page followed by target
+// NAME's PDF as `plate pdf duplex` does, NAME being another pdf target.
 //
 // A line with dur=S (seconds, e.g. 8s or 2.5) is a video line, captured as `plate
 // animate` does: its outputs are mp4, webm, gif, webp and poster (poster
@@ -126,6 +133,25 @@ func ParseManifest(path, outDir string, failIf []string) ([]Target, error) {
 			writer[strings.ToLower(out)] = len(ts)
 		}
 		ts = append(ts, t)
+	}
+	for i, t := range ts {
+		if t.Back == "" {
+			continue
+		}
+		k := slices.IndexFunc(ts, func(o Target) bool { return o.Name == t.Back })
+		var err error
+		switch {
+		case t.Back == t.Name:
+			err = errors.New("back names this target: a back is another page")
+		case k < 0:
+			err = fmt.Errorf("back=%s: no target %q", t.Back, t.Back)
+		case ts[k].Opts.PDF == "":
+			err = fmt.Errorf("back=%s: %q has no pdf output", t.Back, t.Back)
+		}
+		if err != nil {
+			return nil, &LineError{Path: path, Line: t.Line, Err: err}
+		}
+		ts[i].BackPDF = ts[k].Opts.PDF
 	}
 	return ts, nil
 }
@@ -223,6 +249,13 @@ func parseLine(fields []string, dir, outDir string, failIf []string) (Target, er
 			}
 			t.Trim = tr
 			continue
+		case "back":
+			if !hasVal || val == "" {
+				return Target{}, fmt.Errorf("option %q: want back=NAME, the target printed on the back", opt)
+			}
+			t.Back = val
+			t.Duplex = filepath.Join(outDir, name+duplexSuffix)
+			continue
 		case "fps":
 			num = &fps
 		case "budget-kb":
@@ -248,7 +281,7 @@ func parseLine(fields []string, dir, outDir string, failIf []string) (Target, er
 			o.Quality = new(int)
 			num = o.Quality
 		default:
-			return Target{}, fmt.Errorf("option %q: want blank-margin=PX, transparent, budget=MS, quality=Q, 2up, marks, trim=WxH, dur=S, fps=N, loop=L or budget-kb=N", opt)
+			return Target{}, fmt.Errorf("option %q: want blank-margin=PX, transparent, budget=MS, quality=Q, 2up, marks, trim=WxH, back=NAME, dur=S, fps=N, loop=L or budget-kb=N", opt)
 		}
 		v, err := strconv.ParseInt(val, 10, strconv.IntSize)
 		if !hasVal || err != nil {
@@ -278,6 +311,9 @@ func parseLine(fields []string, dir, outDir string, failIf []string) (Target, er
 	if t.Marks != "" && o.PDF == "" {
 		return Target{}, errors.New("marks needs the pdf output: it marks the target's PDF")
 	}
+	if t.Back != "" && o.PDF == "" {
+		return Target{}, errors.New("back needs the pdf output: it prints behind the target's PDF")
+	}
 	if t.Trim != (marks.Trim{}) && t.Marks == "" {
 		return Target{}, errors.New("trim needs marks: it is the trim marks sets a page drawn with its bleed at")
 	}
@@ -291,18 +327,19 @@ func parseLine(fields []string, dir, outDir string, failIf []string) (Target, er
 // twoUpSuffix ends the name of the sheet the 2up option writes, and
 // marksSuffix the print shop's copy the marks option writes.
 const (
-	twoUpSuffix = "-2up-a4.pdf"
-	marksSuffix = "-marks.pdf"
+	twoUpSuffix  = "-2up-a4.pdf"
+	marksSuffix  = "-marks.pdf"
+	duplexSuffix = "-duplex.pdf"
 )
 
 // Outputs lists every file t writes: its render's outputs, then the 2up
-// sheet and the marked copy.
+// sheet, the marked copy and the duplex file.
 func (t Target) Outputs() []string {
 	if t.Anim != nil {
 		return t.Anim.Outputs()
 	}
 	out := t.Opts.Outputs()
-	for _, d := range []string{t.TwoUp, t.Marks} {
+	for _, d := range []string{t.TwoUp, t.Marks, t.Duplex} {
 		if d != "" {
 			out = append(out, d)
 		}
@@ -327,7 +364,7 @@ func videoLine(t Target, o render.Options, formats []string, dur float64, fps in
 		opt string
 		set bool
 	}{{"pdf", o.PDF != ""}, {"html", o.HTML != ""}, {"transparent", o.Transparent}, {"blank-margin", seen["blank-margin"]},
-		{"2up", t.TwoUp != ""}, {"marks", t.Marks != ""}, {"trim", t.Trim != (marks.Trim{})}} {
+		{"2up", t.TwoUp != ""}, {"marks", t.Marks != ""}, {"trim", t.Trim != (marks.Trim{})}, {"back", t.Back != ""}} {
 		if r.set {
 			return Target{}, fmt.Errorf("%s reads a settled page; a video line has one only at its end", r.opt)
 		}
