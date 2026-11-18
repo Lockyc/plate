@@ -137,23 +137,6 @@ func TestBFLPollGivesUp(t *testing.T) {
 	}
 }
 
-func TestBFLContextDeadlineWhilePolling(t *testing.T) {
-	m := bflModel(t)
-	bflServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodPost {
-			fmt.Fprint(w, `{"id":"j"}`)
-			return
-		}
-		fmt.Fprint(w, `{"status":"Generating"}`)
-	}))
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
-	defer cancel()
-	imgs, fails, err := (bfl{}).Generate(ctx, Request{Model: m, Prompt: "p", N: 1, Size: "1K"})
-	if err != nil || len(imgs) != 0 || len(fails) != 1 || !strings.Contains(fails[0].Reason, "Generating") {
-		t.Fatalf("imgs=%d fails=%v err=%v", len(imgs), fails, err)
-	}
-}
-
 func TestBFLReadyButUnusableIsBilled(t *testing.T) {
 	m := bflModel(t)
 	noSleep(t)

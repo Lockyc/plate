@@ -21,6 +21,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/lockyc/plate/internal/engine"
@@ -530,59 +531,66 @@ func TestRefLargeJPEGDownscaled(t *testing.T) {
 	}
 }
 
+// bubbleServer serves h on the in-memory network inside a synctest bubble
+// and sends every HTTP call through it, so the provider's waits run on the
+// bubble's fake clock; it returns the URL to point a provider at.
+func bubbleServer(t *testing.T, h http.HandlerFunc) string {
+	t.Helper()
+	srv := httptest.NewTestServer(t, h)
+	prev := http.DefaultTransport
+	http.DefaultTransport = srv.Client().Transport
+	t.Cleanup(func() { http.DefaultTransport = prev })
+	return srv.URL
+}
+
 // TestInterruptedRoundKeepsWhatArrived: cancelled after two of four answers,
-// the round holds those two and is complete.
+// the round holds those two and is complete. On the fake clock the cancel
+// waits until every other goroutine is blocked, so the client has read both
+// answers first.
 func TestInterruptedRoundKeepsWhatArrived(t *testing.T) {
 	needMagick(t)
-	m, _ := pins.ImageModelFor("google", "")
-	t.Setenv(m.KeyEnv, "test-key-not-real")
-	out := pngOf(t, 4, 4, color.NRGBA{0, 0, 255, 255})
-	cctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	var n atomic.Int32
-	var answered sync.WaitGroup
-	answered.Add(2)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if n.Add(1) <= 2 {
-			defer answered.Done()
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]any{"responseId": "r", "candidates": []any{map[string]any{
-				"finishReason": "STOP",
-				"content": map[string]any{"role": "model", "parts": []any{map[string]any{"inlineData": map[string]any{
-					"mimeType": "image/png", "data": base64.StdEncoding.EncodeToString(out),
-				}}}},
-			}}})
-			return
+	synctest.Test(t, func(t *testing.T) {
+		m, _ := pins.ImageModelFor("google", "")
+		t.Setenv(m.KeyEnv, "test-key-not-real")
+		out := pngOf(t, 4, 4, color.NRGBA{0, 0, 255, 255})
+		cctx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		var n atomic.Int32
+		url := bubbleServer(t, func(w http.ResponseWriter, r *http.Request) {
+			if n.Add(1) <= 2 {
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(map[string]any{"responseId": "r", "candidates": []any{map[string]any{
+					"finishReason": "STOP",
+					"content": map[string]any{"role": "model", "parts": []any{map[string]any{"inlineData": map[string]any{
+						"mimeType": "image/png", "data": base64.StdEncoding.EncodeToString(out),
+					}}}},
+				}}})
+				return
+			}
+			// The server sees the client hang up only once the body is read.
+			io.Copy(io.Discard, r.Body)
+			time.Sleep(time.Second)
+			cancel()
+			<-r.Context().Done()
+		})
+		t.Setenv("PLATE_GENAI_GOOGLE_URL", url)
+		dir := t.TempDir()
+		pose := filepath.Join(dir, "wave")
+		ref := writeRef(t, dir, "front.png")
+		var o, e bytes.Buffer
+		code := Main(cctx, []string{"--pose", pose, "--prompt", "p", "--ref", ref, "--provider", "google"}, &o, &e)
+		if code != 1 {
+			t.Fatalf("code %d, want 1: %s", code, e.String())
 		}
-		// The server sees the client hang up only once the body is read.
-		io.Copy(io.Discard, r.Body)
-		answered.Wait()
-		// Give the client time to read the two answers before the cancel.
-		time.Sleep(200 * time.Millisecond)
-		cancel()
-		select {
-		case <-r.Context().Done():
-		case <-time.After(5 * time.Second):
+		es, _ := os.ReadDir(filepath.Join(pose, "rounds"))
+		if len(es) != 1 || es[0].Name() != "01" {
+			t.Fatalf("rounds/ holds %v, want only 01", es)
 		}
-	}))
-	defer srv.Close()
-	t.Setenv("PLATE_GENAI_GOOGLE_URL", srv.URL)
-	dir := t.TempDir()
-	pose := filepath.Join(dir, "wave")
-	ref := writeRef(t, dir, "front.png")
-	var o, e bytes.Buffer
-	code := Main(cctx, []string{"--pose", pose, "--prompt", "p", "--ref", ref, "--provider", "google"}, &o, &e)
-	if code != 1 {
-		t.Fatalf("code %d, want 1: %s", code, e.String())
-	}
-	es, _ := os.ReadDir(filepath.Join(pose, "rounds"))
-	if len(es) != 1 || es[0].Name() != "01" {
-		t.Fatalf("rounds/ holds %v, want only 01", es)
-	}
-	got, _ := filepath.Glob(filepath.Join(pose, "rounds", "01", "a*.png"))
-	if len(got) != 2 {
-		t.Errorf("round 01 holds %d attempts, want 2", len(got))
-	}
+		got, _ := filepath.Glob(filepath.Join(pose, "rounds", "01", "a*.png"))
+		if len(got) != 2 {
+			t.Errorf("round 01 holds %d attempts, want 2", len(got))
+		}
+	})
 }
 
 func TestRefChainEmbedded(t *testing.T) {
@@ -693,35 +701,33 @@ func TestUnreportedCostWarns(t *testing.T) {
 // attempt in failures.json, marked unreported.
 func TestCutOffAnswerKeepsTheRound(t *testing.T) {
 	needMagick(t)
-	m, _ := pins.ImageModelFor("openrouter", "")
-	t.Setenv(m.KeyEnv, "test-key-not-real")
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		io.Copy(io.Discard, r.Body)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"data":[{"b64_json":"`))
-		w.(http.Flusher).Flush()
-		select {
-		case <-r.Context().Done():
-		case <-time.After(5 * time.Second):
+	synctest.Test(t, func(t *testing.T) {
+		m, _ := pins.ImageModelFor("openrouter", "")
+		t.Setenv(m.KeyEnv, "test-key-not-real")
+		url := bubbleServer(t, func(w http.ResponseWriter, r *http.Request) {
+			io.Copy(io.Discard, r.Body)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"data":[{"b64_json":"`))
+			w.(http.Flusher).Flush()
+			<-r.Context().Done()
+		})
+		t.Setenv("PLATE_GENAI_OPENROUTER_URL", url)
+		dir := t.TempDir()
+		pose := filepath.Join(dir, "wave")
+		ref := writeRef(t, dir, "front.png")
+		cctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		defer cancel()
+		var o, e bytes.Buffer
+		code := Main(cctx, []string{"--pose", pose, "--prompt", "p", "--ref", ref, "--provider", "openrouter", "--n", "1"}, &o, &e)
+		if code != 1 || !strings.Contains(o.String(), "\nunreported 1\n") {
+			t.Errorf("code %d, stdout %q, stderr %q", code, o.String(), e.String())
 		}
-	}))
-	defer srv.Close()
-	t.Setenv("PLATE_GENAI_OPENROUTER_URL", srv.URL)
-	dir := t.TempDir()
-	pose := filepath.Join(dir, "wave")
-	ref := writeRef(t, dir, "front.png")
-	cctx, cancel := context.WithTimeout(ctx, 2*time.Second)
-	defer cancel()
-	var o, e bytes.Buffer
-	code := Main(cctx, []string{"--pose", pose, "--prompt", "p", "--ref", ref, "--provider", "openrouter", "--n", "1"}, &o, &e)
-	if code != 1 || !strings.Contains(o.String(), "\nunreported 1\n") {
-		t.Errorf("code %d, stdout %q, stderr %q", code, o.String(), e.String())
-	}
-	fs, err := LoadFailures(pose)
-	if err != nil || len(fs) != 1 || len(fs[0].Failures) != 1 || !fs[0].Failures[0].Unreported {
-		t.Errorf("failures %+v, %v; want round 01 kept with one unreported failure", fs, err)
-	}
+		fs, err := LoadFailures(pose)
+		if err != nil || len(fs) != 1 || len(fs[0].Failures) != 1 || !fs[0].Failures[0].Unreported {
+			t.Errorf("failures %+v, %v; want round 01 kept with one unreported failure", fs, err)
+		}
+	})
 }
 
 func TestChargedFailuresReachTheTotal(t *testing.T) {
