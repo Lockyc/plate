@@ -776,8 +776,8 @@ func init() {
 // engine's absolute colorimetric Lab of each patch's CMYK against the
 // chart's measured Lab. mode "gs" scores its sRGB proof (relative
 // colorimetric, black point compensation) of each patch's CMYK at 8 bits
-// against Ghostscript's with press's soft-proof flags, both read back as
-// Lab D50. stat is "mean", "p95" or "max".
+// against Ghostscript's in press's conversion intent (gsref.Intent), both
+// read back as Lab D50. stat is "mean", "p95" or "max".
 func fogra39DE00(p Params) (float64, error) {
 	chart, err := p.Path("chart")
 	if err != nil {

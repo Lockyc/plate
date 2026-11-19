@@ -133,7 +133,7 @@ func TestPressClean(t *testing.T) {
 	write := enginetest.Calls(t, e.gs)[0]
 	for _, want := range []string{"-dNoOutputFonts", "-dCompatibilityLevel=1.4", "-sColorConversionStrategy=CMYK", "-sOutputICCProfile=" + e.icc,
 		"--permit-file-read=" + e.icc, "-dFIXEDMEDIA", "-dDEVICEWIDTHPOINTS=900", "-dDEVICEHEIGHTPOINTS=675",
-		"-dAutoFilterColorImages=false", "-dColorImageFilter=/FlateEncode", "-dColorImageResolution=450", "-dColorImageDownsampleThreshold=1.5", "-dSAFER"} {
+		"-dAutoFilterColorImages=false", "-dColorImageFilter=/FlateEncode", "-dColorImageResolution=450", "-dColorImageDownsampleThreshold=1.5", "-dSAFER", "-dRenderIntent=1", "-dBlackPtComp=1"} {
 		if !slices.Contains(write, want) {
 			t.Errorf("pdfwrite args lack %s", want)
 		}

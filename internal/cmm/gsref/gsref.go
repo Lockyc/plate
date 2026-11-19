@@ -1,7 +1,6 @@
 // Package gsref converts CMYK patches to sRGB with Ghostscript's own colour
-// management, the reference plate's colour engine is measured against: the
-// flags are press's soft proof's, relative colorimetric with black point
-// compensation.
+// management, the reference plate's colour engine is measured against, in
+// Intent: the intent press converts with.
 package gsref
 
 import (
@@ -15,6 +14,10 @@ import (
 	"github.com/lockyc/plate/internal/engine"
 	"github.com/lockyc/plate/internal/raster"
 )
+
+// Intent is the Ghostscript flags for press's conversion intent: relative
+// colorimetric with black point compensation, as cmm's ToSRGB proofs.
+var Intent = []string{"-dRenderIntent=1", "-dBlackPtComp=1"}
 
 // patch is each patch's side in points, rendered at 72 dpi: one pixel a
 // point, so a patch centre is far from any edge.
@@ -46,9 +49,9 @@ func SRGB(ctx context.Context, icc string, cmyk [][4]byte) ([][3]float64, error)
 		return nil, err
 	}
 	png := filepath.Join(dir, "patches.png")
-	args := []string{"-q", "-dBATCH", "-dNOPAUSE", "-dSAFER", "-sDEVICE=png16m", "-r72",
-		"--permit-file-read=" + icc, "-sDefaultCMYKProfile=" + icc, "-dRenderIntent=1", "-dBlackPtComp=1",
-		"-sOutputFile=" + png, pdf}
+	args := append([]string{"-q", "-dBATCH", "-dNOPAUSE", "-dSAFER", "-sDEVICE=png16m", "-r72",
+		"--permit-file-read=" + icc, "-sDefaultCMYKProfile=" + icc}, Intent...)
+	args = append(args, "-sOutputFile="+png, pdf)
 	if _, err := engine.Run(ctx, engine.Cmd{Engine: "gs", Args: args, StderrFatal: true, Inputs: []string{pdf, icc}, Outputs: []string{png}}); err != nil {
 		return nil, err
 	}

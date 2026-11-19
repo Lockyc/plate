@@ -34,6 +34,7 @@ import (
 
 	"github.com/lockyc/plate/internal/cli"
 	"github.com/lockyc/plate/internal/cmm"
+	"github.com/lockyc/plate/internal/cmm/gsref"
 	"github.com/lockyc/plate/internal/engine"
 	"github.com/lockyc/plate/internal/pdf"
 	"github.com/lockyc/plate/internal/raster"
@@ -418,7 +419,6 @@ func (j job) run(ctx context.Context) (err error) {
 		"-sDEVICE=pdfwrite", "-dNoOutputFonts",
 		"-dCompatibilityLevel=" + level, "-r" + ppi,
 		"-sColorConversionStrategy=CMYK", "-sOutputICCProfile=" + j.icc,
-		"-dRenderIntent=1", "-dBlackPtComp=1",
 		"-dFIXEDMEDIA", "-dDEVICEWIDTHPOINTS=" + pt(src.W), "-dDEVICEHEIGHTPOINTS=" + pt(src.H),
 		"-dAutoFilterColorImages=" + strconv.FormatBool(j.jpeg > 0), "-dAutoFilterGrayImages=false",
 		"-dColorImageFilter=/FlateEncode", "-dGrayImageFilter=/FlateEncode",
@@ -428,6 +428,7 @@ func (j job) run(ctx context.Context) (err error) {
 		"-dColorImageDownsampleThreshold=1.5", "-dGrayImageDownsampleThreshold=1.5",
 		"-dDownsampleMonoImages=false",
 		"-sOutputFile=" + gsLiteral(j.out)}
+	args = append(args, gsref.Intent...)
 	if len(j.spots) > 0 {
 		// The spots' cmyk is in the output profile's space, so gs keeps it.
 		args = append(args, "-sDefaultCMYKProfile="+j.icc)
