@@ -100,6 +100,26 @@ exit   = 1
 stderr = "ink"
 absent = ["{tmp:press.pdf}"]
 
+[[case]]
+name   = "press-overprint-black"
+why    = "black text on a colour overprints it, so misregistration leaves no paper hairline around the letters"
+files  = { "page.html" = '''<!doctype html><style>@page{size:1200px 896px;margin:0}html,body{margin:0;width:1200px;height:896px}body{background:#fdfcf1}.bar{position:absolute;bottom:0;width:100%;height:200px;background:#f7a81b;color:#000000;font:bold 80px sans-serif}</style><div class="bar">Footer text, 1 Example St</div>''' }
+setup  = [
+  ["plate", "render", "--size", "1200x896", "--pdf", "{tmp:src.pdf}", "{tmp:page.html}"],
+]
+run    = ["press", "--icc", "{asset:Coated_Fogra39L_VIGC_300.icc}", "--cmyk", "000000=0,0,0,100", "{tmp:src.pdf}", "{tmp:press.pdf}"]
+stdout = "1 text object(s) set to overprint"
+
+[[case]]
+name   = "press-knockout"
+why    = "--knockout leaves black text knocked out of the colour under it"
+files  = { "page.html" = '''<!doctype html><style>@page{size:1200px 896px;margin:0}html,body{margin:0;width:1200px;height:896px}body{background:#fdfcf1}.bar{position:absolute;bottom:0;width:100%;height:200px;background:#f7a81b;color:#000000;font:bold 80px sans-serif}</style><div class="bar">Footer text, 1 Example St</div>''' }
+setup  = [
+  ["plate", "render", "--size", "1200x896", "--pdf", "{tmp:src.pdf}", "{tmp:page.html}"],
+]
+run    = ["press", "--icc", "{asset:Coated_Fogra39L_VIGC_300.icc}", "--cmyk", "000000=0,0,0,100", "--knockout", "{tmp:src.pdf}", "{tmp:press.pdf}"]
+stdout = "CMYK only"
+
 # press-jpeg: an A3 sign whose artwork is a large textured cut-out with
 # transparency, placed at about 330 ppi, as a character on an event sign
 # is. Kept lossless, the cut-out alone makes the master too big to email.
