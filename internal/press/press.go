@@ -131,12 +131,12 @@ const gsTimeout = 30 * time.Minute
 // nonCMYK matches every colour space and RGB fill/stroke operator that may
 // not appear in a master, in qpdf's uncompressed QDF form, read without its
 // image data (see withoutImageData).
+var nonCMYK = regexp.MustCompile(`(?m)/(DeviceRGB|CalRGB|ICCBased|Lab|Indexed|Separation|DeviceN)\b| (rg|RG)$`)
+
 // fillOverprint is the fill overprint an ExtGState sets. A master keeps it
 // as /op true, not /OP true: pdfwrite writes only the overprint the content
 // paints with, and outlined text is filled, never stroked.
 var fillOverprint = regexp.MustCompile(`/op true\b`)
-
-var nonCMYK = regexp.MustCompile(`(?m)/(DeviceRGB|CalRGB|ICCBased|Lab|Indexed|Separation|DeviceN)\b| (rg|RG)$`)
 
 type region struct {
 	spec string
