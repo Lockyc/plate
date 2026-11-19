@@ -854,8 +854,8 @@ var (
 // patternSteps is the largest gap, in pattern space, between a tiling
 // pattern's step and its cell, |XStep| against the BBox's width and |YStep|
 // against its height, over every tiling pattern in qdf (a file qpdf --qdf
-// wrote). Quartz draws a step wider than the cell as a seam and the start
-// of a second tile. A file with no tiling pattern measures 0. The gap is
+// wrote). Where the step is wider than the cell, a renderer may draw a gap
+// between tiles. A file with no tiling pattern measures 0. The gap is
 // rounded to the 1e-4 a PDF real carries, so float error in a BBox of
 // 12.7 to 53.1 against an XStep of 40.4 is no gap.
 func patternSteps(p Params) (float64, error) {

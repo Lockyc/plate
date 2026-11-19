@@ -169,7 +169,7 @@ max    = 0.002
 
 [[case]]
 name   = "press-gradient-tiles"
-why    = "a gradient with a transparent stop must tile once: a step wider than the tile drew a seam and a second tile in macOS Preview"
+why    = "a gradient with a transparent stop is a tiling pattern whose step must equal its tile: a step wider than the tile lets a renderer draw a gap between tiles"
 files  = { "page.html" = '''<!doctype html><style>@page{size:1120px 792px;margin:0}html,body{margin:0;width:1120px;height:792px;overflow:hidden}body{background:#e4f1fa;font:bold 80px sans-serif;color:#062d5f}.g{position:absolute;inset:0;background:radial-gradient(circle at 30% 40%,#f7a81b 0,rgba(247,168,27,0) 60%)}p{position:absolute;margin:0;left:40px;top:40px}</style><div class="g"></div><p>Sample sign</p>''' }
 setup  = [
   ["plate", "render", "--size", "1120x792", "--pdf", "{tmp:src.pdf}", "{tmp:page.html}"],
