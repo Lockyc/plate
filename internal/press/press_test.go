@@ -491,7 +491,7 @@ func TestWithOverprintKOnly(t *testing.T) {
 	if !strings.Contains(s, "stream\n0 0 0 1 k BT (x) Tj ET\nendstream") {
 		t.Errorf("a stream no page draws was rewritten:\n%s", s)
 	}
-	if !strings.Contains(s, "/PlateOP << /Type /ExtGState /OP true /op true /OPM 1 >>") {
+	if !strings.Contains(s, "/PlateOP << /Type /ExtGState /OP false /op true /OPM 1 >>") {
 		t.Errorf("no /PlateOP state:\n%s", s)
 	}
 }
@@ -511,7 +511,7 @@ func TestWithOverprintMergesExtGState(t *testing.T) {
 			t.Fatalf("%s: n %d, %v", name, n, err)
 		}
 		s := string(out)
-		if !strings.Contains(s, "/G3 5 0 R") || strings.Count(s, "/PlateOP << /Type /ExtGState /OP true /op true /OPM 1 >>") != 1 || len(extGStateKey.FindAllString(s, -1)) != 1 {
+		if !strings.Contains(s, "/G3 5 0 R") || strings.Count(s, "/PlateOP << /Type /ExtGState /OP false /op true /OPM 1 >>") != 1 || len(extGStateKey.FindAllString(s, -1)) != 1 {
 			t.Errorf("%s:\n%s", name, s)
 		}
 	}
@@ -523,9 +523,16 @@ func TestVerifyOverprintLost(t *testing.T) {
 	if code := e.run("--cmyk", "000000=0,0,0,100"); code != 1 || !strings.Contains(e.stderr.String(), "overprint") {
 		t.Fatalf("code %d, stderr %q", code, e.stderr.String())
 	}
+	// /op true under OPM 0 knocks out the zero C, M and Y: no overprint.
 	e = setup(t)
 	t.Setenv("SRC_QDF", kText)
-	t.Setenv("QDF", "<< /OPM 1 /Type /ExtGState /op true >>")
+	t.Setenv("QDF", "<<\n  /Type /ExtGState\n  /op true\n>>\n<<\n  /OPM 1\n>>")
+	if code := e.run("--cmyk", "000000=0,0,0,100"); code != 1 || !strings.Contains(e.stderr.String(), "overprint") {
+		t.Fatalf("/op true without /OPM 1 passed: code %d, stderr %q", code, e.stderr.String())
+	}
+	e = setup(t)
+	t.Setenv("SRC_QDF", kText)
+	t.Setenv("QDF", "<<\n  /OPM 1\n  /Type /ExtGState\n  /op true\n>>")
 	if code := e.run("--cmyk", "000000=0,0,0,100"); code != 0 {
 		t.Fatalf("a master that kept its overprint failed: %s", e.stderr.String())
 	}

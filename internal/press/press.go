@@ -133,10 +133,26 @@ const gsTimeout = 30 * time.Minute
 // image data (see withoutImageData).
 var nonCMYK = regexp.MustCompile(`(?m)/(DeviceRGB|CalRGB|ICCBased|Lab|Indexed|Separation|DeviceN)\b| (rg|RG)$`)
 
-// fillOverprint is the fill overprint an ExtGState sets. A master keeps it
-// as /op true, not /OP true: pdfwrite writes only the overprint the content
-// paints with, and outlined text is filled, never stroked.
-var fillOverprint = regexp.MustCompile(`/op true\b`)
+// innerDict is a dictionary with none nested in it, as pdfwrite writes an
+// ExtGState.
+var innerDict = regexp.MustCompile(`<<[^<>]*>>`)
+
+// fillOverprint reports whether qdf has an ExtGState that overprints a fill
+// in OPM 1: /op true under OPM 0 knocks out the zero C, M and Y of black
+// text, which overprints nothing.
+func fillOverprint(qdf []byte) bool {
+	for _, d := range innerDict.FindAll(qdf, -1) {
+		if opTrue.Match(d) && opm1.Match(d) {
+			return true
+		}
+	}
+	return false
+}
+
+var (
+	opTrue = regexp.MustCompile(`/op true\b`)
+	opm1   = regexp.MustCompile(`/OPM 1\b`)
+)
 
 type region struct {
 	spec string
@@ -481,7 +497,7 @@ func (j job) verify(ctx context.Context, src pdf.Info) error {
 	if len(spaces) > 0 {
 		return fmt.Errorf("non-CMYK colour in the master: %s", strings.Join(spaces, " "))
 	}
-	if j.overprints > 0 && !fillOverprint.Match(withoutImageData(b)) {
+	if j.overprints > 0 && !fillOverprint(withoutImageData(b)) {
 		return fmt.Errorf("%d text object(s) were set to overprint and the master has no overprinting fill; press with --knockout to print them knocked out", j.overprints)
 	}
 	got, err := pdf.Read(ctx, j.out)

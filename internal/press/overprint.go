@@ -13,8 +13,10 @@ import (
 // after it, since BT and ET do not save the graphics state and the next
 // fill would otherwise overprint too. OPM 1 leaves the zero C, M and Y of
 // the text unpainted, so the colour under the text survives on those plates.
+// Only the fill overprints: K-only is judged on the fill colour, so a
+// stroke (text render modes 1 and 2) may be coloured and stays knocked out.
 const (
-	opState = "/PlateOP << /Type /ExtGState /OP true /op true /OPM 1 >>"
+	opState = "/PlateOP << /Type /ExtGState /OP false /op true /OPM 1 >>"
 	koState = "/PlateKO << /Type /ExtGState /OP false /op false /OPM 0 >>"
 )
 
