@@ -317,22 +317,37 @@ func TestVerifyFlag(t *testing.T) {
 	master := filepath.Join(e.dir, "master.pdf")
 	os.WriteFile(master, []byte("%PDF master"), 0o644)
 	var out, errb bytes.Buffer
-	if code := Main(context.Background(), []string{"--icc", e.icc, "--verify", master, e.in, e.out}, &out, &errb); code != 2 {
-		t.Errorf("--verify with an output: code %d, want 2", code)
+	if code := Main(context.Background(), []string{"--icc", e.icc, "--verify", master, e.in, e.out}, &out, &errb); code != 2 || !strings.Contains(errb.String(), "--verify takes <in.pdf> only") {
+		t.Errorf("--verify with an output: code %d, stderr %q", code, errb.String())
 	}
+	listing := func() []string {
+		ents, err := os.ReadDir(e.dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var names []string
+		for _, f := range ents {
+			names = append(names, f.Name())
+		}
+		return names
+	}
+	before := listing()
 	if code := Main(context.Background(), []string{"--icc", e.icc, "--verify", master, e.in}, &out, &errb); code != 0 {
 		t.Fatalf("code %d: %s", code, errb.String())
 	}
-	if e.outExists() {
-		t.Error("--verify wrote a file")
+	if after := listing(); !slices.Equal(before, after) {
+		t.Errorf("--verify changed the directory: %q then %q", before, after)
+	}
+	if b, _ := os.ReadFile(master); string(b) != "%PDF master" {
+		t.Errorf("--verify rewrote the master: %q", b)
 	}
 	for _, c := range enginetest.Calls(t, e.gs) {
 		if slices.Contains(c, "-sDEVICE=pdfwrite") {
 			t.Errorf("--verify converted: %q", c)
 		}
 	}
-	if !strings.Contains(out.String(), "soft-proof RMSE") {
-		t.Errorf("stdout %q lacks the proof", out.String())
+	if !strings.Contains(out.String(), "soft-proof RMSE") || !strings.Contains(out.String(), "checked "+master) || strings.Contains(out.String(), "wrote") {
+		t.Errorf("stdout %q", out.String())
 	}
 }
 

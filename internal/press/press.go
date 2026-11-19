@@ -2,9 +2,11 @@
 // every glyph outlined, every colour converted to the supplied CMYK profile,
 // the page box forced from the source, images downsampled only well above
 // --max-ppi and kept lossless unless --jpeg sets a quality for photographic
-// colour ones. It then proves the master: no fonts, no RGB anywhere, the same page boxes and count, no more than --max-ink total ink beyond a speck, and a soft proof of the master
-// (its CMYK read back through plate's own colour engine) that matches the source by RMSE over each page and each --region. The
-// master is a separate deliverable: outlining destroys the text a text
+// colour ones. It then proves the master: no fonts, no RGB anywhere, the
+// same page boxes and count, no more than --max-ink total ink beyond a
+// speck, and a soft proof of the master (its CMYK read back through plate's
+// own colour engine) that matches the source by RMSE over each page and
+// each --region. The master is a separate deliverable: outlining destroys the text a text
 // check reads, so check the source, and press the checked source.
 package press
 
@@ -167,6 +169,7 @@ type job struct {
 	regions         []region
 	spots           []spot
 	log             io.Writer
+	checkOnly       bool // out is an existing master being checked, not one just written
 }
 
 // Main runs `plate press`.
@@ -187,7 +190,14 @@ func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	if !ok {
 		return code
 	}
-	if want := map[bool]int{false: 2, true: 1}[*verifyOnly != ""]; len(rest) != want {
+	want := 2
+	if *verifyOnly != "" {
+		want = 1
+		if len(rest) == 2 {
+			return cli.Usage(stderr, "press", "--verify takes <in.pdf> only, and writes no output")
+		}
+	}
+	if len(rest) != want {
 		fs.Usage()
 		return 2
 	}
@@ -229,7 +239,7 @@ func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		if _, err = os.Stat(j.icc); err == nil {
 			if j.prof, err = cmm.Load(j.icc); err == nil {
 				if *verifyOnly != "" {
-					j.in, j.out = rest[0], *verifyOnly
+					j.in, j.out, j.checkOnly = rest[0], *verifyOnly, true
 					err = j.check(ctx)
 				} else {
 					j.in, j.out = rest[0], rest[1]
@@ -504,7 +514,11 @@ func (j job) verify(ctx context.Context, src pdf.Info) error {
 	if err := j.proof(ctx, tmp, src, cmyk); err != nil {
 		return err
 	}
-	fmt.Fprintf(j.log, "wrote %s: no fonts, CMYK only, %d page(s) at %gx%g pt\n", j.out, src.Pages, src.W, src.H)
+	verb := "wrote"
+	if j.checkOnly {
+		verb = "checked"
+	}
+	fmt.Fprintf(j.log, "%s %s: no fonts, CMYK only, %d page(s) at %gx%g pt\n", verb, j.out, src.Pages, src.W, src.H)
 	return nil
 }
 
