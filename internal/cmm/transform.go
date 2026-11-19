@@ -192,6 +192,18 @@ func (p *Profile) Lab(cmyk [4]float64) [3]float64 {
 	return lab
 }
 
+// AbsoluteLab is Lab under the ICC-absolute colorimetric intent: the
+// relative PCS colour scaled per XYZ component by the media white over
+// D50, so paper comes out as the paper's measured colour, as a
+// characterisation chart records it.
+func (p *Profile) AbsoluteLab(cmyk [4]float64) [3]float64 {
+	xyz := labToXYZ(p.Lab(cmyk))
+	for i := range 3 {
+		xyz[i] *= p.white[i] / d50[i]
+	}
+	return xyzToLab(xyz)
+}
+
 // ToSRGB converts a CMYK image to sRGB: relative colorimetric, the
 // profile's black point scaled to sRGB's black (XYZ 0) with the white
 // held, adapted D50 to D65 by Bradford, clipped to the gamut. Rows are

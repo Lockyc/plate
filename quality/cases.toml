@@ -2013,9 +2013,25 @@ timeout_ms = 500
 '''
 
 [[case]]
-name   = "cmm-fogra39"
-why    = "plate's own CMYK to sRGB engine must land Fogra's measured patches no worse than Ghostscript does with press's soft-proof flags"
+name   = "cmm-fogra39-mean"
+why    = "plate's colour engine must read a FOGRA39 profile back to Fogra's own measurements; a PCS decoding error (lut16 legacy Lab read as v4) lands about 0.5 ΔE00 off on average"
 run    = ["version"]
 metric = "fogra39-de00"
-params = { chart = "{asset:FOGRA39.txt}", icc = "{asset:Coated_Fogra39L_VIGC_300.icc}", engine = "go", stat = "p95" }
-max    = 4.9
+params = { chart = "{asset:FOGRA39.txt}", icc = "{asset:Coated_Fogra39L_VIGC_300.icc}", mode = "absolute", stat = "mean" }
+max    = 0.02
+
+[[case]]
+name   = "cmm-fogra39-max"
+why    = "no FOGRA39 patch may land far from Fogra's measurement, which an average hides"
+run    = ["version"]
+metric = "fogra39-de00"
+params = { chart = "{asset:FOGRA39.txt}", icc = "{asset:Coated_Fogra39L_VIGC_300.icc}", mode = "absolute", stat = "max" }
+max    = 0.30
+
+[[case]]
+name   = "cmm-agrees-gs"
+why    = "plate's sRGB proof (relative colorimetric, black point compensation) must match Ghostscript's with press's soft-proof flags; without black point compensation it is about 1.5 ΔE00 off on average"
+run    = ["version"]
+metric = "fogra39-de00"
+params = { chart = "{asset:FOGRA39.txt}", icc = "{asset:Coated_Fogra39L_VIGC_300.icc}", mode = "gs", stat = "mean" }
+max    = 0.20

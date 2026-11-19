@@ -22,6 +22,8 @@ type Profile struct {
 	// white; darkest is the CMYK that prints it.
 	black   [3]float64
 	darkest [4]float64
+	// white is the media white point, XYZ D50 (wtpt).
+	white [3]float64
 }
 
 // Load reads a CMYK output profile. It converts with A2B1 (relative
@@ -88,6 +90,12 @@ func Load(path string) (*Profile, error) {
 	if p.a2b.in != 4 || p.a2b.out != 3 || p.b2a.in != 3 || p.b2a.out != 4 {
 		return nil, fmt.Errorf("%s: want a 4-to-3 A2B and a 3-to-4 B2A, got %d-to-%d and %d-to-%d", path, p.a2b.in, p.a2b.out, p.b2a.in, p.b2a.out)
 	}
+	wt, ok := tags["wtpt"]
+	if !ok || len(wt) < 20 || string(wt[:4]) != "XYZ " {
+		return nil, fmt.Errorf("%s has no readable wtpt (media white point) tag", path)
+	}
+	r := &reader{b: wt}
+	p.white = [3]float64{r.s15f16(8), r.s15f16(12), r.s15f16(16)}
 	p.findBlack()
 	return p, nil
 }

@@ -495,24 +495,9 @@ func TestDoubleExposure(t *testing.T) {
 	}
 }
 
-func TestReadCGATS(t *testing.T) {
-	cmyk, lab, err := readCGATS("assets/FOGRA39.txt")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(cmyk) != 1617 || cmyk[1] != [4]float64{0, 10, 0, 0} || lab[0] != [3]float64{95, 0, -2} {
-		t.Fatalf("read %d patches, patch 2 %v, patch 1 Lab %v", len(cmyk), cmyk[1], lab[0])
-	}
-	bad := filepath.Join(t.TempDir(), "bad.txt")
-	os.WriteFile(bad, []byte("BEGIN_DATA_FORMAT\nSAMPLE_ID CMYK_C\nEND_DATA_FORMAT\n"), 0o644)
-	if _, _, err := readCGATS(bad); err == nil || !strings.Contains(err.Error(), "no CMYK_M column") {
-		t.Fatalf("readCGATS(bad) = %v", err)
-	}
-}
-
 func TestFogra39RefusesUnknownParams(t *testing.T) {
-	base := Params{"chart": "assets/FOGRA39.txt", "icc": "assets/Coated_Fogra39L_VIGC_300.icc", "engine": "go", "stat": "p95"}
-	for k, v := range map[string]string{"engine": "lcms", "stat": "max"} {
+	base := Params{"chart": "assets/FOGRA39.txt", "icc": "assets/Coated_Fogra39L_VIGC_300.icc", "mode": "absolute", "stat": "p95"}
+	for k, v := range map[string]string{"mode": "proof", "stat": "median"} {
 		p := Params{}
 		for kk, vv := range base {
 			p[kk] = vv

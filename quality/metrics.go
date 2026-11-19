@@ -771,12 +771,13 @@ func init() {
 	Metrics["fogra39-de00"] = fogra39DE00
 }
 
-// fogra39DE00 scores a CMYK-to-sRGB engine against Fogra's measurements:
-// every patch of the CGATS chart whose measured Lab lies inside sRGB, its
-// CMYK taken to 8 bits and converted through icc by engine ("go", plate's
-// cmm; "gs", Ghostscript with press's soft-proof flags), read back as Lab
-// D50 and compared with the measurement by CIEDE2000. stat is "mean" or
-// "p95".
+// fogra39DE00 measures plate's colour engine over every patch of a CGATS
+// chart by CIEDE2000, through profile icc. mode "absolute" scores the
+// engine's absolute colorimetric Lab of each patch's CMYK against the
+// chart's measured Lab. mode "gs" scores its sRGB proof (relative
+// colorimetric, black point compensation) of each patch's CMYK at 8 bits
+// against Ghostscript's with press's soft-proof flags, both read back as
+// Lab D50. stat is "mean", "p95" or "max".
 func fogra39DE00(p Params) (float64, error) {
 	chart, err := p.Path("chart")
 	if err != nil {
@@ -786,49 +787,46 @@ func fogra39DE00(p Params) (float64, error) {
 	if err != nil {
 		return 0, err
 	}
-	cmyk, lab, err := readCGATS(chart)
+	stat := p.String("stat", "")
+	if !slices.Contains([]string{"mean", "p95", "max"}, stat) {
+		return 0, fmt.Errorf("stat %q: want mean, p95 or max", stat)
+	}
+	mode := p.String("mode", "")
+	if mode != "absolute" && mode != "gs" {
+		return 0, fmt.Errorf("mode %q: want absolute or gs", mode)
+	}
+	cmyk, lab, err := cmm.ReadCGATS(chart)
 	if err != nil {
 		return 0, err
 	}
-	var patches [][4]byte
-	var measured [][3]float64
-	for i, l := range lab {
-		if rgb := cmm.LabToSRGB(l); slices.ContainsFunc(rgb[:], func(v float64) bool { return v < 0 || v > 1 }) {
-			continue
-		}
-		var c [4]byte
-		for k, v := range cmyk[i] {
-			c[k] = byte(math.Round(v / 100 * 255))
-		}
-		patches = append(patches, c)
-		measured = append(measured, l)
+	prof, err := cmm.Load(icc)
+	if err != nil {
+		return 0, err
 	}
-	if len(patches) == 0 {
-		return 0, fmt.Errorf("%s: no patch lies inside sRGB", chart)
-	}
-	var got [][3]float64
-	switch e := p.String("engine", ""); e {
-	case "go":
-		prof, err := cmm.Load(icc)
+	de := make([]float64, len(cmyk))
+	if mode == "absolute" {
+		for i, c := range cmyk {
+			de[i] = cmm.DE2000(prof.AbsoluteLab([4]float64{c[0] / 100, c[1] / 100, c[2] / 100, c[3] / 100}), lab[i])
+		}
+	} else {
+		patches := make([][4]byte, len(cmyk))
+		for i, c := range cmyk {
+			for k, v := range c {
+				patches[i][k] = byte(math.Round(v / 100 * 255))
+			}
+		}
+		ref, err := gsref.SRGB(context.Background(), icc, patches)
 		if err != nil {
 			return 0, err
 		}
-		for _, c := range patches {
+		for i, c := range patches {
 			px := prof.ToSRGB(raster.PAM{W: 1, H: 1, Pix: c[:]}).RGBA64At(0, 0)
-			got = append(got, [3]float64{float64(px.R) / 65535, float64(px.G) / 65535, float64(px.B) / 65535})
+			got := [3]float64{float64(px.R) / 65535, float64(px.G) / 65535, float64(px.B) / 65535}
+			de[i] = cmm.DE2000(cmm.SRGBToLab(got), cmm.SRGBToLab(ref[i]))
 		}
-	case "gs":
-		if got, err = gsref.SRGB(context.Background(), icc, patches); err != nil {
-			return 0, err
-		}
-	default:
-		return 0, fmt.Errorf("engine %q: want go or gs", e)
 	}
-	de := make([]float64, len(patches))
-	for i := range patches {
-		de[i] = cmm.DE2000(cmm.SRGBToLab(got[i]), measured[i])
-	}
-	switch s := p.String("stat", ""); s {
+	slices.Sort(de)
+	switch stat {
 	case "mean":
 		var sum float64
 		for _, v := range de {
@@ -836,64 +834,7 @@ func fogra39DE00(p Params) (float64, error) {
 		}
 		return sum / float64(len(de)), nil
 	case "p95":
-		slices.Sort(de)
 		return de[int(math.Ceil(0.95*float64(len(de))))-1], nil
-	default:
-		return 0, fmt.Errorf("stat %q: want mean or p95", s)
 	}
-}
-
-// readCGATS reads a CGATS characterisation file's CMYK_C/M/Y/K (percent)
-// and LAB_L/A/B columns.
-func readCGATS(path string) (cmyk [][4]float64, lab [][3]float64, err error) {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return nil, nil, err
-	}
-	var fields []string
-	var inFormat, inData bool
-	want := []string{"CMYK_C", "CMYK_M", "CMYK_Y", "CMYK_K", "LAB_L", "LAB_A", "LAB_B"}
-	var col []int
-	for _, line := range strings.Split(string(b), "\n") {
-		f := strings.Fields(line)
-		switch {
-		case len(f) == 0:
-		case f[0] == "BEGIN_DATA_FORMAT":
-			inFormat = true
-		case f[0] == "END_DATA_FORMAT":
-			inFormat = false
-			for _, w := range want {
-				i := slices.Index(fields, w)
-				if i < 0 {
-					return nil, nil, fmt.Errorf("%s: no %s column", path, w)
-				}
-				col = append(col, i)
-			}
-		case inFormat:
-			fields = append(fields, f...)
-		case f[0] == "BEGIN_DATA":
-			if col == nil {
-				return nil, nil, fmt.Errorf("%s: data before its format", path)
-			}
-			inData = true
-		case f[0] == "END_DATA":
-			inData = false
-		case inData:
-			if len(f) != len(fields) {
-				return nil, nil, fmt.Errorf("%s: %q has %d fields, want %d", path, strings.TrimSpace(line), len(f), len(fields))
-			}
-			var v [7]float64
-			for k, i := range col {
-				if v[k], err = strconv.ParseFloat(f[i], 64); err != nil {
-					return nil, nil, fmt.Errorf("%s: %w", path, err)
-				}
-			}
-			cmyk = append(cmyk, [4]float64{v[0], v[1], v[2], v[3]})
-			lab = append(lab, [3]float64{v[4], v[5], v[6]})
-		}
-	}
-	if len(cmyk) == 0 {
-		return nil, nil, fmt.Errorf("%s: no data", path)
-	}
-	return cmyk, lab, nil
+	return de[len(de)-1], nil
 }

@@ -68,3 +68,23 @@ func TestLoadRefusesUnpairedB2A(t *testing.T) {
 		t.Fatalf("Load = %v, want a refusal naming B2A1", err)
 	}
 }
+
+func TestLoadRefusesMissingWhitePoint(t *testing.T) {
+	b, err := os.ReadFile(fogra)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := int(binary.BigEndian.Uint32(b[128:]))
+	for i := range n {
+		if e := b[132+12*i:]; string(e[:4]) == "wtpt" {
+			copy(e, "zzzz")
+		}
+	}
+	p := filepath.Join(t.TempDir(), "nowtpt.icc")
+	if err := os.WriteFile(p, b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(p); err == nil || !strings.Contains(err.Error(), "wtpt") {
+		t.Fatalf("Load = %v, want a refusal naming wtpt", err)
+	}
+}
