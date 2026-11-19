@@ -220,11 +220,29 @@ independently of phase 5. Within a phase, order is open.
   an opt-in extra. Unlock: a pinned ffmpeg carrying `libwebp_anim`, which
   streams the frames, or encoding in batches and joining them.
 - **press flattens a whole page for one soft-masked pattern.** A page with a
-  transparent-stop CSS gradient and a photo cut-out is flattened (`flattens`),
-  so `--jpeg` misses the cut-out; the real A3 auction sign stays at about
-  17.9 MB. Deferred because a flattened page draws alike in every renderer.
-  Unlock: gs parameters or a post-pass that JPEG-encodes the flattened areas,
-  measured on a quality case shaped like that sign.
+  transparent-stop CSS gradient and a photo cut-out is flattened (`flattens`)
+  into one lossless CMYK image at `--max-ppi`, its text included, so `--jpeg`
+  misses the cut-out: `press-jpeg-size`'s page with one such gradient added
+  presses to 11.4 MB under `--jpeg 90`, against that case's `max`. Deferred
+  because a flattened page draws alike in every renderer. Unlock: gs
+  parameters or a post-pass that JPEG-encodes the flattened areas, measured
+  on a quality case shaped like that page.
+- **A flattened page loses vector text.** Its text is pixels at `--max-ppi`,
+  and black text stays knocked out. Deferred because live transparency
+  draws wrong in Quartz. Unlock: a fix for Quartz's pattern placement that
+  keeps transparency live. Rescaling each pattern's matrix was probed:
+  Quartz came out clean, but the soft proof got worse (RMSE 0.0263 to
+  0.0291); measure that against a gs-based RIP render.
+- **`/PlateKO` resets overprint to the PDF default after black text**, wiping
+  an overprint the source set. Deferred because Chrome never sets one.
+  Unlock: a non-Chrome source that sets overprint, then a reset that
+  restores the prior state.
+- **An odd `/Resources` or `/ExtGState` anywhere aborts the overprint pass.**
+  `withStates` edits every resource dictionary and refuses one it cannot
+  read. Deferred because no source has shown one. Unlock: such a file.
+- **flatten treats a referenced `/SMask` on an ExtGState as transparency**,
+  so it over-flattens. Deferred because the error flattens, which draws
+  right. Unlock: a source whose referenced SMask is `/None`.
 - **cmm reads v4 `mAB `, lut8 and XYZ-PCS profiles untested.** Only the
   FOGRA39 v2 lut16 profile is measured. Deferred because no other CMYK
   profile with characterisation data is in the assets. Unlock: an openly

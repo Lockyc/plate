@@ -178,15 +178,18 @@ colours, or renders what it is given.
   artwork, grey images and soft masks stay lossless). A `--cmyk` brand colour
   is written into the input's vector fills and strokes as its own CMYK first
   (in QDF, repaired by fix-qdf), and gs keeps it, its default CMYK profile
-  being the output's. Text that leaves K-only is set to overprint in the same
-  pass unless `--knockout`. Transparency stays live unless `flattens` finds a
-  tiling pattern holding it; then the whole file is flattened. The result is
+  being the output's. In the same pass every text object shown only in a
+  K-only fill (`kOnly`), whether the source or a `--cmyk` drew it so, is set
+  to overprint, unless `--knockout` or the file is flattened. Transparency
+  stays live unless `flattens` finds a tiling pattern holding it; then the
+  whole file is flattened, and each page with transparency becomes one CMYK
+  image at `--max-ppi`, its text included. The result is
   checked for no fonts, no RGB, unchanged page boxes, any overprint it set and
   total ink within `--max-ink` beyond `inkSpeckMM2`, read from a CMYK render.
   The soft proof reads the master back through `internal/cmm`, not Ghostscript,
   and compares it with the source by RMSE (`defaultMaxRMSE`) over the page and
-  any `--region`. `--verify` runs those checks on an existing master and
-  writes nothing.
+  any `--region`. `--verify` runs those checks on an existing master, counting
+  the source's overprinting text by the same pass, and writes nothing.
 - **grade** — `fit` registers the image to the reference (SIFT + RANSAC),
   fits an RGB→RGB thin-plate map on opaque, eroded pixels, and bakes a 16-bit
   HALD CLUT from sRGB frames. `apply` reads the source upright in sRGB too,
