@@ -333,7 +333,7 @@ func (j job) marked(ctx context.Context, tmp string, flat bool) (gsIn string, ov
 	switch {
 	case j.knockout:
 	case flat:
-		fmt.Fprintln(j.log, "black text stays knocked out: the page is flattened into one image, its text included")
+		fmt.Fprintln(j.log, "black text stays knocked out: the file is flattened")
 	default:
 		if b, overprints, err = withOverprint(b); err != nil {
 			return "", 0, err
