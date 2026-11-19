@@ -8,7 +8,6 @@ import (
 	"math"
 	"os"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -838,63 +837,4 @@ func fogra39DE00(p Params) (float64, error) {
 		return de[int(math.Ceil(0.95*float64(len(de))))-1], nil
 	}
 	return de[len(de)-1], nil
-}
-
-func init() {
-	Metrics["pattern-steps"] = patternSteps
-}
-
-var (
-	qdfObject = regexp.MustCompile(`(?m)^\d+ \d+ obj\n<<\n((?:  .*\n)*)>>`)
-	qdfTiling = regexp.MustCompile(`(?m)^  /PatternType 1$`)
-	qdfStep   = regexp.MustCompile(`(?m)^  /([XY])Step (.*)$`)
-	qdfBBox   = regexp.MustCompile(`(?m)^  /BBox \[\n    (\S+)\n    (\S+)\n    (\S+)\n    (\S+)\n  \]$`)
-)
-
-// patternSteps is the largest gap, in pattern space, between a tiling
-// pattern's step and its cell, |XStep| against the BBox's width and |YStep|
-// against its height, over every tiling pattern in qdf (a file qpdf --qdf
-// wrote). Where the step is wider than the cell, a renderer may draw a gap
-// between tiles. A file with no tiling pattern measures 0. The gap is
-// rounded to the 1e-4 a PDF real carries, so float error in a BBox of
-// 12.7 to 53.1 against an XStep of 40.4 is no gap.
-func patternSteps(p Params) (float64, error) {
-	path, err := p.Path("qdf")
-	if err != nil {
-		return 0, err
-	}
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return 0, err
-	}
-	var worst float64
-	for _, m := range qdfObject.FindAllSubmatch(b, -1) {
-		dict := m[1]
-		if !qdfTiling.Match(dict) {
-			continue
-		}
-		box := qdfBBox.FindSubmatch(dict)
-		steps := qdfStep.FindAllSubmatch(dict, -1)
-		if box == nil || len(steps) != 2 {
-			return 0, fmt.Errorf("pattern-steps: a tiling pattern without a direct BBox, XStep and YStep:\n%s", dict)
-		}
-		var v [4]float64
-		for i := range v {
-			if v[i], err = strconv.ParseFloat(string(box[1+i]), 64); err != nil {
-				return 0, fmt.Errorf("pattern-steps: BBox %q", box[1+i])
-			}
-		}
-		for _, s := range steps {
-			step, err := strconv.ParseFloat(string(s[2]), 64)
-			if err != nil {
-				return 0, fmt.Errorf("pattern-steps: %sStep %q is not a number", s[1], s[2])
-			}
-			cell := math.Abs(v[2] - v[0])
-			if string(s[1]) == "Y" {
-				cell = math.Abs(v[3] - v[1])
-			}
-			worst = math.Max(worst, math.Round(math.Abs(math.Abs(step)-cell)*1e4)/1e4)
-		}
-	}
-	return worst, nil
 }
