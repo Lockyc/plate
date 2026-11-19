@@ -103,6 +103,17 @@ func Cached(kind string, files map[string][]byte, build func(dir string) error) 
 	return dir, nil
 }
 
+// SwiftHelper returns the path of a helper binary called name, compiled
+// with swiftc -O from src (saved as file) once per source into the cache.
+func SwiftHelper(ctx context.Context, name, file string, src []byte) (string, error) {
+	dir, err := Cached(name, map[string][]byte{file: src}, func(dir string) error {
+		in, bin := filepath.Join(dir, file), filepath.Join(dir, name)
+		_, err := Run(ctx, Cmd{Engine: "swiftc", Args: []string{"-O", in, "-o", bin}, Inputs: []string{in}, Outputs: []string{bin}, Timeout: 5 * time.Minute})
+		return err
+	})
+	return filepath.Join(dir, name), err
+}
+
 // ManagedDir is where a managed engine's pinned version is unpacked.
 func ManagedDir(e pins.Engine) (string, error) {
 	d, err := DataDir()

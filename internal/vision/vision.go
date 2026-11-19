@@ -8,7 +8,6 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -37,21 +36,12 @@ func available(goos, version string) error {
 	return nil
 }
 
-func helper(ctx context.Context) (string, error) {
-	dir, err := engine.Cached("vision", map[string][]byte{"mask.swift": source}, func(dir string) error {
-		src, out := filepath.Join(dir, "mask.swift"), filepath.Join(dir, "plate-vision")
-		_, err := engine.Run(ctx, engine.Cmd{Engine: "swiftc", Args: []string{"-O", src, "-o", out}, Inputs: []string{src}, Outputs: []string{out}, Timeout: 5 * time.Minute})
-		return err
-	})
-	return filepath.Join(dir, "plate-vision"), err
-}
-
 // Mask writes in's foreground, alpha as the mask, to out.
 func Mask(ctx context.Context, in, out string) error {
 	if err := Available(); err != nil {
 		return err
 	}
-	bin, err := helper(ctx)
+	bin, err := engine.SwiftHelper(ctx, "plate-vision", "mask.swift", source)
 	if err != nil {
 		return err
 	}

@@ -395,3 +395,31 @@ func TestStartChromeCleanCloseIsNil(t *testing.T) {
 		t.Fatalf("Close = %v, want nil after pipe EOF", err)
 	}
 }
+
+// TestSwiftHelper compiles a helper once per source, named as asked, and
+// builds it afresh when the source changes.
+func TestSwiftHelper(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	log := enginetest.Stub(t, "swiftc", `while [ "$1" != "-o" ]; do shift; done
+printf '#!/bin/sh\n' > "$2"; chmod +x "$2"`)
+	var bins []string
+	for _, src := range []string{"a", "a", "b"} {
+		bin, err := engine.SwiftHelper(ctx, "probe", "probe.swift", []byte(src))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if filepath.Base(bin) != "probe" {
+			t.Errorf("helper %s, want one named probe", bin)
+		}
+		if _, err := os.Stat(bin); err != nil {
+			t.Fatal(err)
+		}
+		bins = append(bins, bin)
+	}
+	if calls := enginetest.Calls(t, log); len(calls) != 2 || calls[0][0] != "-O" {
+		t.Errorf("swiftc calls %q, want two with -O", calls)
+	}
+	if bins[0] != bins[1] || bins[0] == bins[2] {
+		t.Errorf("helpers %q: want the first two shared, the third apart", bins)
+	}
+}

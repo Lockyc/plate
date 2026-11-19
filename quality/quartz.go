@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
-	"time"
 
 	"github.com/lockyc/plate/internal/engine"
 )
@@ -26,15 +25,11 @@ func quartzRender(ctx context.Context, in string, page, dpi int, out string) err
 	if runtime.GOOS != "darwin" {
 		return errors.New("quartz-rmse needs macOS: Quartz is the renderer it measures")
 	}
-	dir, err := engine.Cached("quartz", map[string][]byte{"quartz.swift": quartzSource}, func(dir string) error {
-		src, bin := filepath.Join(dir, "quartz.swift"), filepath.Join(dir, "quartz")
-		_, err := engine.Run(ctx, engine.Cmd{Engine: "swiftc", Args: []string{"-O", src, "-o", bin}, Inputs: []string{src}, Outputs: []string{bin}, Timeout: 5 * time.Minute})
-		return err
-	})
+	bin, err := engine.SwiftHelper(ctx, "quartz", "quartz.swift", quartzSource)
 	if err != nil {
 		return err
 	}
-	_, err = engine.Run(ctx, engine.Cmd{Engine: "quartz", Path: filepath.Join(dir, "quartz"), Args: []string{in, strconv.Itoa(page), strconv.Itoa(dpi), out}, Inputs: []string{in}, Outputs: []string{out}})
+	_, err = engine.Run(ctx, engine.Cmd{Engine: "quartz", Path: bin, Args: []string{in, strconv.Itoa(page), strconv.Itoa(dpi), out}, Inputs: []string{in}, Outputs: []string{out}})
 	return err
 }
 

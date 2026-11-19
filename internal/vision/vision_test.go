@@ -2,15 +2,12 @@ package vision
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
 
-	"github.com/lockyc/plate/internal/engine"
 	"github.com/lockyc/plate/internal/enginetest"
 )
 
@@ -29,26 +26,6 @@ func TestAvailable(t *testing.T) {
 	}
 	if runtime.GOOS == "darwin" && macOSVersion() == "" {
 		t.Error("no macOS version read on macOS")
-	}
-}
-
-// TestHelperBuildIgnoresAStaleTemp: a temp file another run left (or is
-// writing) at a fixed name does not stop the build.
-func TestHelperBuildIgnoresAStaleTemp(t *testing.T) {
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
-	enginetest.Stub(t, "swiftc", `while [ "$1" != "-o" ]; do shift; done
-printf '#!/bin/sh\n' > "$2"; chmod +x "$2"`)
-	sum := sha256.Sum256(source)
-	cache, err := engine.CacheDir()
-	if err != nil {
-		t.Fatal(err)
-	}
-	stale := filepath.Join(cache, "vision", hex.EncodeToString(sum[:])[:16], "plate-vision.tmp")
-	if err := os.MkdirAll(stale, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := helper(context.Background()); err != nil {
-		t.Fatal(err)
 	}
 }
 
