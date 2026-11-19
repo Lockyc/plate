@@ -3,11 +3,13 @@
 // the page box forced from the source, images downsampled only well above
 // --max-ppi and kept lossless unless --jpeg sets a quality for photographic
 // colour ones. Transparency stays live unless a tiling pattern holds it;
-// then the whole file is flattened, so a page with both a soft-masked
-// pattern and a photo cut-out has its cut-out flattened too, lossless,
-// where --jpeg does not reach. Text a --cmyk makes K-only overprints unless
-// --knockout. It then proves the master: no fonts, no RGB anywhere, the same page boxes
-// and count, the overprint kept, no more than --max-ink total ink beyond a
+// then the whole file is flattened, and each page with transparency becomes
+// one lossless CMYK image at --max-ppi, its text and any photo cut-out
+// included, where --jpeg does not reach. Once any --cmyk is given, every
+// text object shown only in a K-only fill (0 0 0 K k), from the source or a
+// --cmyk, overprints, unless --knockout or the file is flattened. It then
+// proves the master: no fonts, no RGB anywhere, the same page boxes and
+// count, the overprint kept, no more than --max-ink total ink beyond a
 // speck, and a soft proof of the master (its CMYK read back through plate's
 // own colour engine) that matches the source by RMSE over each page and
 // each --region. The master is a separate deliverable: outlining destroys
@@ -187,7 +189,7 @@ func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	proofWidth := cli.Int(fs, "proof-width", 3000, "soft-proof render width in px; RMSE settles by about 3000")
 	maxInk := cli.Float(fs, "max-ink", 300, "total ink (C+M+Y+K) a page may carry over more than a speck of area, in percent; 0 to 400")
 	jpeg := cli.Int(fs, "jpeg", 0, "store photographic colour images as JPEG at this `quality` (1-100), no chroma subsampling, flat artwork staying lossless; 0 keeps every image lossless")
-	knockout := fs.Bool("knockout", false, "print text a --cmyk makes K-only knocked out of the colour under it, instead of overprinting it")
+	knockout := fs.Bool("knockout", false, "under --cmyk, print text shown in a K-only fill knocked out of the colour under it, instead of overprinting it")
 	verifyOnly := fs.String("verify", "", "check this existing `master` against <in.pdf>, as press checks one it makes; writes nothing")
 	var specs cli.Multi
 	fs.Var(&specs, "region", "x,y,w,h:max: a page region, as fractions, held to its own RMSE (repeatable)")
@@ -279,13 +281,73 @@ func parseRegion(s string) (region, error) {
 
 func pt(v float64) string { return strconv.FormatFloat(v, 'f', -1, 64) }
 
-// check proves an existing master against its source, writing nothing.
+// check proves an existing master against its source, writing nothing
+// outside its own temporary directory. Under --cmyk it counts the source's
+// overprinting text as press would, so the master is held to keep it.
 func (j job) check(ctx context.Context) error {
 	src, err := pdf.Read(ctx, j.in)
 	if err != nil {
 		return err
 	}
+	if len(j.spots) > 0 && !j.knockout {
+		flat, err := flattens(ctx, j.in)
+		if err != nil {
+			return err
+		}
+		tmp, err := os.MkdirTemp("", "press-spots-")
+		if err != nil {
+			return err
+		}
+		defer os.RemoveAll(tmp)
+		if _, j.overprints, err = j.marked(ctx, tmp, flat); err != nil {
+			return err
+		}
+	}
 	return j.verify(ctx, src)
+}
+
+// marked is the file gs presses: j.in itself without --cmyk, else a copy in
+// tmp with the spots written in and, unless --knockout or a flattened page,
+// its K-only text set to overprint, counted in overprints. The spots go in
+// before the gs pass: gs converts rgb through the profile and keeps a cmyk
+// already in the output profile's space as it is. A flattened page becomes
+// one image, its text included, so no overprint could reach the master.
+func (j job) marked(ctx context.Context, tmp string, flat bool) (gsIn string, overprints int, err error) {
+	if len(j.spots) == 0 {
+		return j.in, 0, nil
+	}
+	qdf := filepath.Join(tmp, "in.qdf.pdf")
+	if _, err := engine.Run(ctx, engine.Cmd{Engine: "qpdf", Args: []string{"--warning-exit-0", "--qdf", "--object-streams=disable", j.in, qdf}, Inputs: []string{j.in}, Outputs: []string{qdf}}); err != nil {
+		return "", 0, err
+	}
+	b, err := os.ReadFile(qdf)
+	if err != nil {
+		return "", 0, err
+	}
+	b, n := withSpots(b, j.spots)
+	switch {
+	case j.knockout:
+	case flat:
+		fmt.Fprintln(j.log, "black text stays knocked out: the page is flattened into one image, its text included")
+	default:
+		if b, overprints, err = withOverprint(b); err != nil {
+			return "", 0, err
+		}
+	}
+	if err := os.WriteFile(qdf, b, 0o644); err != nil {
+		return "", 0, err
+	}
+	fixed := filepath.Join(tmp, "spots.pdf")
+	if _, err := engine.Run(ctx, engine.Cmd{Engine: "fix-qdf", Args: []string{qdf, fixed}, Inputs: []string{qdf}, Outputs: []string{fixed}}); err != nil {
+		return "", 0, err
+	}
+	if !j.checkOnly {
+		fmt.Fprintf(j.log, "%d fill(s) and stroke(s) set to their brand CMYK\n", n)
+		if !j.knockout && !flat {
+			fmt.Fprintf(j.log, "%d text object(s) set to overprint\n", overprints)
+		}
+	}
+	return fixed, overprints, nil
 }
 
 func (j job) run(ctx context.Context) (err error) {
@@ -315,52 +377,11 @@ func (j job) run(ctx context.Context) (err error) {
 			return fmt.Errorf("page %d is %gx%g pt and page 1 is %gx%g pt; press fixes one media size for the whole file", i+1, s[0], s[1], sizes[0][0], sizes[0][1])
 		}
 	}
-	// The spots go in before the pass: gs converts rgb through the profile
-	// and keeps a cmyk already in the output profile's space as it is.
-	gsIn := j.in
-	if len(j.spots) > 0 {
-		tmp, err := os.MkdirTemp("", "press-spots-")
-		if err != nil {
-			return err
-		}
-		defer os.RemoveAll(tmp)
-		qdf := filepath.Join(tmp, "in.qdf.pdf")
-		if _, err := engine.Run(ctx, engine.Cmd{Engine: "qpdf", Args: []string{"--warning-exit-0", "--qdf", "--object-streams=disable", j.in, qdf}, Inputs: []string{j.in}, Outputs: []string{qdf}}); err != nil {
-			return err
-		}
-		b, err := os.ReadFile(qdf)
-		if err != nil {
-			return err
-		}
-		b, n := withSpots(b, j.spots)
-		if !j.knockout {
-			if b, j.overprints, err = withOverprint(b); err != nil {
-				return err
-			}
-		}
-		if err := os.WriteFile(qdf, b, 0o644); err != nil {
-			return err
-		}
-		fixed := filepath.Join(tmp, "spots.pdf")
-		if _, err := engine.Run(ctx, engine.Cmd{Engine: "fix-qdf", Args: []string{qdf, fixed}, Inputs: []string{qdf}, Outputs: []string{fixed}}); err != nil {
-			return err
-		}
-		fmt.Fprintf(j.log, "%d fill(s) and stroke(s) set to their brand CMYK\n", n)
-		if !j.knockout {
-			fmt.Fprintf(j.log, "%d text object(s) set to overprint\n", j.overprints)
-		}
-		gsIn = fixed
-	}
-	ppi := pt(j.maxPPI)
-	// gs imposes its own media and shifts the artwork onto it unless the
-	// source's box is forced. Its pdfwrite defaults downsample to 72 dpi and
-	// re-encode JPEG; every image flag below undoes one of those.
-	// --permit-file-read: -dSAFER otherwise refuses the profile and reports
-	// it only after writing a plausible file.
 	// -dCompatibilityLevel=1.4 keeps transparency live: a cut-out stays an
-	// image with a soft mask, which --jpeg reaches. 1.3 flattens each
-	// transparent area into a lossless CMYK image at -r, which press asks
-	// for only where flattens says live transparency draws wrong.
+	// image with a soft mask, which --jpeg reaches. 1.3 flattens a page
+	// with transparency into one lossless CMYK image at -r, its text
+	// included, which press asks for only where flattens says live
+	// transparency draws wrong.
 	flat, err := flattens(ctx, j.in)
 	if err != nil {
 		return err
@@ -372,6 +393,22 @@ func (j job) run(ctx context.Context) (err error) {
 	} else {
 		fmt.Fprintln(j.log, "transparency kept live (PDF 1.4): no tiling pattern holds transparency")
 	}
+	tmp, err := os.MkdirTemp("", "press-spots-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tmp)
+	gsIn, overprints, err := j.marked(ctx, tmp, flat)
+	if err != nil {
+		return err
+	}
+	j.overprints = overprints
+	ppi := pt(j.maxPPI)
+	// gs imposes its own media and shifts the artwork onto it unless the
+	// source's box is forced. Its pdfwrite defaults downsample to 72 dpi and
+	// re-encode JPEG; every image flag below undoes one of those.
+	// --permit-file-read: -dSAFER otherwise refuses the profile and reports
+	// it only after writing a plausible file.
 	args := []string{"-q", "-dBATCH", "-dNOPAUSE", "-dSAFER",
 		"--permit-file-read=" + j.icc,
 		"-sDEVICE=pdfwrite", "-dNoOutputFonts",

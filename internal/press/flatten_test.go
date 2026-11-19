@@ -57,8 +57,6 @@ func TestPressFlattensOnlyTransparentTiles(t *testing.T) {
 		{chromeGradient, "-dCompatibilityLevel=1.3", "transparency flattened (PDF 1.3)"},
 	} {
 		e := setup(t)
-		enginetest.Stub(t, "qpdf", `[ "$2" = --json=2 ] && { printf '{"qpdf": [{"jsonversion": 2}, %s]}\n' "$OBJS"; exit 0; }
-printf '%s\n' "${QDF:-/DeviceCMYK k}" > "$5"`)
 		t.Setenv("OBJS", c.objs)
 		if code := e.run(); code != 0 {
 			t.Fatalf("code %d: %s", code, e.stderr.String())
@@ -69,5 +67,22 @@ printf '%s\n' "${QDF:-/DeviceCMYK k}" > "$5"`)
 		if !strings.Contains(e.stdout.String(), c.log) {
 			t.Errorf("stdout %q lacks %q", e.stdout.String(), c.log)
 		}
+	}
+}
+
+// TestPressFlattenedKeepsTextKnockedOut: flattening rasterises the page,
+// text included, so no /PlateOP could survive into the master; press must
+// leave the text knocked out and say so instead of refusing for a lost
+// overprint.
+func TestPressFlattenedKeepsTextKnockedOut(t *testing.T) {
+	e := setup(t)
+	t.Setenv("OBJS", chromeGradient)
+	t.Setenv("SRC_QDF", kText)
+	if code := e.run("--cmyk", "000000=0,0,0,100"); code != 0 {
+		t.Fatalf("code %d: %s", code, e.stderr.String())
+	}
+	out := e.stdout.String()
+	if !strings.Contains(out, "black text stays knocked out") || strings.Contains(out, "set to overprint") {
+		t.Errorf("stdout %q", out)
 	}
 }

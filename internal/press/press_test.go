@@ -96,12 +96,12 @@ func setup(t *testing.T) *env {
 	enginetest.Stub(t, "pdfinfo", pdfinfoStub)
 	enginetest.Stub(t, "pdffonts", `printf 'name type encoding emb sub uni object ID\n---- ---- ---- --- --- --- ---\n%s' "$FONTS"`)
 	enginetest.Stub(t, "pdfimages", `printf 'page num type width height color comp bpc enc interp object ID x-ppi y-ppi size ratio\n----\n   1   0 %s 1200 900 %s 4 8 image no 12 0 300 300 100K 2.5%%\n' "${IMG_TYPE:-image}" "${IMG_COLOR:-cmyk}"`)
-	enginetest.Stub(t, "qpdf", `[ "$2" = --json=2 ] && { echo '{"qpdf": [{"jsonversion": 2}, {}]}'; exit 0; }
+	enginetest.Stub(t, "qpdf", `[ "$2" = --json=2 ] && { printf '{"qpdf": [{"jsonversion": 2}, %s]}\n' "${OBJS:-"{}"}"; exit 0; }
 q=${QDF:-/DeviceCMYK k}
 case "$4" in */in.pdf) [ -n "$SRC_QDF" ] && q=$SRC_QDF ;; esac
 printf '%s\n' "$q" > "$5"`)
 	enginetest.Stub(t, "fix-qdf", `cp "$1" "$2"`)
-	for _, k := range []string{"GS_STDERR", "FONTS", "IMG_TYPE", "IMG_COLOR", "QDF", "SRC_QDF", "OUT_SIZE", "PAGES", "PAGE_LINES", "PAM_1", "PAM_2"} {
+	for _, k := range []string{"GS_STDERR", "FONTS", "IMG_TYPE", "IMG_COLOR", "QDF", "SRC_QDF", "OBJS", "OUT_SIZE", "PAGES", "PAGE_LINES", "PAM_1", "PAM_2"} {
 		t.Setenv(k, "")
 	}
 	t.Setenv("FIXTURE_PAM", pamFile(t, flat(0)))
@@ -567,5 +567,30 @@ func TestInkOverWithOverprintSuggestsKnockout(t *testing.T) {
 		if got := strings.Contains(e.stderr.String(), "--knockout"); got == knockout {
 			t.Errorf("knockout %v: stderr %q", knockout, e.stderr.String())
 		}
+	}
+}
+
+// TestVerifyChecksOverprint: --verify counts the source's K-only text as
+// press would, so a knocked-out master is refused under --cmyk, accepted
+// with --knockout, and nothing is written either way.
+func TestVerifyChecksOverprint(t *testing.T) {
+	e := setup(t)
+	t.Setenv("SRC_QDF", kText)
+	master := filepath.Join(e.dir, "master.pdf")
+	os.WriteFile(master, []byte("%PDF master"), 0o644)
+	before, _ := os.ReadDir(e.dir)
+	var out, errb bytes.Buffer
+	if code := Main(context.Background(), []string{"--icc", e.icc, "--cmyk", "000000=0,0,0,100", "--verify", master, e.in}, &out, &errb); code != 1 || !strings.Contains(errb.String(), "overprint") {
+		t.Fatalf("a knocked-out master passed --verify: code %d, stderr %q", code, errb.String())
+	}
+	errb.Reset()
+	if code := Main(context.Background(), []string{"--icc", e.icc, "--cmyk", "000000=0,0,0,100", "--knockout", "--verify", master, e.in}, &out, &errb); code != 0 {
+		t.Fatalf("--knockout --verify: code %d, stderr %q", code, errb.String())
+	}
+	if after, _ := os.ReadDir(e.dir); len(after) != len(before) {
+		t.Errorf("--verify wrote into the directory: %d entries, then %d", len(before), len(after))
+	}
+	if b, _ := os.ReadFile(master); string(b) != "%PDF master" {
+		t.Errorf("--verify rewrote the master: %q", b)
 	}
 }
