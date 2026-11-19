@@ -173,12 +173,13 @@ colours, or renders what it is given.
   supplied ICC, fixed media from the input's page box, and images downsampled
   only above 1.5 × `--max-ppi`, lossless unless `--jpeg` sets a quality for
   photographic colour images (Ghostscript's auto filter judges each; flat
-  artwork, grey images and soft masks stay lossless). A `--cmyk` brand colour is written into the
-  input's vector fills and strokes as its own CMYK first (QDF, padded to the
-  same length so offsets hold), and gs keeps it, its default CMYK profile
-  being the output's. It then checks the result has no fonts, no
-  RGB, and unchanged page boxes, and compares a soft proof against the source
-  by RMSE over the page and any `--region`.
+  artwork, grey images and soft masks stay lossless). A `--cmyk` brand colour
+  is written into the input's vector fills and strokes as its own CMYK first
+  (in QDF, repaired by fix-qdf), and gs keeps it, its default CMYK profile
+  being the output's. Text that leaves K-only is set to overprint in the same
+  pass unless `--knockout`. It then checks the result has no fonts, no RGB,
+  unchanged page boxes and any overprint it set, and compares a soft proof
+  against the source by RMSE over the page and any `--region`.
 - **grade** — `fit` registers the image to the reference (SIFT + RANSAC),
   fits an RGB→RGB thin-plate map on opaque, eroded pixels, and bakes a 16-bit
   HALD CLUT from sRGB frames. `apply` reads the source upright in sRGB too,
