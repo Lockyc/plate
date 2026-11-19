@@ -3,6 +3,7 @@ package press
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -17,20 +18,29 @@ func tiling(bbox, xstep, ystep string) string {
 func TestTileSteps(t *testing.T) {
 	objs := map[string]json.RawMessage{
 		"obj:1 0 R":  json.RawMessage(`{"value": {"/Type": "/Catalog"}}`),
-		"obj:5 0 R":  json.RawMessage(tiling("[0, 0, 840, 594]", "842", "596")),
-		"obj:6 0 R":  json.RawMessage(tiling("[12.7, 0, 53.1, 40]", "40.4", "40")),
-		"obj:7 0 R":  json.RawMessage(tiling("[0, 0, 40, 40]", "-42", "40")),
+		"obj:5 0 R":  json.RawMessage(tiling("[0, 0, 840, 594]", "842", "596")),    // Chrome's gradient
+		"obj:6 0 R":  json.RawMessage(tiling("[12.7, 0, 53.1, 40]", "40.4", "40")), // exact, through float error
+		"obj:7 0 R":  json.RawMessage(tiling("[0, 0, 840, 594]", "-842", "596")),   // sign kept
 		"obj:8 0 R":  json.RawMessage(`{"value": {"/PatternType": 2, "/Shading": "9 0 R"}}`),
 		"obj:10 0 R": json.RawMessage(`{"stream": {"dict": {"/Subtype": "/Image", "/Width": 4}}}`),
+		"obj:11 0 R": json.RawMessage(tiling("[0, 0, 10, 10]", "20", "20")),          // spaced on purpose
+		"obj:12 0 R": json.RawMessage(tiling("[0, 0, 20, 20]", "10", "10")),          // overlapping on purpose
+		"obj:13 0 R": json.RawMessage(tiling("[0, 0, 40, 40]", "40", "40")),          // exact
+		"obj:14 0 R": json.RawMessage(tiling("[0, 0, 40, 40]", "42", "40")),          // 2 units is 5% of a 40 tile
+		"obj:15 0 R": json.RawMessage(tiling("[0, 0, 840, 40]", "842", "50")),        // one axis a sliver, one spaced
+		"obj:16 0 R": json.RawMessage(tiling(`"12 0 R"`, "842", "596")),              // indirect BBox
+		"obj:17 0 R": json.RawMessage(tiling("[0, 0, 840]", "842", "596")),           // short BBox
+		"obj:18 0 R": json.RawMessage(tiling("[0, 0, 840, 594]", `"13 0 R"`, "596")), // indirect step
 	}
-	patch, err := tileSteps(objs)
-	if err != nil {
-		t.Fatal(err)
+	patch, skipped := tileSteps(objs)
+	if skipped != 3 {
+		t.Errorf("skipped %d, want 16, 17 and 18", skipped)
 	}
-	if len(patch) != 2 {
-		t.Fatalf("patched %d objects, want 5 and 7: %v", len(patch), patch)
+	want := map[string][2]float64{"obj:5 0 R": {840, 594}, "obj:7 0 R": {-840, 594}, "obj:15 0 R": {840, 50}}
+	if len(patch) != len(want) {
+		t.Fatalf("patched %d objects, want 5, 7 and 15: %v", len(patch), patch)
 	}
-	for ref, want := range map[string][2]float64{"obj:5 0 R": {840, 594}, "obj:7 0 R": {-40, 40}} {
+	for ref, want := range want {
 		var o struct {
 			Stream struct {
 				Dict map[string]any `json:"dict"`
@@ -49,23 +59,23 @@ func TestTileSteps(t *testing.T) {
 			t.Errorf("%s lost the rest of its dictionary: %v", ref, d)
 		}
 	}
-	for _, bad := range []string{tiling(`"12 0 R"`, "842", "596"), tiling("[0, 0, 840]", "842", "596"), tiling("[0, 0, 840, 594]", `"13 0 R"`, "596")} {
-		if _, err := tileSteps(map[string]json.RawMessage{"obj:5 0 R": json.RawMessage(bad)}); err == nil {
-			t.Errorf("a pattern press cannot read was accepted: %s", bad)
-		}
-	}
 }
+
+const tilesQPDF = `case "$2" in
+  --json=2) printf '{"qpdf": [{"jsonversion": 2}, {"obj:5 0 R": %s, "obj:6 0 R": %s}]}\n' "$TILING" "${OTHER:-null}"; exit 0 ;;
+  --deterministic-id) [ -n "$UPDATE_FAILS" ] && { echo "update failed" >&2; exit 1; }
+    cp "${3#--update-from-json=}" "$PATCH_COPY"; cp "$4" "$5"; exit 0 ;;
+esac
+printf '%s\n' "${QDF:-/DeviceCMYK k}" > "$5"`
 
 func TestPressSnapsTileSteps(t *testing.T) {
 	e := setup(t)
-	qpdf := enginetest.Stub(t, "qpdf", `case "$2" in
-  --json=2) printf '{"qpdf": [{"jsonversion": 2}, {"obj:5 0 R": %s}]}\n' "$TILING"; exit 0 ;;
-  --deterministic-id) cp "${3#--update-from-json=}" "$PATCH_COPY"; cp "$4" "$5"; exit 0 ;;
-esac
-printf '%s\n' "${QDF:-/DeviceCMYK k}" > "$5"`)
-	patch := e.dir + "/patch.json"
+	qpdf := enginetest.Stub(t, "qpdf", tilesQPDF)
+	patch := filepath.Join(t.TempDir(), "patch.json")
 	t.Setenv("PATCH_COPY", patch)
+	t.Setenv("UPDATE_FAILS", "")
 	t.Setenv("TILING", tiling("[0, 0, 840, 594]", "842", "596"))
+	t.Setenv("OTHER", tiling(`"12 0 R"`, "842", "596"))
 	if code := e.run(); code != 0 {
 		t.Fatalf("code %d: %s", code, e.stderr.String())
 	}
@@ -76,21 +86,41 @@ printf '%s\n' "${QDF:-/DeviceCMYK k}" > "$5"`)
 	if !strings.Contains(string(b), `"/XStep":840`) || !strings.Contains(string(b), `"/YStep":594`) {
 		t.Errorf("patch %s", b)
 	}
-	if !strings.Contains(e.stdout.String(), "1 tiling pattern(s) stepped to their tile") {
-		t.Errorf("stdout %q", e.stdout.String())
+	for _, want := range []string{"1 tiling pattern(s) stepped to their tile", "1 tiling pattern(s) left alone: indirect BBox or step"} {
+		if !strings.Contains(e.stdout.String(), want) {
+			t.Errorf("stdout %q lacks %q", e.stdout.String(), want)
+		}
+	}
+	// The update is written beside the master, so the rename that replaces
+	// it never crosses a volume, and nothing of it is left there.
+	for _, call := range enginetest.Calls(t, qpdf) {
+		if call[1] == "--deterministic-id" && filepath.Dir(call[4]) != e.dir {
+			t.Errorf("update written to %s, not beside the master in %s", call[4], e.dir)
+		}
+	}
+	if left, _ := filepath.Glob(filepath.Join(e.dir, ".press-tiles-*")); len(left) > 0 {
+		t.Errorf("left behind %v", left)
 	}
 
 	e = setup(t)
-	enginetest.Stub(t, "qpdf", `case "$2" in
-  --json=2) printf '{"qpdf": [{"jsonversion": 2}, {"obj:5 0 R": %s}]}\n' "$TILING"; exit 0 ;;
-  --deterministic-id) echo "an update with nothing to change" >&2; exit 1 ;;
-esac
-printf '%s\n' "${QDF:-/DeviceCMYK k}" > "$5"`)
+	enginetest.Stub(t, "qpdf", tilesQPDF)
+	t.Setenv("OTHER", "")
+	t.Setenv("UPDATE_FAILS", "1")
 	t.Setenv("TILING", tiling("[0, 0, 840, 594]", "840", "594"))
 	if code := e.run(); code != 0 {
 		t.Fatalf("matched steps: code %d: %s", code, e.stderr.String())
 	}
 	if strings.Contains(e.stdout.String(), "tiling") {
 		t.Errorf("stdout %q", e.stdout.String())
+	}
+
+	e = setup(t)
+	enginetest.Stub(t, "qpdf", tilesQPDF)
+	t.Setenv("TILING", tiling("[0, 0, 840, 594]", "842", "596"))
+	if code := e.run(); code != 1 || e.outExists() {
+		t.Errorf("a failed update: code %d, master left %v", code, e.outExists())
+	}
+	if left, _ := filepath.Glob(filepath.Join(e.dir, ".press-tiles-*")); len(left) > 0 {
+		t.Errorf("a failed update left %v", left)
 	}
 }

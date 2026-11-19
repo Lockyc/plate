@@ -384,12 +384,15 @@ func (j job) run(ctx context.Context) (err error) {
 	if _, err := engine.Run(ctx, engine.Cmd{Engine: "gs", Args: args, StderrFatal: true, Inputs: []string{gsIn, j.icc}, Outputs: []string{j.out}, Timeout: gsTimeout}); err != nil {
 		return err
 	}
-	n, err := snapTiles(ctx, j.out)
+	snapped, skipped, err := snapTiles(ctx, j.out)
 	if err != nil {
 		return err
 	}
-	if n > 0 {
-		fmt.Fprintf(j.log, "%d tiling pattern(s) stepped to their tile\n", n)
+	if snapped > 0 {
+		fmt.Fprintf(j.log, "%d tiling pattern(s) stepped to their tile\n", snapped)
+	}
+	if skipped > 0 {
+		fmt.Fprintf(j.log, "%d tiling pattern(s) left alone: indirect BBox or step\n", skipped)
 	}
 	return j.verify(ctx, src)
 }
