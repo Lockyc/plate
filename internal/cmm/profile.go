@@ -24,8 +24,10 @@ type Profile struct {
 	darkest [4]float64
 }
 
-// Load reads a CMYK output profile. It takes A2B1 (relative colorimetric),
-// else A2B0, and the matching B2A tag, which finds the black point.
+// Load reads a CMYK output profile. It converts with A2B1 (relative
+// colorimetric) and finds the black point with B2A1; a profile without
+// A2B1 is read through A2B0 and B2A0 instead. The pair is never mixed, so
+// the black point is the darkest colour of the tables that convert.
 func Load(path string) (*Profile, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -58,28 +60,29 @@ func Load(path string) (*Profile, error) {
 		}
 		tags[string(e[:4])] = b[off : off+size]
 	}
-	pick := func(names ...string) (*lut, error) {
-		for _, name := range names {
-			data, ok := tags[name]
-			if !ok {
-				continue
-			}
-			l, err := parseLut(data)
-			var u unknownType
-			if errors.As(err, &u) {
-				return nil, fmt.Errorf("%s: tag %s has type %q, which plate does not read", path, name, string(u))
-			}
-			if err != nil {
-				return nil, fmt.Errorf("%s: tag %s: %w", path, name, err)
-			}
-			return l, nil
+	read := func(name string) (*lut, error) {
+		data, ok := tags[name]
+		if !ok {
+			return nil, fmt.Errorf("%s has no %s tag", path, name)
 		}
-		return nil, fmt.Errorf("%s has no %s or %s tag", path, names[0], names[1])
+		l, err := parseLut(data, p.xyzPCS)
+		var u unknownType
+		if errors.As(err, &u) {
+			return nil, fmt.Errorf("%s: tag %s has type %q, which plate does not read", path, name, string(u))
+		}
+		if err != nil {
+			return nil, fmt.Errorf("%s: tag %s: %w", path, name, err)
+		}
+		return l, nil
 	}
-	if p.a2b, err = pick("A2B1", "A2B0"); err != nil {
+	a2b, b2a := "A2B1", "B2A1"
+	if _, ok := tags[a2b]; !ok {
+		a2b, b2a = "A2B0", "B2A0"
+	}
+	if p.a2b, err = read(a2b); err != nil {
 		return nil, err
 	}
-	if p.b2a, err = pick("B2A1", "B2A0"); err != nil {
+	if p.b2a, err = read(b2a); err != nil {
 		return nil, err
 	}
 	if p.a2b.in != 4 || p.a2b.out != 3 || p.b2a.in != 3 || p.b2a.out != 4 {
@@ -314,7 +317,8 @@ func (r *reader) samples(off, n, width int) []float64 {
 	return out
 }
 
-func parseLut(b []byte) (*lut, error) {
+// parseLut reads an A2B or B2A tag; xyzPCS says the profile's PCS is XYZ.
+func parseLut(b []byte, xyzPCS bool) (*lut, error) {
 	r := &reader{b: b}
 	if len(b) < 12 {
 		return nil, fmt.Errorf("the tag is shorter than its header")
@@ -326,7 +330,7 @@ func parseLut(b []byte) (*lut, error) {
 	}
 	switch sig {
 	case "mft1", "mft2":
-		parseLut816(r, l, sig == "mft2")
+		parseLut816(r, l, sig == "mft2", xyzPCS)
 	case "mAB ", "mBA ":
 		parseLutAB(r, l, sig == "mAB ")
 	default:
@@ -338,9 +342,10 @@ func parseLut(b []byte) (*lut, error) {
 	return l, nil
 }
 
-// parseLut816 reads lut8Type and lut16Type: matrix (only for XYZ input),
-// input tables, CLUT, output tables.
-func parseLut816(r *reader, l *lut, wide bool) {
+// parseLut816 reads lut8Type and lut16Type: matrix, input tables, CLUT,
+// output tables. The matrix applies only to XYZ input, so only to a B2A
+// tag of an XYZ-PCS profile.
+func parseLut816(r *reader, l *lut, wide, xyzPCS bool) {
 	grid := r.u8(10)
 	width, nIn, nOut, off := 1, 256, 256, 48
 	l.enc = fullLab
@@ -356,7 +361,7 @@ func parseLut816(r *reader, l *lut, wide bool) {
 	for i := range 9 {
 		m[i] = r.s15f16(12 + 4*i)
 	}
-	if l.in == 3 && m != (matrix{0: 1, 4: 1, 8: 1}) {
+	if xyzPCS && l.in == 3 {
 		l.stages = append(l.stages, &m)
 	}
 	in := make(curves, l.in)
@@ -385,8 +390,9 @@ func parseLut816(r *reader, l *lut, wide bool) {
 func parseLutAB(r *reader, l *lut, aToB bool) {
 	l.enc = fullLab
 	offB, offMat, offM, offClut, offA := r.u32(12), r.u32(16), r.u32(20), r.u32(24), r.u32(28)
-	// The A curves are on the CLUT's input side, the B and M curves on its
-	// output side, whichever way the tag runs.
+	// The A curves are on the device side of the CLUT and count device
+	// channels; the B and M curves are on the PCS side and count PCS
+	// channels: after the CLUT in lutAtoBType, before it in lutBtoAType.
 	aN, bN := l.in, l.out
 	if !aToB {
 		aN, bN = l.out, l.in
