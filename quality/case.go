@@ -40,6 +40,7 @@ type Asset struct {
 type Case struct {
 	Name   string            `toml:"name"`
 	Why    string            `toml:"why"`    // the shortfall this case pins
+	OS     string            `toml:"os"`     // the one GOOS the case runs on (a renderer only it has); "" for every host
 	Files  map[string]string `toml:"files"`  // written into the case directory first
 	Serve  bool              `toml:"serve"`  // serve the case directory at {url} while setup, run and post run
 	Setup  [][]string        `toml:"setup"`  // steps before run; argv[0] "plate" or a pinned engine

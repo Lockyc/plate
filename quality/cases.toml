@@ -168,6 +168,22 @@ params = { a = "{tmp:a/page-1.png}", b = "{tmp:b/page-1.png}" }
 max    = 0.002
 
 [[case]]
+name   = "press-gradient-quartz"
+why    = "macOS Preview must draw a master's transparent gradients where the source has them: live, Quartz places each tiling pattern by the page's space, a strip down one edge and a tile in the corner"
+os     = "darwin"
+files  = { "page.html" = '''<!doctype html><style>@page{size:1120px 1584px;margin:0}html,body{margin:0;width:1120px;height:1584px}body{background:#fff;font:bold 120px sans-serif;color:#062d5f}.panel{position:absolute;inset:24px;border-radius:24px;background:radial-gradient(90% 60% at 105% -5%,#1d8fd6 0%,transparent 70%),radial-gradient(80% 55% at -5% 105%,#f7a81b 0%,transparent 70%),#e3f1f6}.card{position:absolute;left:160px;right:160px;top:620px;height:300px;background:#fff;border:6px solid #062d5f;border-radius:28px;display:flex;align-items:center;justify-content:center}</style><div class="panel"></div><div class="card">Sample</div>''' }
+setup  = [
+  ["plate", "render", "--size", "1120x1584", "--pdf", "{tmp:src.pdf}", "{tmp:page.html}"],
+]
+run    = ["press", "--icc", "{asset:Coated_Fogra39L_VIGC_300.icc}", "{tmp:src.pdf}", "{tmp:press.pdf}"]
+post   = [
+  ["plate", "pdf", "pages", "--dpi", "72", "--out", "{tmp:ref}", "{tmp:src.pdf}"],
+]
+metric = "quartz-rmse"
+params = { pdf = "{tmp:press.pdf}", ref = "{tmp:ref/page-1.png}" }
+max    = 0.05
+
+[[case]]
 name   = "diff-ignores-shift"
 why    = "a 4 px vertical shift must not read as a broken page"
 setup  = [

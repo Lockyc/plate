@@ -6,6 +6,7 @@ import (
 	"context"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -22,6 +23,9 @@ func TestQuality(t *testing.T) {
 	t.Logf("%d cases", len(cases))
 	for _, c := range cases {
 		t.Run(c.Name, func(t *testing.T) {
+			if c.OS != "" && c.OS != runtime.GOOS {
+				t.Skipf("runs on %s only", c.OS)
+			}
 			env := Env{Assets: assets, Tmp: t.TempDir(), Plate: bin}
 			if err := env.RunCase(context.Background(), c); err != nil {
 				t.Fatal(err)

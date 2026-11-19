@@ -65,6 +65,9 @@ func TestCasesAreWellFormed(t *testing.T) {
 		if c.Why == "" {
 			t.Errorf("%s: why is required (the shortfall this case pins)", c.Name)
 		}
+		if c.OS != "" && c.OS != "darwin" && c.OS != "linux" {
+			t.Errorf("%s: os %q: want darwin or linux", c.Name, c.OS)
+		}
 		if len(c.Run) == 0 {
 			t.Errorf("%s: run is empty", c.Name)
 		}
