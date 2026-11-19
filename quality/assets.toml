@@ -11,6 +11,14 @@ licence = "May be used, embedded, exchanged, and shared without restriction (ICC
 sha256  = "6df43849a84d2632e7900a125f657bd09364ed56775bc4740c1e39a5492d47e3"
 
 [[asset]]
+file    = "FOGRA39.txt"
+source  = "https://fogra.org/en/downloads/work-tools/characterisation-data"
+author  = "Fogra"
+licence = "Fogra terms: free use and redistribution, unmodified, with Fogra identified as the source"
+recipe  = "FOGRA39L characterisation data from Fogra's FOGRA39_to_FOGRA60_v2.zip, unmodified; byte-identical to crates/cms/tests/data/FOGRA39.txt in github.com/storytold/craft-libs at commit 36ca4574e4fbd0fc16a714506b78607daf99942e"
+sha256  = "5210c4a671895a739e6dbe53a3e9923f990fdce8272da7b31b08d1ffd9fce1e8"
+
+[[asset]]
 file    = "portrait-foliage.jpg"
 source  = "https://commons.wikimedia.org/wiki/File:Allef_Vinicius_2016-09-16_(Unsplash_5GyVnouGxqM).jpg"
 author  = "Allef Vinicius (Unsplash)"

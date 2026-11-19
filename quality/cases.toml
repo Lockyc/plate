@@ -2011,3 +2011,11 @@ timeout_ms = 500
 <meta charset="utf-8">
 <body style="margin:0;font:16px sans-serif"><h1>Jobs</h1></body>
 '''
+
+[[case]]
+name   = "cmm-fogra39"
+why    = "plate's own CMYK to sRGB engine must land Fogra's measured patches no worse than Ghostscript does with press's soft-proof flags"
+run    = ["version"]
+metric = "fogra39-de00"
+params = { chart = "{asset:FOGRA39.txt}", icc = "{asset:Coated_Fogra39L_VIGC_300.icc}", engine = "go", stat = "p95" }
+max    = 4.9
