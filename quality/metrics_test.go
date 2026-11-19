@@ -532,8 +532,9 @@ func TestPatternSteps(t *testing.T) {
 		{"none", shading, 0},
 		{"matched", qdfPattern(5, [4]string{"0", "0", "840", "594"}, "840", "594"), 0},
 		{"chrome", qdfPattern(5, [4]string{"0", "0", "840", "594"}, "842", "596") + shading, 2},
-		{"worst of several", qdfPattern(5, [4]string{"400", "266.5", "440", "306.5"}, "40", "40") +
+		{"worst of several", qdfPattern(5, [4]string{"400.1", "266.66666", "440.1", "306.66666"}, "40", "40") +
 			qdfPattern(7, [4]string{"0", "0", "840", "594"}, "840", "597.5"), 3.5},
+		{"float error", qdfPattern(5, [4]string{"12.7", "0", "53.1", "40"}, "40.4", "40"), 0},
 		{"negative step", qdfPattern(5, [4]string{"0", "0", "40", "40"}, "-40", "40"), 0},
 	} {
 		v, err := Metrics["pattern-steps"](Params{"qdf": write(c.name+".qdf", c.body)})
