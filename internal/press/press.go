@@ -2,7 +2,7 @@
 // every glyph outlined, every colour converted to the supplied CMYK profile,
 // the page box forced from the source, images downsampled only well above
 // --max-ppi and kept lossless unless --jpeg sets a quality for photographic
-// colour ones. It then proves the master: no fonts, no RGB anywhere, the same page boxes and count, and a soft proof of the master
+// colour ones. It then proves the master: no fonts, no RGB anywhere, the same page boxes and count, no more than --max-ink total ink beyond a speck, and a soft proof of the master
 // that matches the source by RMSE over each page and each --region. The
 // master is a separate deliverable: outlining destroys the text a text
 // check reads, so check the source, and press the checked source.
@@ -30,7 +30,7 @@ import (
 	"github.com/lockyc/plate/internal/raster"
 )
 
-const usage = "press --icc profile.icc [--cmyk RRGGBB=C,M,Y,K]... [--max-ppi N] [--jpeg Q] [--max-rmse R] [--region x,y,w,h:max]... [--proof-width PX] <in.pdf> <out.pdf>"
+const usage = "press --icc profile.icc [--cmyk RRGGBB=C,M,Y,K]... [--max-ppi N] [--jpeg Q] [--max-rmse R] [--region x,y,w,h:max]... [--proof-width PX] [--max-ink PCT] <in.pdf> <out.pdf>"
 
 // spot is a brand colour with its own CMYK: a vector fill or stroke drawn in
 // rgb is written as cmyk (percentages) instead of converted through the
@@ -157,6 +157,7 @@ type region struct {
 type job struct {
 	in, out, icc    string
 	maxPPI, maxRMSE float64
+	maxInk          float64 // total ink a pixel may carry, in percent
 	proofWidth      int
 	jpeg            int // colour images' JPEG quality; 0 keeps them lossless
 	regions         []region
@@ -171,6 +172,7 @@ func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	maxPPI := cli.Float(fs, "max-ppi", 450, "downsample images above 1.5 × this resolution, to it")
 	maxRMSE := cli.Float(fs, "max-rmse", defaultMaxRMSE, "soft-proof RMSE allowed over a whole page")
 	proofWidth := cli.Int(fs, "proof-width", 3000, "soft-proof render width in px; RMSE settles by about 3000")
+	maxInk := cli.Float(fs, "max-ink", 300, "total ink (C+M+Y+K) a page may carry over more than a speck of area, in percent; 0 to 400")
 	jpeg := cli.Int(fs, "jpeg", 0, "store photographic colour images as JPEG at this `quality` (1-100), no chroma subsampling, flat artwork staying lossless; 0 keeps every image lossless")
 	var specs cli.Multi
 	fs.Var(&specs, "region", "x,y,w,h:max: a page region, as fractions, held to its own RMSE (repeatable)")
@@ -187,15 +189,18 @@ func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	for _, c := range []struct {
 		flag string
 		ok   bool
-	}{{"max-ppi", *maxPPI > 0}, {"max-rmse", *maxRMSE > 0}, {"proof-width", *proofWidth > 0}} {
+	}{{"max-ppi", *maxPPI > 0}, {"max-rmse", *maxRMSE > 0}, {"proof-width", *proofWidth > 0}, {"max-ink", *maxInk > 0}} {
 		if !c.ok {
 			return cli.Usage(stderr, "press", "--%s must be greater than 0", c.flag)
 		}
 	}
+	if *maxInk > 400 {
+		return cli.Usage(stderr, "press", "--max-ink must be greater than 0 and at most 400, the most four inks can lay down")
+	}
 	if *jpeg < 0 || *jpeg > 100 {
 		return cli.Usage(stderr, "press", "--jpeg must be 1 to 100, or 0 for lossless")
 	}
-	j := job{maxPPI: *maxPPI, maxRMSE: *maxRMSE, proofWidth: *proofWidth, jpeg: *jpeg, log: stdout}
+	j := job{maxPPI: *maxPPI, maxRMSE: *maxRMSE, proofWidth: *proofWidth, maxInk: *maxInk, jpeg: *jpeg, log: stdout}
 	for _, s := range specs {
 		r, err := parseRegion(s)
 		if err != nil {
@@ -455,6 +460,22 @@ func (j job) verify(ctx context.Context, src pdf.Info) error {
 	if got.Pages != src.Pages {
 		return fmt.Errorf("the page count changed from %d to %d", src.Pages, got.Pages)
 	}
+	dpi := j.dpi(src)
+	cmyk, err := renderCMYK(ctx, tmp, j.out, pt(dpi), src.Pages)
+	if err != nil {
+		return err
+	}
+	for p, path := range cmyk {
+		img, err := raster.ReadPAM(path)
+		if err != nil {
+			return err
+		}
+		over, bad := inkLimit(img, j.maxInk, dpi)
+		fmt.Fprintf(j.log, "page %d: peak ink %.0f%% (max %g%%)\n", p+1, over.Peak, j.maxInk)
+		if bad {
+			return fmt.Errorf("page %d: %.0f%% ink over %.1f mm² around %s, above --max-ink %g; lower the colours there or raise --max-ink to what the printer accepts", p+1, over.Peak, over.Area, boxSpec(over.Box), j.maxInk)
+		}
+	}
 	if err := j.proof(ctx, tmp, src); err != nil {
 		return err
 	}
@@ -467,7 +488,7 @@ func (j job) verify(ctx context.Context, src pdf.Info) error {
 // print against what the screen showed. The regions exist because a page
 // average hides a small element that went missing.
 func (j job) proof(ctx context.Context, tmp string, src pdf.Info) error {
-	dpi := pt(float64(j.proofWidth) * 72 / src.W)
+	dpi := pt(j.dpi(src))
 	common := []string{"-q", "-dBATCH", "-dNOPAUSE", "-dSAFER", "-sDEVICE=png16m", "-r" + dpi, "-dTextAlphaBits=4", "-dGraphicsAlphaBits=4"}
 	page := func(name string, p int) string { return filepath.Join(tmp, name+"-"+strconv.Itoa(p)+".png") }
 	pattern := func(name string) string { return gsLiteral(tmp) + string(filepath.Separator) + name + "-%d.png" }

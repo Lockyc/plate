@@ -28,6 +28,13 @@ case "$dev" in
     f=$FIXTURE_SRC_PNG
     case "$*" in *DefaultCMYKProfile*) f=$FIXTURE_OUT_PNG ;; esac
     cp "$f" "$(printf '%s' "$out" | sed 's/%d/1/')" ;;
+  pam)
+    p=1
+    while [ "$p" -le "${PAGES:-1}" ]; do
+      eval "f=\${PAM_$p:-\$FIXTURE_PAM}"
+      cp "$f" "$(printf '%s' "$out" | sed "s/%d/$p/")"
+      p=$((p+1))
+    done ;;
 esac
 exit 0`
 
@@ -68,9 +75,12 @@ func setup(t *testing.T) *env {
 	enginetest.Stub(t, "pdffonts", `printf 'name type encoding emb sub uni object ID\n---- ---- ---- --- --- --- ---\n%s' "$FONTS"`)
 	enginetest.Stub(t, "pdfimages", `printf 'page num type width height color comp bpc enc interp object ID x-ppi y-ppi size ratio\n----\n   1   0 %s 1200 900 %s 4 8 image no 12 0 300 300 100K 2.5%%\n' "${IMG_TYPE:-image}" "${IMG_COLOR:-cmyk}"`)
 	enginetest.Stub(t, "qpdf", `printf '%s\n' "${QDF:-/DeviceCMYK k}" > "$5"`)
-	for _, k := range []string{"GS_STDERR", "FONTS", "IMG_TYPE", "IMG_COLOR", "QDF", "OUT_SIZE", "PAGES", "PAGE_LINES"} {
+	for _, k := range []string{"GS_STDERR", "FONTS", "IMG_TYPE", "IMG_COLOR", "QDF", "OUT_SIZE", "PAGES", "PAGE_LINES", "PAM_1", "PAM_2"} {
 		t.Setenv(k, "")
 	}
+	pam := filepath.Join(e.dir, "ink.pam")
+	os.WriteFile(pam, pamBytes(4, 4, block(0, 0, 0, [4]byte{})), 0o644)
+	t.Setenv("FIXTURE_PAM", pam)
 	src := grey(t, nil)
 	t.Setenv("FIXTURE_SRC_PNG", src)
 	t.Setenv("FIXTURE_OUT_PNG", src)

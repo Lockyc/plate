@@ -60,6 +60,18 @@ setup  = [
 run    = ["press", "--icc", "{asset:Coated_Fogra39L_VIGC_300.icc}", "--region", "0,0.88,1,0.12:0.06", "{tmp:src.pdf}", "{tmp:press.pdf}"]
 stdout = "CMYK only"
 
+[[case]]
+name   = "press-ink-limit"
+why    = "a master with 400% ink is refused before it reaches a printer"
+files  = { "page.html" = '''<!doctype html><style>@page{size:1200px 896px;margin:0}html,body{margin:0;width:1200px;height:896px}body{background:#fdfcf1}div{width:600px;height:400px;background:#000001}</style><div></div>''' }
+setup  = [
+  ["plate", "render", "--size", "1200x896", "--pdf", "{tmp:src.pdf}", "{tmp:page.html}"],
+]
+run    = ["press", "--icc", "{asset:Coated_Fogra39L_VIGC_300.icc}", "--cmyk", "000001=100,100,100,100", "{tmp:src.pdf}", "{tmp:press.pdf}"]
+exit   = 1
+stderr = "ink"
+absent = ["{tmp:press.pdf}"]
+
 # press-jpeg: an A3 sign whose artwork is a large textured cut-out with
 # transparency, placed at about 330 ppi, as a character on an event sign
 # is. Kept lossless, the cut-out alone makes the master too big to email.
