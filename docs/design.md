@@ -31,6 +31,8 @@ internal/cdp/        a DevTools-protocol session with Chrome over --remote-debug
 internal/video/      the encode, checks and whole-set publish clip and animate share
 internal/frames/     the one clip decoder: video's measures, clip's extraction, diff's clips
 internal/sheet/      a PDF's pages redrawn as forms on new sheets (impose, marks)
+internal/cmm/        CMYK output profiles read and converted to sRGB in-process; the
+                     proof's independent reading of a master
 internal/cli/        flag, exit-code and error conventions every command shares
 internal/engine/     the one way an external tool is run
 internal/atomicfile/ a file written whole or not at all: a temp file beside it, renamed
@@ -177,9 +179,14 @@ colours, or renders what it is given.
   is written into the input's vector fills and strokes as its own CMYK first
   (in QDF, repaired by fix-qdf), and gs keeps it, its default CMYK profile
   being the output's. Text that leaves K-only is set to overprint in the same
-  pass unless `--knockout`. It then checks the result has no fonts, no RGB,
-  unchanged page boxes and any overprint it set, and compares a soft proof
-  against the source by RMSE over the page and any `--region`.
+  pass unless `--knockout`. Transparency stays live unless `flattens` finds a
+  tiling pattern holding it; then the whole file is flattened. The result is
+  checked for no fonts, no RGB, unchanged page boxes, any overprint it set and
+  total ink within `--max-ink` beyond `inkSpeckMM2`, read from a CMYK render.
+  The soft proof reads the master back through `internal/cmm`, not Ghostscript,
+  and compares it with the source by RMSE (`defaultMaxRMSE`) over the page and
+  any `--region`. `--verify` runs those checks on an existing master and
+  writes nothing.
 - **grade** — `fit` registers the image to the reference (SIFT + RANSAC),
   fits an RGB→RGB thin-plate map on opaque, eroded pixels, and bakes a 16-bit
   HALD CLUT from sRGB frames. `apply` reads the source upright in sRGB too,

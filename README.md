@@ -62,7 +62,7 @@ plate build site.manifest                                    # every target, ski
 | | `build` | Renders every target in a manifest in parallel |
 | | `fonts` | Embeds web fonts into a CSS file, optionally cut to one language's characters |
 | | `slides` | Previews a Google Slides deck from its API JSON, one PNG per slide |
-| **Print & PDF** | `press` | A print master: text as outlines, CMYK, brand colours exact, checked against a soft proof |
+| **Print & PDF** | `press` | A print master: text as outlines, CMYK, brand colours exact, total ink limited, black text overprinting, checked against a soft proof read back independently |
 | | `impose` | An A5 flyer two-up on A4, cut down the middle, one- or two-sided |
 | | `marks` | A print shop's copy: each page at its trim size with bleed and crop marks |
 | | `doc` | Markdown or HTML to a plain A4 PDF with running heads and page numbers |

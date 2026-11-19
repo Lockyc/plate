@@ -219,6 +219,26 @@ independently of phase 5. Within a phase, order is open.
   Deferred because MP4 and WebM are the formats a page plays, and WebP is
   an opt-in extra. Unlock: a pinned ffmpeg carrying `libwebp_anim`, which
   streams the frames, or encoding in batches and joining them.
+- **press flattens a whole page for one soft-masked pattern.** A page with a
+  transparent-stop CSS gradient and a photo cut-out is flattened (`flattens`),
+  so `--jpeg` misses the cut-out; the real A3 auction sign stays at about
+  17.9 MB. Deferred because a flattened page draws alike in every renderer.
+  Unlock: gs parameters or a post-pass that JPEG-encodes the flattened areas,
+  measured on a quality case shaped like that sign.
+- **cmm reads v4 `mAB `, lut8 and XYZ-PCS profiles untested.** Only the
+  FOGRA39 v2 lut16 profile is measured. Deferred because no other CMYK
+  profile with characterisation data is in the assets. Unlock: an openly
+  licensed v4 or lut8 CMYK profile with characterisation data, added as an
+  asset and a case.
+- **flatten misses an opaque pattern under page-level alpha.** An opaque
+  tiling pattern painted under a `/ca` below 1 is not detected by
+  `transparentTiles`, and Quartz may misplace it. Deferred because no such
+  file has shown the misplacement. Unlock: a probe showing the misplacement,
+  then the detector extended to it.
+- **press-knockout proves only that the master is CMYK.** The harness has no
+  stdout-absent or pixel check that the text was knocked out. Deferred
+  because the overprint case pins the other half. Unlock: a stdout-absent
+  field or a plate-level pixel metric.
 - **Sharpness misses a magenta chroma smear.** Magenta keeps its strokes
   through either smear `video.MinSharpness` catches on the other colours
   (see `sharpSigma` in internal/video/measure.go), so a chroma-smearing

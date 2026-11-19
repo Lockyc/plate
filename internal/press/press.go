@@ -5,8 +5,8 @@
 // colour ones. Transparency stays live unless a tiling pattern holds it;
 // then the whole file is flattened, so a page with both a soft-masked
 // pattern and a photo cut-out has its cut-out flattened too, lossless,
-// where --jpeg does not reach. Text a --cmyk makes K-only overprints unless --knockout. It
-// then proves the master: no fonts, no RGB anywhere, the same page boxes
+// where --jpeg does not reach. Text a --cmyk makes K-only overprints unless
+// --knockout. It then proves the master: no fonts, no RGB anywhere, the same page boxes
 // and count, the overprint kept, no more than --max-ink total ink beyond a
 // speck, and a soft proof of the master (its CMYK read back through plate's
 // own colour engine) that matches the source by RMSE over each page and
