@@ -2,7 +2,10 @@
 // every glyph outlined, every colour converted to the supplied CMYK profile,
 // the page box forced from the source, images downsampled only well above
 // --max-ppi and kept lossless unless --jpeg sets a quality for photographic
-// colour ones. Text a --cmyk makes K-only overprints unless --knockout. It
+// colour ones. Transparency stays live unless a tiling pattern holds it;
+// then the whole file is flattened, so a page with both a soft-masked
+// pattern and a photo cut-out has its cut-out flattened too, lossless,
+// where --jpeg does not reach. Text a --cmyk makes K-only overprints unless --knockout. It
 // then proves the master: no fonts, no RGB anywhere, the same page boxes
 // and count, the overprint kept, no more than --max-ink total ink beyond a
 // speck, and a soft proof of the master (its CMYK read back through plate's
@@ -355,13 +358,24 @@ func (j job) run(ctx context.Context) (err error) {
 	// --permit-file-read: -dSAFER otherwise refuses the profile and reports
 	// it only after writing a plausible file.
 	// -dCompatibilityLevel=1.4 keeps transparency live: a cut-out stays an
-	// image with a soft mask, which --jpeg reaches, where 1.3 flattens each
-	// transparent area into a lossless CMYK image at -r. snapTiles then
-	// fixes the tiling patterns live transparency keeps.
+	// image with a soft mask, which --jpeg reaches. 1.3 flattens each
+	// transparent area into a lossless CMYK image at -r, which press asks
+	// for only where flattens says live transparency draws wrong.
+	flat, err := flattens(ctx, j.in)
+	if err != nil {
+		return err
+	}
+	level := "1.4"
+	if flat {
+		level = "1.3"
+		fmt.Fprintln(j.log, "transparency flattened (PDF 1.3): a tiling pattern holds transparency, which macOS draws out of place when live")
+	} else {
+		fmt.Fprintln(j.log, "transparency kept live (PDF 1.4): no tiling pattern holds transparency")
+	}
 	args := []string{"-q", "-dBATCH", "-dNOPAUSE", "-dSAFER",
 		"--permit-file-read=" + j.icc,
 		"-sDEVICE=pdfwrite", "-dNoOutputFonts",
-		"-dCompatibilityLevel=1.4", "-r" + ppi,
+		"-dCompatibilityLevel=" + level, "-r" + ppi,
 		"-sColorConversionStrategy=CMYK", "-sOutputICCProfile=" + j.icc,
 		"-dRenderIntent=1", "-dBlackPtComp=1",
 		"-dFIXEDMEDIA", "-dDEVICEWIDTHPOINTS=" + pt(src.W), "-dDEVICEHEIGHTPOINTS=" + pt(src.H),
@@ -383,16 +397,6 @@ func (j job) run(ctx context.Context) (err error) {
 	args = append(args, gsIn)
 	if _, err := engine.Run(ctx, engine.Cmd{Engine: "gs", Args: args, StderrFatal: true, Inputs: []string{gsIn, j.icc}, Outputs: []string{j.out}, Timeout: gsTimeout}); err != nil {
 		return err
-	}
-	snapped, skipped, err := snapTiles(ctx, j.out)
-	if err != nil {
-		return err
-	}
-	if snapped > 0 {
-		fmt.Fprintf(j.log, "%d tiling pattern(s) stepped to their tile\n", snapped)
-	}
-	if skipped > 0 {
-		fmt.Fprintf(j.log, "%d tiling pattern(s) left alone: indirect BBox or step\n", skipped)
 	}
 	return j.verify(ctx, src)
 }
