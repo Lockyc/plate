@@ -88,3 +88,35 @@ func TestLoadRefusesMissingWhitePoint(t *testing.T) {
 		t.Fatalf("Load = %v, want a refusal naming wtpt", err)
 	}
 }
+
+// lutHeader is a lut16Type tag's 52-byte header (in inputs, out outputs, a
+// grid of grid points on each, two-entry curves) and its input curves,
+// with no CLUT after them.
+func lutHeader(in, out, grid byte) []byte {
+	b := make([]byte, 52+int(in)*2*2)
+	copy(b, "mft2")
+	b[8], b[9], b[10] = in, out, grid
+	binary.BigEndian.PutUint16(b[48:], 2)
+	binary.BigEndian.PutUint16(b[50:], 2)
+	return b
+}
+
+// TestParseLutRefusesBeforeAllocating: a malformed header refuses before
+// the CLUT is allocated, whatever its declared size.
+func TestParseLutRefusesBeforeAllocating(t *testing.T) {
+	for _, c := range []struct {
+		name            string
+		in, out, grid   byte
+		wantIn, wantOut int
+		refusal         string
+	}{
+		{"an A2B with 8 inputs on a 255 grid", 8, 3, 255, 4, 3, "want 4 to 3"},
+		{"an A2B with 4 inputs on a 255 grid", 4, 3, 255, 4, 3, "more than"},
+		{"a B2A with 3 inputs on a 255 grid and no data", 3, 4, 255, 3, 4, "shorter"},
+	} {
+		_, err := parseLut(lutHeader(c.in, c.out, c.grid), false, c.wantIn, c.wantOut)
+		if err == nil || !strings.Contains(err.Error(), c.refusal) {
+			t.Errorf("%s: %v, want a refusal with %q", c.name, err, c.refusal)
+		}
+	}
+}

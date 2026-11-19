@@ -62,12 +62,13 @@ func Load(path string) (*Profile, error) {
 		}
 		tags[string(e[:4])] = b[off : off+size]
 	}
-	read := func(name string) (*lut, error) {
+	// read parses tag name, which must map in channels to out.
+	read := func(name string, in, out int) (*lut, error) {
 		data, ok := tags[name]
 		if !ok {
 			return nil, fmt.Errorf("%s has no %s tag", path, name)
 		}
-		l, err := parseLut(data, p.xyzPCS)
+		l, err := parseLut(data, p.xyzPCS, in, out)
 		var u unknownType
 		if errors.As(err, &u) {
 			return nil, fmt.Errorf("%s: tag %s has type %q, which plate does not read", path, name, string(u))
@@ -81,14 +82,11 @@ func Load(path string) (*Profile, error) {
 	if _, ok := tags[a2b]; !ok {
 		a2b, b2a = "A2B0", "B2A0"
 	}
-	if p.a2b, err = read(a2b); err != nil {
+	if p.a2b, err = read(a2b, 4, 3); err != nil {
 		return nil, err
 	}
-	if p.b2a, err = read(b2a); err != nil {
+	if p.b2a, err = read(b2a, 3, 4); err != nil {
 		return nil, err
-	}
-	if p.a2b.in != 4 || p.a2b.out != 3 || p.b2a.in != 3 || p.b2a.out != 4 {
-		return nil, fmt.Errorf("%s: want a 4-to-3 A2B and a 3-to-4 B2A, got %d-to-%d and %d-to-%d", path, p.a2b.in, p.a2b.out, p.b2a.in, p.b2a.out)
 	}
 	wt, ok := tags["wtpt"]
 	if !ok || len(wt) < 20 || string(wt[:4]) != "XYZ " {
@@ -308,9 +306,13 @@ func (r *reader) s15f16(off int) float64 {
 	return float64(int32(binary.BigEndian.Uint32(r.b[off:]))) / 65536
 }
 
-// samples reads n unsigned samples of width bytes each, as 0..1.
+// maxSamples is the most samples one table or CLUT may hold.
+const maxSamples = 1 << 26
+
+// samples reads n unsigned samples of width bytes each, as 0..1, refusing
+// before it allocates when they exceed maxSamples or the data.
 func (r *reader) samples(off, n, width int) []float64 {
-	if n > 1<<26 || !r.need(off, n*width) {
+	if n > maxSamples || !r.need(off, n*width) {
 		r.need(-1, 0)
 		return nil
 	}
@@ -325,16 +327,17 @@ func (r *reader) samples(off, n, width int) []float64 {
 	return out
 }
 
-// parseLut reads an A2B or B2A tag; xyzPCS says the profile's PCS is XYZ.
-func parseLut(b []byte, xyzPCS bool) (*lut, error) {
+// parseLut reads an A2B or B2A tag that must map in channels to out;
+// xyzPCS says the profile's PCS is XYZ.
+func parseLut(b []byte, xyzPCS bool, in, out int) (*lut, error) {
 	r := &reader{b: b}
 	if len(b) < 12 {
 		return nil, fmt.Errorf("the tag is shorter than its header")
 	}
 	sig := string(b[:4])
 	l := &lut{in: r.u8(8), out: r.u8(9)}
-	if l.in < 1 || l.in > 8 || l.out < 1 || l.out > 15 {
-		return nil, fmt.Errorf("%d inputs and %d outputs are out of range", l.in, l.out)
+	if l.in != in || l.out != out {
+		return nil, fmt.Errorf("it maps %d channels to %d, want %d to %d", l.in, l.out, in, out)
 	}
 	switch sig {
 	case "mft1", "mft2":
@@ -381,8 +384,10 @@ func parseLut816(r *reader, l *lut, wide, xyzPCS bool) {
 	for i := range gridPts {
 		gridPts[i] = grid
 	}
-	c := newClut(l.in, l.out, gridPts)
-	c.data = r.samples(off, len(c.data), width)
+	c := newClut(r, l.in, l.out, gridPts, off, width)
+	if c == nil {
+		return
+	}
 	off += len(c.data) * width
 	out := make(curves, l.out)
 	for i := range out {
@@ -437,8 +442,9 @@ func parseLutAB(r *reader, l *lut, aToB bool) {
 			r.need(-1, 0)
 			return
 		}
-		c = newClut(cin, cout, gridPts)
-		c.data = r.samples(offClut+20, len(c.data), width)
+		if c = newClut(r, cin, cout, gridPts, offClut+20, width); c == nil {
+			return
+		}
 	}
 	if r.err != nil {
 		return
@@ -463,14 +469,24 @@ func parseLutAB(r *reader, l *lut, aToB bool) {
 	}
 }
 
-func newClut(in, out int, grid []int) *clut {
+// newClut reads a CLUT of the given shape from width-byte samples at off,
+// or returns nil with r failed when it would hold more than maxSamples or
+// run past the data, before allocating it.
+func newClut(r *reader, in, out int, grid []int, off, width int) *clut {
 	c := &clut{in: in, out: out, grid: grid, stride: make([]int, in)}
 	n := out
 	for i := in - 1; i >= 0; i-- {
 		c.stride[i] = n
-		n *= grid[i]
+		if n *= grid[i]; n > maxSamples {
+			if r.err == nil {
+				r.err = fmt.Errorf("its CLUT holds more than %d samples", maxSamples)
+			}
+			return nil
+		}
 	}
-	c.data = make([]float64, n)
+	if c.data = r.samples(off, n, width); c.data == nil {
+		return nil
+	}
 	return c
 }
 
