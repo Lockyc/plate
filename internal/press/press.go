@@ -3,7 +3,7 @@
 // the page box forced from the source, images downsampled only well above
 // --max-ppi and kept lossless unless --jpeg sets a quality for photographic
 // colour ones. It then proves the master: no fonts, no RGB anywhere, the same page boxes and count, no more than --max-ink total ink beyond a speck, and a soft proof of the master
-// that matches the source by RMSE over each page and each --region. The
+// (its CMYK read back through plate's own colour engine) that matches the source by RMSE over each page and each --region. The
 // master is a separate deliverable: outlining destroys the text a text
 // check reads, so check the source, and press the checked source.
 package press
@@ -25,12 +25,13 @@ import (
 	"time"
 
 	"github.com/lockyc/plate/internal/cli"
+	"github.com/lockyc/plate/internal/cmm"
 	"github.com/lockyc/plate/internal/engine"
 	"github.com/lockyc/plate/internal/pdf"
 	"github.com/lockyc/plate/internal/raster"
 )
 
-const usage = "press --icc profile.icc [--cmyk RRGGBB=C,M,Y,K]... [--max-ppi N] [--jpeg Q] [--max-rmse R] [--region x,y,w,h:max]... [--proof-width PX] [--max-ink PCT] <in.pdf> <out.pdf>"
+const usage = "press --icc profile.icc [--cmyk RRGGBB=C,M,Y,K]... [--max-ppi N] [--jpeg Q] [--max-rmse R] [--region x,y,w,h:max]... [--proof-width PX] [--max-ink PCT] (<in.pdf> <out.pdf> | --verify <master.pdf> <in.pdf>)"
 
 // spot is a brand colour with its own CMYK: a vector fill or stroke drawn in
 // rgb is written as cmyk (percentages) instead of converted through the
@@ -135,11 +136,12 @@ func rewriteContent(qdf []byte, f func([]byte) []byte) []byte {
 	}
 }
 
-// defaultMaxRMSE separated clean masters (at most 0.066) from masters with a
-// hidden element (0.083 and above) on the print artboards press was built
-// against. Calibrate a project's own value against a deliberately broken
-// master: a gate that cannot fail is decoration.
-const defaultMaxRMSE = 0.085
+// defaultMaxRMSE sits midway between the page RMSE of the press-clean-master
+// quality case (0.0221) and of press-proof-broken-master (0.1803), a master
+// pressed from the same page without its footer bar, rounded to 0.005.
+// Calibrate a project's own value against a deliberately broken master: a
+// gate that cannot fail is decoration.
+const defaultMaxRMSE = 0.1
 
 const gsTimeout = 30 * time.Minute
 
@@ -156,6 +158,7 @@ type region struct {
 
 type job struct {
 	in, out, icc    string
+	prof            *cmm.Profile // icc, read by plate's own colour engine for the soft proof
 	maxPPI, maxRMSE float64
 	maxInk          float64 // total ink a pixel may carry, in percent
 	proofWidth      int
@@ -174,13 +177,18 @@ func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	proofWidth := cli.Int(fs, "proof-width", 3000, "soft-proof render width in px; RMSE settles by about 3000")
 	maxInk := cli.Float(fs, "max-ink", 300, "total ink (C+M+Y+K) a page may carry over more than a speck of area, in percent; 0 to 400")
 	jpeg := cli.Int(fs, "jpeg", 0, "store photographic colour images as JPEG at this `quality` (1-100), no chroma subsampling, flat artwork staying lossless; 0 keeps every image lossless")
+	verifyOnly := fs.String("verify", "", "check this existing `master` against <in.pdf>, as press checks one it makes; writes nothing")
 	var specs cli.Multi
 	fs.Var(&specs, "region", "x,y,w,h:max: a page region, as fractions, held to its own RMSE (repeatable)")
 	var cmyks cli.Multi
 	fs.Var(&cmyks, "cmyk", "RRGGBB=C,M,Y,K: vector fills in this colour get exactly this CMYK, in percent (repeatable)")
-	rest, code, ok := cli.Parse(fs, args, 2)
+	rest, code, ok := cli.Parse(fs, args, -1)
 	if !ok {
 		return code
+	}
+	if want := map[bool]int{false: 2, true: 1}[*verifyOnly != ""]; len(rest) != want {
+		fs.Usage()
+		return 2
 	}
 	if *icc == "" {
 		defer fs.Usage()
@@ -218,8 +226,15 @@ func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	var err error
 	if j.icc, err = filepath.Abs(*icc); err == nil {
 		if _, err = os.Stat(j.icc); err == nil {
-			j.in, j.out = rest[0], rest[1]
-			err = j.run(ctx)
+			if j.prof, err = cmm.Load(j.icc); err == nil {
+				if *verifyOnly != "" {
+					j.in, j.out = rest[0], *verifyOnly
+					err = j.check(ctx)
+				} else {
+					j.in, j.out = rest[0], rest[1]
+					err = j.run(ctx)
+				}
+			}
 		}
 	}
 	if err != nil {
@@ -245,6 +260,15 @@ func parseRegion(s string) (region, error) {
 }
 
 func pt(v float64) string { return strconv.FormatFloat(v, 'f', -1, 64) }
+
+// check proves an existing master against its source, writing nothing.
+func (j job) check(ctx context.Context) error {
+	src, err := pdf.Read(ctx, j.in)
+	if err != nil {
+		return err
+	}
+	return j.verify(ctx, src)
+}
 
 func (j job) run(ctx context.Context) (err error) {
 	for _, other := range []string{j.in, j.icc} {
@@ -476,38 +500,39 @@ func (j job) verify(ctx context.Context, src pdf.Info) error {
 			return fmt.Errorf("page %d: %.0f%% ink over %.1f mm² around %s, above --max-ink %g; lower the colours there or raise --max-ink to what the printer accepts", p+1, over.Peak, over.Area, boxSpec(over.Box), j.maxInk)
 		}
 	}
-	if err := j.proof(ctx, tmp, src); err != nil {
+	if err := j.proof(ctx, tmp, src, cmyk); err != nil {
 		return err
 	}
 	fmt.Fprintf(j.log, "wrote %s: no fonts, CMYK only, %d page(s) at %gx%g pt\n", j.out, src.Pages, src.W, src.H)
 	return nil
 }
 
-// proof renders source and master with Ghostscript, the master's CMYK read
-// back through the same profile, and compares them: what the press will
-// print against what the screen showed. The regions exist because a page
-// average hides a small element that went missing.
-func (j job) proof(ctx context.Context, tmp string, src pdf.Info) error {
+// proof renders the source with Ghostscript and the master's CMYK pages
+// (cmyk, the PAMs the ink check read) through plate's own colour engine, in
+// the relative colorimetric intent with black point compensation that press
+// converts with, and compares them: what the press will print against what
+// the screen showed. The regions exist because a page average hides a small
+// element that went missing.
+func (j job) proof(ctx context.Context, tmp string, src pdf.Info, cmyk []string) error {
 	dpi := pt(j.dpi(src))
-	common := []string{"-q", "-dBATCH", "-dNOPAUSE", "-dSAFER", "-sDEVICE=png16m", "-r" + dpi, "-dTextAlphaBits=4", "-dGraphicsAlphaBits=4"}
-	page := func(name string, p int) string { return filepath.Join(tmp, name+"-"+strconv.Itoa(p)+".png") }
-	pattern := func(name string) string { return gsLiteral(tmp) + string(filepath.Separator) + name + "-%d.png" }
-	if _, err := engine.Run(ctx, engine.Cmd{Engine: "gs", Args: append(common, "-sOutputFile="+pattern("src"), j.in), StderrFatal: true, Inputs: []string{j.in}, Outputs: []string{page("src", 1)}, Timeout: gsTimeout}); err != nil {
-		return err
-	}
-	outArgs := append(common, "--permit-file-read="+j.icc, "-sDefaultCMYKProfile="+j.icc, "-dRenderIntent=1", "-dBlackPtComp=1", "-sOutputFile="+pattern("out"), j.out)
-	if _, err := engine.Run(ctx, engine.Cmd{Engine: "gs", Args: outArgs, StderrFatal: true, Inputs: []string{j.out, j.icc}, Outputs: []string{page("out", 1)}, Timeout: gsTimeout}); err != nil {
+	page := func(p int) string { return filepath.Join(tmp, "src-"+strconv.Itoa(p)+".png") }
+	args := append(renderBase(dpi), "-sDEVICE=png16m", "-sOutputFile="+gsLiteral(tmp)+string(filepath.Separator)+"src-%d.png", j.in)
+	if _, err := engine.Run(ctx, engine.Cmd{Engine: "gs", Args: args, StderrFatal: true, Inputs: []string{j.in}, Outputs: []string{page(1)}, Timeout: gsTimeout}); err != nil {
 		return err
 	}
 	for p := 1; p <= src.Pages; p++ {
-		a, err := raster.Load(page("src", p))
+		a, err := raster.Load(page(p))
 		if err != nil {
 			return err
 		}
-		b, err := raster.Load(page("out", p))
+		m, err := raster.ReadPAM(cmyk[p-1])
 		if err != nil {
 			return err
 		}
+		if sz := a.Bounds().Size(); sz.X != m.W || sz.Y != m.H {
+			return fmt.Errorf("page %d: the source renders %dx%d px and the master %dx%d px", p, sz.X, sz.Y, m.W, m.H)
+		}
+		b := j.prof.ToSRGB(m)
 		v, err := raster.RMSE(a, b, a.Bounds(), raster.RGB)
 		if err != nil {
 			return err

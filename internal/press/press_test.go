@@ -3,14 +3,14 @@ package press
 import (
 	"bytes"
 	"context"
-	"image"
-	"image/color"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
+	"github.com/lockyc/plate/internal/cmm"
 	"github.com/lockyc/plate/internal/enginetest"
 	"github.com/lockyc/plate/internal/raster"
 )
@@ -25,9 +25,7 @@ done
 case "$dev" in
   pdfwrite) printf '%%PDF-1.7 master' > "$(printf '%s' "$out" | sed 's/%%/%/g')"; [ -n "$GS_STDERR" ] && echo "$GS_STDERR" >&2 ;;
   png16m)
-    f=$FIXTURE_SRC_PNG
-    case "$*" in *DefaultCMYKProfile*) f=$FIXTURE_OUT_PNG ;; esac
-    cp "$f" "$(printf '%s' "$out" | sed 's/%d/1/')" ;;
+    cp "$FIXTURE_SRC_PNG" "$(printf '%s' "$out" | sed 's/%d/1/')" ;;
   pam)
     p=1
     while [ "$p" -le "${PAGES:-1}" ]; do
@@ -44,20 +42,43 @@ const pdfinfoStub = `case "$*" in
   *) printf 'Pages:          %s\nPage size:      900 x 675 pts\n' "${PAGES:-1}" ;;
 esac`
 
-func grey(t *testing.T, band color.Color) string {
-	t.Helper()
-	img := image.NewRGBA64(image.Rect(0, 0, 300, 225))
-	for y := 0; y < 225; y++ {
-		for x := 0; x < 300; x++ {
-			c := color.Color(color.Gray{128})
-			if band != nil && y >= 198 {
-				c = band
+const fogra = "../../quality/assets/Coated_Fogra39L_VIGC_300.icc"
+
+// flat is a 300x225 CMYK page of K=128, its bottom 27 rows K=band when
+// band is above 0.
+func flat(band byte) raster.PAM {
+	img := raster.PAM{W: 300, H: 225}
+	for y := range img.H {
+		for range img.W {
+			k := byte(128)
+			if band > 0 && y >= 198 {
+				k = band
 			}
-			img.Set(x, y, c)
+			img.Pix = append(img.Pix, 0, 0, 0, k)
 		}
 	}
-	p := filepath.Join(t.TempDir(), "f.png")
-	if err := raster.SavePNG(p, img); err != nil {
+	return img
+}
+
+func pamFile(t *testing.T, img raster.PAM) string {
+	t.Helper()
+	b := []byte("P7\nWIDTH " + strconv.Itoa(img.W) + "\nHEIGHT " + strconv.Itoa(img.H) + "\nDEPTH 4\nMAXVAL 255\nTUPLTYPE CMYK\nENDHDR\n")
+	p := filepath.Join(t.TempDir(), "m.pam")
+	if err := os.WriteFile(p, append(b, img.Pix...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+// srcFor is the PNG a source that proofs as img would render to.
+func srcFor(t *testing.T, img raster.PAM) string {
+	t.Helper()
+	prof, err := cmm.Load(fogra)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(t.TempDir(), "src.png")
+	if err := raster.SavePNG(p, prof.ToSRGB(img)); err != nil {
 		t.Fatal(err)
 	}
 	return p
@@ -78,17 +99,17 @@ func setup(t *testing.T) *env {
 	for _, k := range []string{"GS_STDERR", "FONTS", "IMG_TYPE", "IMG_COLOR", "QDF", "OUT_SIZE", "PAGES", "PAGE_LINES", "PAM_1", "PAM_2"} {
 		t.Setenv(k, "")
 	}
-	pam := filepath.Join(e.dir, "ink.pam")
-	os.WriteFile(pam, pamBytes(4, 4, block(0, 0, 0, [4]byte{})), 0o644)
-	t.Setenv("FIXTURE_PAM", pam)
-	src := grey(t, nil)
-	t.Setenv("FIXTURE_SRC_PNG", src)
-	t.Setenv("FIXTURE_OUT_PNG", src)
+	t.Setenv("FIXTURE_PAM", pamFile(t, flat(0)))
+	t.Setenv("FIXTURE_SRC_PNG", srcFor(t, flat(0)))
 	e.in = filepath.Join(e.dir, "in.pdf")
 	e.out = filepath.Join(e.dir, "out.pdf")
 	e.icc = filepath.Join(e.dir, "cmyk.icc")
 	os.WriteFile(e.in, []byte("%PDF"), 0o644)
-	os.WriteFile(e.icc, []byte("icc"), 0o644)
+	b, err := os.ReadFile(fogra)
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(e.icc, b, 0o644)
 	return e
 }
 
@@ -218,14 +239,21 @@ func TestPressMixedPageSizes(t *testing.T) {
 	}
 }
 
+// banded makes the master's page carry band at its foot while the source
+// stays flat.
+func banded(t *testing.T, band byte) {
+	t.Helper()
+	t.Setenv("FIXTURE_PAM", pamFile(t, flat(band)))
+}
+
 func TestPressProof(t *testing.T) {
 	e := setup(t)
-	t.Setenv("FIXTURE_OUT_PNG", grey(t, color.Gray{90}))
+	banded(t, 160)
 	if code := e.run(); code != 0 {
 		t.Fatalf("a band difference failed the page gate: %s", e.stderr.String())
 	}
 	e = setup(t)
-	t.Setenv("FIXTURE_OUT_PNG", grey(t, color.Gray{90}))
+	banded(t, 160)
 	if code := e.run("--region", "0,0.88,1,0.12:0.06"); code != 1 {
 		t.Fatalf("region gate passed a changed band")
 	}
@@ -233,11 +261,78 @@ func TestPressProof(t *testing.T) {
 		t.Errorf("stderr %q does not name the region", e.stderr.String())
 	}
 	e = setup(t)
-	black := filepath.Join(t.TempDir(), "black.png")
-	raster.SavePNG(black, image.NewRGBA64(image.Rect(0, 0, 300, 225)))
-	t.Setenv("FIXTURE_OUT_PNG", black)
-	if code := e.run(); code != 1 || !strings.Contains(e.stderr.String(), "soft proof") {
+	allBlack := flat(0)
+	for i := range allBlack.Pix {
+		allBlack.Pix[i] = 255
+	}
+	t.Setenv("FIXTURE_PAM", pamFile(t, allBlack))
+	if code := e.run("--max-ink", "400"); code != 1 || !strings.Contains(e.stderr.String(), "soft proof") {
 		t.Fatalf("code %d, stderr %q", code, e.stderr.String())
+	}
+}
+
+func TestProofNoGSReadback(t *testing.T) {
+	e := setup(t)
+	if code := e.run(); code != 0 {
+		t.Fatalf("code %d: %s", code, e.stderr.String())
+	}
+	for _, c := range enginetest.Calls(t, e.gs) {
+		if slices.Contains(c, "-sDEVICE=png16m") && slices.Contains(c, "--permit-file-read="+e.icc) {
+			t.Errorf("gs read the master back through a profile: %q", c)
+		}
+		for _, a := range c {
+			if strings.HasPrefix(a, "-sDefaultCMYKProfile") {
+				t.Errorf("gs call with %q: %q", a, c)
+			}
+		}
+	}
+}
+
+func TestProofSizeMismatch(t *testing.T) {
+	e := setup(t)
+	t.Setenv("FIXTURE_PAM", pamFile(t, raster.PAM{W: 300, H: 226, Pix: make([]byte, 300*226*4)}))
+	if code := e.run(); code != 1 {
+		t.Fatalf("code %d", code)
+	}
+	for _, want := range []string{"300x225", "300x226"} {
+		if !strings.Contains(e.stderr.String(), want) {
+			t.Errorf("stderr %q lacks %q", e.stderr.String(), want)
+		}
+	}
+}
+
+func TestRunRefusesRGBProfile(t *testing.T) {
+	e := setup(t)
+	e.icc = "../../quality/assets/sRGB-v4.icc"
+	if code := e.run(); code != 1 || !strings.Contains(e.stderr.String(), "not a CMYK output profile") {
+		t.Fatalf("code %d, stderr %q", code, e.stderr.String())
+	}
+	if len(enginetest.Calls(t, e.gs)) != 0 {
+		t.Error("gs ran with an RGB profile")
+	}
+}
+
+func TestVerifyFlag(t *testing.T) {
+	e := setup(t)
+	master := filepath.Join(e.dir, "master.pdf")
+	os.WriteFile(master, []byte("%PDF master"), 0o644)
+	var out, errb bytes.Buffer
+	if code := Main(context.Background(), []string{"--icc", e.icc, "--verify", master, e.in, e.out}, &out, &errb); code != 2 {
+		t.Errorf("--verify with an output: code %d, want 2", code)
+	}
+	if code := Main(context.Background(), []string{"--icc", e.icc, "--verify", master, e.in}, &out, &errb); code != 0 {
+		t.Fatalf("code %d: %s", code, errb.String())
+	}
+	if e.outExists() {
+		t.Error("--verify wrote a file")
+	}
+	for _, c := range enginetest.Calls(t, e.gs) {
+		if slices.Contains(c, "-sDEVICE=pdfwrite") {
+			t.Errorf("--verify converted: %q", c)
+		}
+	}
+	if !strings.Contains(out.String(), "soft-proof RMSE") {
+		t.Errorf("stdout %q lacks the proof", out.String())
 	}
 }
 
@@ -277,8 +372,9 @@ func TestPressRefusesProfileAsOutput(t *testing.T) {
 	if code := e.run(); code != 1 {
 		t.Fatalf("code %d", code)
 	}
-	if b, err := os.ReadFile(e.icc); err != nil || string(b) != "icc" {
-		t.Errorf("the profile did not survive: %q, %v", b, err)
+	want, _ := os.ReadFile(fogra)
+	if b, err := os.ReadFile(e.icc); err != nil || !bytes.Equal(b, want) {
+		t.Errorf("the profile did not survive: %v", err)
 	}
 }
 

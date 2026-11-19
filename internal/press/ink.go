@@ -59,10 +59,17 @@ func renderCMYK(ctx context.Context, tmp, master, dpi string, pages int) ([]stri
 	for p := range paths {
 		paths[p] = filepath.Join(tmp, "cmyk-"+strconv.Itoa(p+1)+".pam")
 	}
-	args := []string{"-q", "-dBATCH", "-dNOPAUSE", "-dSAFER", "-sDEVICE=pam", "-dOverprint=/enable", "-r" + dpi, "-dTextAlphaBits=4", "-dGraphicsAlphaBits=4",
-		"-sOutputFile=" + gsLiteral(tmp) + string(filepath.Separator) + "cmyk-%d.pam", master}
+	args := append(renderBase(dpi), "-sDEVICE=pam", "-dOverprint=/enable",
+		"-sOutputFile="+gsLiteral(tmp)+string(filepath.Separator)+"cmyk-%d.pam", master)
 	_, err := engine.Run(ctx, engine.Cmd{Engine: "gs", Args: args, StderrFatal: true, Inputs: []string{master}, Outputs: paths, Timeout: gsTimeout})
 	return paths, err
+}
+
+// renderBase is the Ghostscript flags every proof render shares, so the
+// source and the master are rasterised alike: the same resolution and the
+// same anti-aliasing.
+func renderBase(dpi string) []string {
+	return []string{"-q", "-dBATCH", "-dNOPAUSE", "-dSAFER", "-r" + dpi, "-dTextAlphaBits=4", "-dGraphicsAlphaBits=4"}
 }
 
 // dpi is the resolution that renders src proofWidth px wide.

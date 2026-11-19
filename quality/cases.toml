@@ -61,6 +61,20 @@ run    = ["press", "--icc", "{asset:Coated_Fogra39L_VIGC_300.icc}", "--region", 
 stdout = "CMYK only"
 
 [[case]]
+name   = "press-proof-broken-master"
+why    = "a master that lost the footer bar its source has fails the soft proof at the default RMSE"
+files  = { "page.html" = '''<!doctype html><style>@page{size:1200px 896px;margin:0}html,body{margin:0;width:1200px;height:896px}body{background:#fdfcf1;font:bold 96px sans-serif;color:#062d5f}img{width:600px;height:400px;display:block}.bar{position:absolute;bottom:0;width:100%;height:100px;background:#f7a81b;color:#062d5f;font-size:40px}</style><p>Sample heading</p><img src="photo.jpg"><div class="bar">Footer text, 1 Example St</div>''', "nobar.html" = '''<!doctype html><style>@page{size:1200px 896px;margin:0}html,body{margin:0;width:1200px;height:896px}body{background:#fdfcf1;font:bold 96px sans-serif;color:#062d5f}img{width:600px;height:400px;display:block}</style><p>Sample heading</p><img src="photo.jpg">''' }
+setup  = [
+  ["magick", "-size", "1200x800", "gradient:#c9a27e-#35606b", "-seed", "7", "-attenuate", "0.3", "+noise", "Gaussian", "-quality", "92", "{tmp:photo.jpg}"],
+  ["plate", "render", "--size", "1200x896", "--pdf", "{tmp:src.pdf}", "{tmp:page.html}"],
+  ["plate", "render", "--size", "1200x896", "--pdf", "{tmp:nobar.pdf}", "{tmp:nobar.html}"],
+  ["plate", "press", "--icc", "{asset:Coated_Fogra39L_VIGC_300.icc}", "--max-rmse", "1", "{tmp:nobar.pdf}", "{tmp:broken.pdf}"],
+]
+run    = ["press", "--icc", "{asset:Coated_Fogra39L_VIGC_300.icc}", "--verify", "{tmp:broken.pdf}", "{tmp:src.pdf}"]
+exit   = 1
+stderr = "soft proof differs"
+
+[[case]]
 name   = "press-ink-limit"
 why    = "a master with 400% ink is refused before it reaches a printer"
 files  = { "page.html" = '''<!doctype html><style>@page{size:1200px 896px;margin:0}html,body{margin:0;width:1200px;height:896px}body{background:#fdfcf1}div{width:600px;height:400px;background:#000001}</style><div></div>''' }
