@@ -136,12 +136,13 @@ func rewriteContent(qdf []byte, f func([]byte) []byte) []byte {
 	}
 }
 
-// defaultMaxRMSE sits midway between the page RMSE of the press-clean-master
-// quality case (0.0221) and of press-proof-broken-master (0.1803), a master
-// pressed from the same page without its footer bar, rounded to 0.005.
-// Calibrate a project's own value against a deliberately broken master: a
-// gate that cannot fail is decoration.
-const defaultMaxRMSE = 0.1
+// defaultMaxRMSE separated clean masters (at most 0.066) from masters with a
+// hidden element (0.083 and above) on the print artboards press was built
+// against. The quality cases bracket it: press-clean-master reads 0.0221 and
+// press-proof-broken-master, the same page pressed without its footer bar,
+// 0.1803. Calibrate a project's own value against a deliberately broken
+// master: a gate that cannot fail is decoration.
+const defaultMaxRMSE = 0.085
 
 const gsTimeout = 30 * time.Minute
 
