@@ -354,15 +354,14 @@ func (j job) run(ctx context.Context) (err error) {
 	// re-encode JPEG; every image flag below undoes one of those.
 	// --permit-file-read: -dSAFER otherwise refuses the profile and reports
 	// it only after writing a plausible file.
-	// -dCompatibilityLevel=1.3 flattens transparency, painting each
-	// transparent area as a CMYK image at -r: left live, a soft-masked
-	// tiling pattern (Chrome's CSS gradient with a transparent stop) comes
-	// out with an XStep wider than its BBox, which macOS draws as seams and
-	// a second tile, and a print RIP may too.
+	// -dCompatibilityLevel=1.4 keeps transparency live: a cut-out stays an
+	// image with a soft mask, which --jpeg reaches, where 1.3 flattens each
+	// transparent area into a lossless CMYK image at -r. snapTiles then
+	// fixes the tiling patterns live transparency keeps.
 	args := []string{"-q", "-dBATCH", "-dNOPAUSE", "-dSAFER",
 		"--permit-file-read=" + j.icc,
 		"-sDEVICE=pdfwrite", "-dNoOutputFonts",
-		"-dCompatibilityLevel=1.3", "-r" + ppi,
+		"-dCompatibilityLevel=1.4", "-r" + ppi,
 		"-sColorConversionStrategy=CMYK", "-sOutputICCProfile=" + j.icc,
 		"-dRenderIntent=1", "-dBlackPtComp=1",
 		"-dFIXEDMEDIA", "-dDEVICEWIDTHPOINTS=" + pt(src.W), "-dDEVICEHEIGHTPOINTS=" + pt(src.H),
@@ -384,6 +383,13 @@ func (j job) run(ctx context.Context) (err error) {
 	args = append(args, gsIn)
 	if _, err := engine.Run(ctx, engine.Cmd{Engine: "gs", Args: args, StderrFatal: true, Inputs: []string{gsIn, j.icc}, Outputs: []string{j.out}, Timeout: gsTimeout}); err != nil {
 		return err
+	}
+	n, err := snapTiles(ctx, j.out)
+	if err != nil {
+		return err
+	}
+	if n > 0 {
+		fmt.Fprintf(j.log, "%d tiling pattern(s) stepped to their tile\n", n)
 	}
 	return j.verify(ctx, src)
 }

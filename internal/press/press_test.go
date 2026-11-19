@@ -96,7 +96,8 @@ func setup(t *testing.T) *env {
 	enginetest.Stub(t, "pdfinfo", pdfinfoStub)
 	enginetest.Stub(t, "pdffonts", `printf 'name type encoding emb sub uni object ID\n---- ---- ---- --- --- --- ---\n%s' "$FONTS"`)
 	enginetest.Stub(t, "pdfimages", `printf 'page num type width height color comp bpc enc interp object ID x-ppi y-ppi size ratio\n----\n   1   0 %s 1200 900 %s 4 8 image no 12 0 300 300 100K 2.5%%\n' "${IMG_TYPE:-image}" "${IMG_COLOR:-cmyk}"`)
-	enginetest.Stub(t, "qpdf", `q=${QDF:-/DeviceCMYK k}
+	enginetest.Stub(t, "qpdf", `[ "$2" = --json=2 ] && { echo '{"qpdf": [{"jsonversion": 2}, {}]}'; exit 0; }
+q=${QDF:-/DeviceCMYK k}
 case "$4" in */in.pdf) [ -n "$SRC_QDF" ] && q=$SRC_QDF ;; esac
 printf '%s\n' "$q" > "$5"`)
 	enginetest.Stub(t, "fix-qdf", `cp "$1" "$2"`)
@@ -130,7 +131,7 @@ func TestPressClean(t *testing.T) {
 		t.Fatalf("code %d: %s", code, e.stderr.String())
 	}
 	write := enginetest.Calls(t, e.gs)[0]
-	for _, want := range []string{"-dNoOutputFonts", "-sColorConversionStrategy=CMYK", "-sOutputICCProfile=" + e.icc,
+	for _, want := range []string{"-dNoOutputFonts", "-dCompatibilityLevel=1.4", "-sColorConversionStrategy=CMYK", "-sOutputICCProfile=" + e.icc,
 		"--permit-file-read=" + e.icc, "-dFIXEDMEDIA", "-dDEVICEWIDTHPOINTS=900", "-dDEVICEHEIGHTPOINTS=675",
 		"-dAutoFilterColorImages=false", "-dColorImageFilter=/FlateEncode", "-dColorImageResolution=450", "-dColorImageDownsampleThreshold=1.5", "-dSAFER"} {
 		if !slices.Contains(write, want) {
