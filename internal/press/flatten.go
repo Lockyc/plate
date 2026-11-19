@@ -71,6 +71,18 @@ func transparentTiles(objs map[string]json.RawMessage) bool {
 		return json.Unmarshal(v, &s) == nil && s == name
 	}
 	softMask := func(v json.RawMessage) bool { return v != nil && !is(v, "/None") }
+	// blends reports whether a /BM blends: a name, or an array whose first
+	// entry is the mode a reader that knows it uses.
+	blends := func(v json.RawMessage) bool {
+		if v == nil {
+			return false
+		}
+		var modes []json.RawMessage
+		if json.Unmarshal(v, &modes) == nil && len(modes) > 0 {
+			v = modes[0]
+		}
+		return !is(v, "/Normal") && !is(v, "/Compatible")
+	}
 	seen := map[string]bool{}
 	var transparent func(res json.RawMessage) bool
 	transparent = func(res json.RawMessage) bool {
@@ -90,7 +102,7 @@ func transparentTiles(objs map[string]json.RawMessage) bool {
 					return true
 				}
 			}
-			if softMask(g["/SMask"]) || (g["/BM"] != nil && !is(g["/BM"], "/Normal") && !is(g["/BM"], "/Compatible")) {
+			if softMask(g["/SMask"]) || blends(g["/BM"]) {
 				return true
 			}
 		}

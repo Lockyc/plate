@@ -37,6 +37,9 @@ func TestTransparentTiles(t *testing.T) {
 		{"fill alpha", `{"obj:6 0 R": {"stream": {"dict": {"/PatternType": 1, "/Resources": {"/ExtGState": {"/G": "3 0 R"}}}}}, "obj:3 0 R": {"value": {"/ca": 0.4}}}`, true},
 		{"a soft mask in the graphics state", `{"obj:6 0 R": {"stream": {"dict": {"/PatternType": 1, "/Resources": {"/ExtGState": {"/G": {"/SMask": "9 0 R"}}}}}}}`, true},
 		{"a blend mode", `{"obj:6 0 R": {"stream": {"dict": {"/PatternType": 1, "/Resources": {"/ExtGState": {"/G": {"/BM": "/Multiply"}}}}}}}`, true},
+		{"a blend mode array led by Normal", `{"obj:6 0 R": {"stream": {"dict": {"/PatternType": 1, "/Resources": {"/ExtGState": {"/G": {"/BM": ["/Normal", "/Multiply"]}}}}}}}`, false},
+		{"a blend mode array led by Compatible", `{"obj:6 0 R": {"stream": {"dict": {"/PatternType": 1, "/Resources": {"/ExtGState": {"/G": {"/BM": ["/Compatible"]}}}}}}}`, false},
+		{"a blend mode array led by Multiply", `{"obj:6 0 R": {"stream": {"dict": {"/PatternType": 1, "/Resources": {"/ExtGState": {"/G": {"/BM": ["/Multiply", "/Normal"]}}}}}}}`, true},
 		{"a transparency group, two forms down, with a cycle", `{
 		  "obj:6 0 R": {"stream": {"dict": {"/PatternType": 1, "/Resources": {"/XObject": {"/F": "7 0 R"}}}}},
 		  "obj:7 0 R": {"stream": {"dict": {"/Subtype": "/Form", "/Resources": {"/XObject": {"/F": "8 0 R", "/Me": "7 0 R"}}}}},
