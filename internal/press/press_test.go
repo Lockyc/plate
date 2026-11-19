@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -95,8 +96,11 @@ func setup(t *testing.T) *env {
 	enginetest.Stub(t, "pdfinfo", pdfinfoStub)
 	enginetest.Stub(t, "pdffonts", `printf 'name type encoding emb sub uni object ID\n---- ---- ---- --- --- --- ---\n%s' "$FONTS"`)
 	enginetest.Stub(t, "pdfimages", `printf 'page num type width height color comp bpc enc interp object ID x-ppi y-ppi size ratio\n----\n   1   0 %s 1200 900 %s 4 8 image no 12 0 300 300 100K 2.5%%\n' "${IMG_TYPE:-image}" "${IMG_COLOR:-cmyk}"`)
-	enginetest.Stub(t, "qpdf", `printf '%s\n' "${QDF:-/DeviceCMYK k}" > "$5"`)
-	for _, k := range []string{"GS_STDERR", "FONTS", "IMG_TYPE", "IMG_COLOR", "QDF", "OUT_SIZE", "PAGES", "PAGE_LINES", "PAM_1", "PAM_2"} {
+	enginetest.Stub(t, "qpdf", `q=${QDF:-/DeviceCMYK k}
+case "$4" in */in.pdf) [ -n "$SRC_QDF" ] && q=$SRC_QDF ;; esac
+printf '%s\n' "$q" > "$5"`)
+	enginetest.Stub(t, "fix-qdf", `cp "$1" "$2"`)
+	for _, k := range []string{"GS_STDERR", "FONTS", "IMG_TYPE", "IMG_COLOR", "QDF", "SRC_QDF", "OUT_SIZE", "PAGES", "PAGE_LINES", "PAM_1", "PAM_2"} {
 		t.Setenv(k, "")
 	}
 	t.Setenv("FIXTURE_PAM", pamFile(t, flat(0)))
@@ -447,6 +451,113 @@ func TestWithSpots(t *testing.T) {
 	for _, want := range []string{"q 1 .84 .12 .03 k 0", " 1 .84 .12 .03 K 1", " 1 1 1 rg", " 0 0 0 1 k\n", "stream\n.0902 .2706 .5608 rg\nendstream"} {
 		if !strings.Contains(string(out), want) {
 			t.Errorf("no %q in:\n%s", want, out)
+		}
+	}
+}
+
+// kText is a source page, in QDF, whose first text object is drawn in rgb
+// black (K-only once --cmyk maps black to 0,0,0,100) and second in colour.
+const kText = "3 0 obj\n<<\n  /Contents 4 0 R\n  /Resources <<\n    /Font <<\n      /F1 6 0 R\n    >>\n  >>\n  /Type /Page\n>>\nendobj\n" +
+	"4 0 obj\n<<\n  /Length 5 0 R\n>>\nstream\n0 0 0 rg BT /F1 9 Tf (A) Tj ET .2 .3 .4 rg BT /F1 9 Tf (B) Tj ET\nendstream\nendobj\n"
+
+// extGStateKey is an /ExtGState entry of a resource dictionary.
+var extGStateKey = regexp.MustCompile(`/ExtGState\s*(<<|\d)`)
+
+func TestWithOverprintKOnly(t *testing.T) {
+	in := "3 0 obj\n<<\n  /Contents 4 0 R\n  /Resources <<\n    /Font <<\n      /F1 6 0 R\n    >>\n  >>\n  /Type /Page\n>>\nendobj\n" +
+		"4 0 obj\n<<\n  /Length 5 0 R\n>>\nstream\nBT 0 0 0 1 k /F1 9 Tf (A) Tj ET\nBT .2 .3 .4 .5 k /F1 9 Tf (B) Tj ET\nq 0 0 0 1 k 0 0 9 9 re f Q\nendstream\nendobj\n" +
+		"6 0 obj\n<<\n  /Length1 3\n>>\nstream\n0 0 0 1 k BT (x) Tj ET\nendstream\nendobj\n"
+	out, n, err := withOverprint([]byte(in))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("n %d, want 1:\n%s", n, out)
+	}
+	s := string(out)
+	first, rest, _ := strings.Cut(s, "(A) Tj ET")
+	if !strings.Contains(first, "BT\n/PlateOP gs") {
+		t.Errorf("the K-only text does not overprint:\n%s", s)
+	}
+	if b, _, _ := strings.Cut(rest, "(B)"); strings.Contains(b, "/PlateOP gs") || strings.Count(s, "/PlateOP gs") != 1 {
+		t.Errorf("/PlateOP gs outside the K-only text:\n%s", s)
+	}
+	if c := len(extGStateKey.FindAllString(s, -1)); c != 1 {
+		t.Errorf("%d /ExtGState, want 1:\n%s", c, s)
+	}
+	if !strings.Contains(s, "(A) Tj ET\n/PlateKO gs") {
+		t.Errorf("the overprint outlives its text object:\n%s", s)
+	}
+	if !strings.Contains(s, "stream\n0 0 0 1 k BT (x) Tj ET\nendstream") {
+		t.Errorf("a stream no page draws was rewritten:\n%s", s)
+	}
+	if !strings.Contains(s, "/PlateOP << /Type /ExtGState /OP true /op true /OPM 1 >>") {
+		t.Errorf("no /PlateOP state:\n%s", s)
+	}
+}
+
+func TestWithOverprintMergesExtGState(t *testing.T) {
+	stream := "stream\n0 0 0 1 k BT /F1 9 Tf (A) Tj ET\nendstream\nendobj\n"
+	for name, in := range map[string]string{
+		"inline": "3 0 obj\n<<\n  /Contents 4 0 R\n  /Resources <<\n    /ExtGState <<\n      /G3 5 0 R\n    >>\n  >>\n  /Type /Page\n>>\nendobj\n" +
+			"4 0 obj\n<<\n  /Length 9 0 R\n>>\n" + stream,
+		"indirect": "3 0 obj\n<<\n  /Contents 4 0 R\n  /Resources <<\n    /ExtGState 7 0 R\n  >>\n  /Type /Page\n>>\nendobj\n" +
+			"4 0 obj\n<<\n  /Length 9 0 R\n>>\n" + stream + "7 0 obj\n<<\n  /G3 5 0 R\n>>\nendobj\n",
+		"indirect resources": "3 0 obj\n<<\n  /Contents 4 0 R\n  /Resources 8 0 R\n  /Type /Page\n>>\nendobj\n" +
+			"4 0 obj\n<<\n  /Length 9 0 R\n>>\n" + stream + "8 0 obj\n<<\n  /ExtGState <<\n    /G3 5 0 R\n  >>\n>>\nendobj\n",
+	} {
+		out, n, err := withOverprint([]byte(in))
+		if err != nil || n != 1 {
+			t.Fatalf("%s: n %d, %v", name, n, err)
+		}
+		s := string(out)
+		if !strings.Contains(s, "/G3 5 0 R") || strings.Count(s, "/PlateOP << /Type /ExtGState /OP true /op true /OPM 1 >>") != 1 || len(extGStateKey.FindAllString(s, -1)) != 1 {
+			t.Errorf("%s:\n%s", name, s)
+		}
+	}
+}
+
+func TestVerifyOverprintLost(t *testing.T) {
+	e := setup(t)
+	t.Setenv("SRC_QDF", kText)
+	if code := e.run("--cmyk", "000000=0,0,0,100"); code != 1 || !strings.Contains(e.stderr.String(), "overprint") {
+		t.Fatalf("code %d, stderr %q", code, e.stderr.String())
+	}
+	e = setup(t)
+	t.Setenv("SRC_QDF", kText)
+	t.Setenv("QDF", "<< /OPM 1 /Type /ExtGState /op true >>")
+	if code := e.run("--cmyk", "000000=0,0,0,100"); code != 0 {
+		t.Fatalf("a master that kept its overprint failed: %s", e.stderr.String())
+	}
+	if !strings.Contains(e.stdout.String(), "1 text object(s) set to overprint") {
+		t.Errorf("stdout %q", e.stdout.String())
+	}
+	e = setup(t)
+	t.Setenv("SRC_QDF", kText)
+	if code := e.run("--cmyk", "000000=0,0,0,100", "--knockout"); code != 0 {
+		t.Fatalf("--knockout still required overprint: %s", e.stderr.String())
+	}
+}
+
+func TestInkOverWithOverprintSuggestsKnockout(t *testing.T) {
+	allBlack := flat(0)
+	for i := range allBlack.Pix {
+		allBlack.Pix[i] = 255
+	}
+	for _, knockout := range []bool{false, true} {
+		e := setup(t)
+		t.Setenv("FIXTURE_PAM", pamFile(t, allBlack))
+		t.Setenv("SRC_QDF", kText)
+		t.Setenv("QDF", "<< /OPM 1 /Type /ExtGState /op true >>")
+		args := []string{"--cmyk", "000000=0,0,0,100"}
+		if knockout {
+			args = append(args, "--knockout")
+		}
+		if code := e.run(args...); code != 1 || !strings.Contains(e.stderr.String(), "ink") {
+			t.Fatalf("code %d, stderr %q", code, e.stderr.String())
+		}
+		if got := strings.Contains(e.stderr.String(), "--knockout"); got == knockout {
+			t.Errorf("knockout %v: stderr %q", knockout, e.stderr.String())
 		}
 	}
 }

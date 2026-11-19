@@ -2,12 +2,14 @@
 // every glyph outlined, every colour converted to the supplied CMYK profile,
 // the page box forced from the source, images downsampled only well above
 // --max-ppi and kept lossless unless --jpeg sets a quality for photographic
-// colour ones. It then proves the master: no fonts, no RGB anywhere, the
-// same page boxes and count, no more than --max-ink total ink beyond a
+// colour ones. Text a --cmyk makes K-only overprints unless --knockout. It
+// then proves the master: no fonts, no RGB anywhere, the same page boxes
+// and count, the overprint kept, no more than --max-ink total ink beyond a
 // speck, and a soft proof of the master (its CMYK read back through plate's
 // own colour engine) that matches the source by RMSE over each page and
-// each --region. The master is a separate deliverable: outlining destroys the text a text
-// check reads, so check the source, and press the checked source.
+// each --region. The master is a separate deliverable: outlining destroys
+// the text a text check reads, so check the source, and press the checked
+// source.
 package press
 
 import (
@@ -33,7 +35,7 @@ import (
 	"github.com/lockyc/plate/internal/raster"
 )
 
-const usage = "press --icc profile.icc [--cmyk RRGGBB=C,M,Y,K]... [--max-ppi N] [--jpeg Q] [--max-rmse R] [--region x,y,w,h:max]... [--proof-width PX] [--max-ink PCT] (<in.pdf> <out.pdf> | --verify <master.pdf> <in.pdf>)"
+const usage = "press --icc profile.icc [--cmyk RRGGBB=C,M,Y,K]... [--max-ppi N] [--jpeg Q] [--max-rmse R] [--region x,y,w,h:max]... [--proof-width PX] [--max-ink PCT] [--knockout] (<in.pdf> <out.pdf> | --verify <master.pdf> <in.pdf>)"
 
 // spot is a brand colour with its own CMYK: a vector fill or stroke drawn in
 // rgb is written as cmyk (percentages) instead of converted through the
@@ -113,29 +115,7 @@ func withSpots(qdf []byte, spots []spot) ([]byte, int) {
 
 // rewriteContent applies f to the data of every stream in qdf but images'.
 func rewriteContent(qdf []byte, f func([]byte) []byte) []byte {
-	var out []byte
-	for {
-		i := bytes.Index(qdf, []byte("\nstream\n"))
-		if i < 0 {
-			return append(out, qdf...)
-		}
-		head := i + len("\nstream\n")
-		out = append(out, qdf[:head]...)
-		dict := qdf[:i]
-		if o := bytes.LastIndex(dict, []byte(" obj\n")); o >= 0 {
-			dict = dict[o:]
-		}
-		end := bytes.Index(qdf[head:], []byte("\nendstream"))
-		if end < 0 {
-			return append(out, qdf[head:]...)
-		}
-		data := qdf[head : head+end]
-		if !imageDict.Match(dict) {
-			data = f(data)
-		}
-		out = append(out, data...)
-		qdf = qdf[head+end:]
-	}
+	return eachStream(qdf, func(_, _, data []byte) []byte { return f(data) })
 }
 
 // defaultMaxRMSE separated clean masters (at most 0.066) from masters with a
@@ -151,6 +131,11 @@ const gsTimeout = 30 * time.Minute
 // nonCMYK matches every colour space and RGB fill/stroke operator that may
 // not appear in a master, in qpdf's uncompressed QDF form, read without its
 // image data (see withoutImageData).
+// fillOverprint is the fill overprint an ExtGState sets. A master keeps it
+// as /op true, not /OP true: pdfwrite writes only the overprint the content
+// paints with, and outlined text is filled, never stroked.
+var fillOverprint = regexp.MustCompile(`/op true\b`)
+
 var nonCMYK = regexp.MustCompile(`(?m)/(DeviceRGB|CalRGB|ICCBased|Lab|Indexed|Separation|DeviceN)\b| (rg|RG)$`)
 
 type region struct {
@@ -168,6 +153,8 @@ type job struct {
 	jpeg            int // colour images' JPEG quality; 0 keeps them lossless
 	regions         []region
 	spots           []spot
+	knockout        bool // K-only text stays knocked out of what it sits on
+	overprints      int  // text objects set to overprint, which the master must keep
 	log             io.Writer
 	checkOnly       bool // out is an existing master being checked, not one just written
 }
@@ -181,6 +168,7 @@ func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	proofWidth := cli.Int(fs, "proof-width", 3000, "soft-proof render width in px; RMSE settles by about 3000")
 	maxInk := cli.Float(fs, "max-ink", 300, "total ink (C+M+Y+K) a page may carry over more than a speck of area, in percent; 0 to 400")
 	jpeg := cli.Int(fs, "jpeg", 0, "store photographic colour images as JPEG at this `quality` (1-100), no chroma subsampling, flat artwork staying lossless; 0 keeps every image lossless")
+	knockout := fs.Bool("knockout", false, "print text a --cmyk makes K-only knocked out of the colour under it, instead of overprinting it")
 	verifyOnly := fs.String("verify", "", "check this existing `master` against <in.pdf>, as press checks one it makes; writes nothing")
 	var specs cli.Multi
 	fs.Var(&specs, "region", "x,y,w,h:max: a page region, as fractions, held to its own RMSE (repeatable)")
@@ -219,7 +207,7 @@ func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	if *jpeg < 0 || *jpeg > 100 {
 		return cli.Usage(stderr, "press", "--jpeg must be 1 to 100, or 0 for lossless")
 	}
-	j := job{maxPPI: *maxPPI, maxRMSE: *maxRMSE, proofWidth: *proofWidth, maxInk: *maxInk, jpeg: *jpeg, log: stdout}
+	j := job{maxPPI: *maxPPI, maxRMSE: *maxRMSE, proofWidth: *proofWidth, maxInk: *maxInk, jpeg: *jpeg, knockout: *knockout, log: stdout}
 	for _, s := range specs {
 		r, err := parseRegion(s)
 		if err != nil {
@@ -326,6 +314,11 @@ func (j job) run(ctx context.Context) (err error) {
 			return err
 		}
 		b, n := withSpots(b, j.spots)
+		if !j.knockout {
+			if b, j.overprints, err = withOverprint(b); err != nil {
+				return err
+			}
+		}
 		if err := os.WriteFile(qdf, b, 0o644); err != nil {
 			return err
 		}
@@ -334,6 +327,9 @@ func (j job) run(ctx context.Context) (err error) {
 			return err
 		}
 		fmt.Fprintf(j.log, "%d fill(s) and stroke(s) set to their brand CMYK\n", n)
+		if !j.knockout {
+			fmt.Fprintf(j.log, "%d text object(s) set to overprint\n", j.overprints)
+		}
 		gsIn = fixed
 	}
 	ppi := pt(j.maxPPI)
@@ -485,6 +481,9 @@ func (j job) verify(ctx context.Context, src pdf.Info) error {
 	if len(spaces) > 0 {
 		return fmt.Errorf("non-CMYK colour in the master: %s", strings.Join(spaces, " "))
 	}
+	if j.overprints > 0 && !fillOverprint.Match(withoutImageData(b)) {
+		return fmt.Errorf("%d text object(s) were set to overprint and the master has no overprinting fill; press with --knockout to print them knocked out", j.overprints)
+	}
 	got, err := pdf.Read(ctx, j.out)
 	if err != nil {
 		return err
@@ -508,7 +507,11 @@ func (j job) verify(ctx context.Context, src pdf.Info) error {
 		over, bad := inkLimit(img, j.maxInk, dpi)
 		fmt.Fprintf(j.log, "page %d: peak ink %.0f%% (max %g%%)\n", p+1, over.Peak, j.maxInk)
 		if bad {
-			return fmt.Errorf("page %d: %.0f%% ink over %.1f mm² around %s, above --max-ink %g; lower the colours there or raise --max-ink to what the printer accepts", p+1, over.Peak, over.Area, boxSpec(over.Box), j.maxInk)
+			hint := ""
+			if j.overprints > 0 {
+				hint = "; overprinted black text adds to the ink under it, --knockout turns that off"
+			}
+			return fmt.Errorf("page %d: %.0f%% ink over %.1f mm² around %s, above --max-ink %g; lower the colours there or raise --max-ink to what the printer accepts%s", p+1, over.Peak, over.Area, boxSpec(over.Box), j.maxInk, hint)
 		}
 	}
 	if err := j.proof(ctx, tmp, src, cmyk); err != nil {
