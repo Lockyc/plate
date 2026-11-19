@@ -18,7 +18,6 @@
 package press
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -120,7 +119,12 @@ func withSpots(qdf []byte, spots []spot) ([]byte, int) {
 
 // rewriteContent applies f to the data of every stream in qdf but images'.
 func rewriteContent(qdf []byte, f func([]byte) []byte) []byte {
-	return eachStream(qdf, func(_, _, data []byte) []byte { return f(data) })
+	return eachStream(qdf, func(_, _, data []byte, image bool) []byte {
+		if image {
+			return data
+		}
+		return f(data)
+	})
 }
 
 // defaultMaxRMSE separated clean masters (at most 0.066) from masters with a
@@ -464,27 +468,12 @@ func gsLiteral(path string) string { return strings.ReplaceAll(path, "%", "%%") 
 // out: press stores images Flate-encoded and QDF decodes them, so their
 // pixel bytes would otherwise be scanned as if they were page content.
 func withoutImageData(qdf []byte) []byte {
-	var out []byte
-	for {
-		i := bytes.Index(qdf, []byte("\nstream\n"))
-		if i < 0 {
-			return append(out, qdf...)
+	return eachStream(qdf, func(_, _, data []byte, image bool) []byte {
+		if image {
+			return nil
 		}
-		head := i + len("\nstream\n")
-		out = append(out, qdf[:head]...)
-		dict := qdf[:i]
-		if o := bytes.LastIndex(dict, []byte(" obj\n")); o >= 0 {
-			dict = dict[o:]
-		}
-		end := bytes.Index(qdf[head:], []byte("\nendstream"))
-		if end < 0 {
-			return out
-		}
-		if !imageDict.Match(dict) {
-			out = append(out, qdf[head:head+end]...)
-		}
-		qdf = qdf[head+end:]
-	}
+		return data
+	})
 }
 
 var imageDict = regexp.MustCompile(`/Subtype\s*/Image\b`)

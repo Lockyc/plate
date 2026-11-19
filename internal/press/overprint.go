@@ -30,8 +30,8 @@ const (
 func withOverprint(qdf []byte) ([]byte, int, error) {
 	content := contentStreams(qdf)
 	var n int
-	out := eachStream(qdf, func(num, dict, data []byte) []byte {
-		if !content[string(num)] && !formDict.Match(dict) {
+	out := eachStream(qdf, func(num, dict, data []byte, image bool) []byte {
+		if image || (!content[string(num)] && !formDict.Match(dict)) {
 			return data
 		}
 		b, k := overprintText(data)
@@ -66,9 +66,10 @@ func contentStreams(qdf []byte) map[string]bool {
 	return nums
 }
 
-// eachStream applies f to the data of every stream in qdf but images',
-// giving it the stream's object number and dictionary.
-func eachStream(qdf []byte, f func(num, dict, data []byte) []byte) []byte {
+// eachStream replaces the data of every stream in qdf with what f returns,
+// giving it the stream's object number and dictionary and whether it is an
+// image. Data after an unterminated stream is kept as it is.
+func eachStream(qdf []byte, f func(num, dict, data []byte, image bool) []byte) []byte {
 	var out []byte
 	for {
 		i := bytes.Index(qdf, []byte("\nstream\n"))
@@ -88,11 +89,7 @@ func eachStream(qdf []byte, f func(num, dict, data []byte) []byte) []byte {
 		if end < 0 {
 			return append(out, qdf[head:]...)
 		}
-		data := qdf[head : head+end]
-		if !imageDict.Match(dict) {
-			data = f(num, dict, data)
-		}
-		out = append(out, data...)
+		out = append(out, f(num, dict, qdf[head:head+end], imageDict.Match(dict))...)
 		qdf = qdf[head+end:]
 	}
 }
