@@ -168,6 +168,21 @@ params = { a = "{tmp:a/page-1.png}", b = "{tmp:b/page-1.png}" }
 max    = 0.002
 
 [[case]]
+name   = "press-gradient-tiles"
+why    = "a gradient with a transparent stop must tile once: a step wider than the tile drew a seam and a second tile in macOS Preview"
+files  = { "page.html" = '''<!doctype html><style>@page{size:1120px 792px;margin:0}html,body{margin:0;width:1120px;height:792px;overflow:hidden}body{background:#e4f1fa;font:bold 80px sans-serif;color:#062d5f}.g{position:absolute;inset:0;background:radial-gradient(circle at 30% 40%,#f7a81b 0,rgba(247,168,27,0) 60%)}p{position:absolute;margin:0;left:40px;top:40px}</style><div class="g"></div><p>Sample sign</p>''' }
+setup  = [
+  ["plate", "render", "--size", "1120x792", "--pdf", "{tmp:src.pdf}", "{tmp:page.html}"],
+]
+run    = ["press", "--icc", "{asset:Coated_Fogra39L_VIGC_300.icc}", "{tmp:src.pdf}", "{tmp:press.pdf}"]
+post   = [
+  ["qpdf", "--warning-exit-0", "--qdf", "--object-streams=disable", "{tmp:press.pdf}", "{tmp:press.qdf}"],
+]
+metric = "pattern-steps"
+params = { qdf = "{tmp:press.qdf}" }
+max    = 0
+
+[[case]]
 name   = "diff-ignores-shift"
 why    = "a 4 px vertical shift must not read as a broken page"
 setup  = [
