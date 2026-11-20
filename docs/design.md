@@ -24,7 +24,8 @@ wrapping it would add nothing; a resize down for the web goes through
 main.go              dispatch
 internal/<op>/       one package per command (cutout, inpaint, infill, upscale,
                      grade, render, build, press, pdf, impose, marks, doc,
-                     slides, shrink, icon, diff, clip, animate, fonts, qr, generate,
+                     slides, shrink, icon, diff, clip, animate, walkthrough, fonts, qr,
+                     generate,
                      doctor)
 internal/genai/      the one way a hosted image model is called
 internal/cdp/        a DevTools-protocol session with Chrome over --remote-debugging-pipe
@@ -299,7 +300,7 @@ colours, or renders what it is given.
   rounds that fit to PNG (`render.PNG`), so the agent sees what the person sees;
   `generate accept` writes the record before the image. Every file a person
   keeps goes through `internal/atomicfile`.
-- **inpaint, fonts, qr, icon, pdf, impose, marks, doc, slides** — as `docs/commands.md` and each package's
+- **inpaint, fonts, qr, icon, pdf, impose, marks, doc, slides, walkthrough, shrink, doctor** — as `docs/commands.md` and each package's
   doc comment describe.
 
 ## Platforms and errors
@@ -308,7 +309,7 @@ macOS is primary. The floor is the locked wheels': Apple Silicon on macOS 14
 or later, and Linux with glibc 2.28 or later on x86_64 or arm64. On Linux,
 everything works except `--coarse vision`, which exits with a message pointing
 at `birefnet`; on arm64, Chrome for Testing publishes no
-chrome-headless-shell, so `render` runs only with one supplied through
+chrome-headless-shell, so every command that renders a page runs only with one supplied through
 `PLATE_ENGINE_CHROME_HEADLESS_SHELL`. On an Intel Mac, `ml.RunScript` refuses
 a script whose lockfile holds a package built for Apple Silicon only (PyTorch,
 ONNX Runtime), so `cutout` and `upscale` refuse before uv runs; `grade fit`

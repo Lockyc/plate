@@ -74,7 +74,7 @@ independently of phase 5. Within a phase, order is open.
   input tokens, a fraction of a cent. Unlock: the adapter in regular use,
   then pricing from `usageMetadata`.
 - **`--aspect` is checked inside each provider,** after the round is claimed
-  and before any request, not by `genai.Check`, and google ignores it.
+  and before any request, not by `genai.Check`, and google sends it to the API unchecked.
   Unlock: a bad `--aspect` costing a round folder, then the check moved
   into `genai.Check`.
 

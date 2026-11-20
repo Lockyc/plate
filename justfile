@@ -97,14 +97,16 @@ vet:
 # Format all Go files in place
 [group("check")]
 fmt:
-    gofmt -w .
+    git ls-files -z --cached --others --exclude-standard -- '*.go' | xargs -0 gofmt -w
 
 # Non-mutating pre-merge gate: gofmt check + vet + tests
 [group("check")]
 gate:
     #!/usr/bin/env bash
     set -euo pipefail
-    unformatted="$(gofmt -l .)"
+    # The repo's own Go files, never `.`: gofmt walks hidden dirs, and .claude/worktrees/ holds
+    # other agents' checkouts.
+    unformatted="$(git ls-files -z --cached --others --exclude-standard -- '*.go' | xargs -0 gofmt -l)"
     if [ -n "$unformatted" ]; then
       echo "✗ gofmt: these files need formatting:" >&2
       echo "$unformatted" >&2
