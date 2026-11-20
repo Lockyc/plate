@@ -20,7 +20,7 @@ import (
 	"github.com/lockyc/plate/internal/icc"
 )
 
-const usage = "grade fit --ref ref.png [...] <subject.png> <out-hald.png>\n       plate grade apply --clut hald.png <in> <out.png>"
+const usage = "grade fit --ref ref.png [--ref-crop x,y,w,h] [--exclude x,y,w,h]... [--level 8] [--min-inliers 40] <subject.png> <out-hald.png>\n       plate grade apply --clut hald.png <in> <out.png>"
 
 // Main dispatches `plate grade <subcommand>`.
 func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {

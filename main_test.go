@@ -77,6 +77,38 @@ func TestEngineUsedByNamesCommands(t *testing.T) {
 }
 
 // Help is not a usage error, whether a command has verbs or flags.
+// The usage line each command's -h prints is the one source; docs/commands.md's Usage column
+// carries each verbatim (with `|` escaped as `\|`).
+func TestCommandsDocCarriesEveryUsageLine(t *testing.T) {
+	doc, err := os.ReadFile("docs/commands.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(t.TempDir())
+	verbs := map[string][]string{"clip": {"check", "render"}, "walkthrough": {"check", "render"}, "generate": {"accept"}}
+	for _, c := range commands {
+		calls := [][]string{{c.name, "-h"}}
+		for _, v := range verbs[c.name] {
+			calls = append(calls, []string{c.name, v, "-h"})
+		}
+		for _, args := range calls {
+			var out, errb bytes.Buffer
+			run(context.Background(), args, &out, &errb)
+			for _, line := range strings.Split(out.String()+errb.String(), "\n") {
+				l := strings.TrimSpace(strings.TrimPrefix(line, "usage: "))
+				// A note after two spaces (diff's "(two images, or two clips…)") is help text, not usage.
+				l, _, _ = strings.Cut(l, "  ")
+				if !strings.HasPrefix(l, "plate ") || strings.Contains(l, "<check|render>") {
+					continue
+				}
+				if !bytes.Contains(doc, []byte(strings.ReplaceAll(l, "|", `\|`))) {
+					t.Errorf("docs/commands.md lacks %q", l)
+				}
+			}
+		}
+	}
+}
+
 func TestHelpExitsZero(t *testing.T) {
 	t.Chdir(t.TempDir())
 	for _, c := range commands {
