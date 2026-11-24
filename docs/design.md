@@ -183,7 +183,7 @@ colours, or renders what it is given.
   target whose `render.Result.Inputs` holds another target's output fails
   (`build.loadsOutput`). A `2up` target's sheet is `impose.Run` on its
   PDF, and a `marks` target's copy `marks.Run`, each written when the PDF
-  rendered or the file is missing or older (`build.derive`). A `back=`
+  rendered or the file is stale (`build.derive`, `build.stale`). A `back=`
   target's duplex file reads two targets' PDFs, so it is written as results
   are collected, once both renders are done (`build.writeDuplex`).
 - **press** — Ghostscript pdfwrite with outlined text, CMYK conversion to a
