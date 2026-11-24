@@ -315,8 +315,9 @@ func filterPath(p string) string {
 
 var startName = regexp.MustCompile(`^VID_(\d{8}_\d{6})_`)
 
-// clockName is the wall-clock time, HH:MM:SS.mmm, t seconds into the clip
-// whose file name states its start (VID_YYYYMMDD_HHMMSS_…).
+// clockName is the wall-clock time, HH:MM:SS.mmm to the nearest
+// millisecond, t seconds into the clip whose file name states its start
+// (VID_YYYYMMDD_HHMMSS_…).
 func clockName(path string, t float64) (string, error) {
 	m := startName.FindStringSubmatch(filepath.Base(path))
 	if m == nil {
@@ -326,7 +327,7 @@ func clockName(path string, t float64) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("%s: %w", path, err)
 	}
-	return start.Add(time.Duration(math.Floor(t*1000)) * time.Millisecond).Format("15:04:05.000"), nil
+	return start.Add(time.Duration(math.Round(t*1000)) * time.Millisecond).Format("15:04:05.000"), nil
 }
 
 // probe reads the clip's video frame rate (as a number and in ffmpeg's

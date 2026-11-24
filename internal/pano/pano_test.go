@@ -206,7 +206,7 @@ func TestFrameNames(t *testing.T) {
 	for _, c := range []struct {
 		t    float64
 		want string
-	}{{905, "12:22:06.000"}, {1.5, "12:07:02.500"}, {0.0334, "12:07:01.033"}} {
+	}{{905, "12:22:06.000"}, {1.5, "12:07:02.500"}, {0.0334, "12:07:01.033"}, {599.0 / (30000.0 / 1001), "12:07:20.987"}} {
 		got, err := clockName("/x/VID_20261122_120701_00_001.insv", c.t)
 		if err != nil || got != c.want {
 			t.Errorf("clockName(%v) = %q, %v; want %s", c.t, got, err, c.want)
