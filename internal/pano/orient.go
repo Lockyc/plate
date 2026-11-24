@@ -100,27 +100,40 @@ func Rotations(imu []insv.IMU, times []float64, m Mode) ([]Rot, error) {
 // (z down): a body at rest reads up times g on its accelerometer.
 var up = [3]float64{0, 0, -1}
 
-// attitude integrates the gyro, less bias, from the orientation the first
-// sample's accelerometer gives, turning each sample Gain of the way from its
-// predicted gravity to the measured one. It returns each sample's
-// body-to-world orientation.
+// attitude integrates the gyro, less bias, turning each sample Gain of the
+// way from its predicted gravity to the measured one, and returns each
+// sample's body-to-world orientation. The same filter first runs backwards
+// from the last sample to the first, and the forward run starts from the
+// tilt it arrives at (heading zero): one sample's accelerometer is a poor
+// start for a handheld camera, and at Gain's slow rate its error would last
+// seconds into the clip.
 func attitude(imu []insv.IMU, bias [3]float64) []quat {
-	out := make([]quat, len(imu))
-	q := levelled(imu[0].Accel)
+	n := len(imu)
+	q := levelled(imu[n-1].Accel)
+	for i := n - 1; i > 0; i-- {
+		q = correct(q.mul(step(imu[i-1], imu[i], bias).conj()), imu[i-1].Accel)
+	}
+	q = levelled(q.conj().rotate(up))
+	out := make([]quat, n)
 	out[0] = q
-	for i := 1; i < len(imu); i++ {
-		q = q.mul(step(imu[i-1], imu[i], bias))
-		if a, ok := unit(imu[i].Accel); ok {
-			p := q.conj().rotate(up)
-			k := cross(p, a)
-			if s := norm(k); s > 1e-12 {
-				angle := math.Atan2(s, dot(p, a))
-				q = q.mul(axisAngle(scale(k, 1/s), -Gain*angle))
-			}
-		}
-		out[i] = q.normalized()
+	for i := 1; i < n; i++ {
+		q = correct(q.mul(step(imu[i-1], imu[i], bias)), imu[i].Accel)
+		out[i] = q
 	}
 	return out
+}
+
+// correct turns q Gain of the way from its predicted gravity direction to
+// the accelerometer's.
+func correct(q quat, accel [3]float64) quat {
+	if a, ok := unit(accel); ok {
+		p := q.conj().rotate(up)
+		k := cross(p, a)
+		if s := norm(k); s > 1e-12 {
+			q = q.mul(axisAngle(scale(k, 1/s), -Gain*math.Atan2(s, dot(p, a))))
+		}
+	}
+	return q.normalized()
 }
 
 // step is the body's turn from sample a to sample b: the mean of their gyro

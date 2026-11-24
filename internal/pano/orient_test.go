@@ -84,6 +84,22 @@ func TestStaticTilt(t *testing.T) {
 	}
 }
 
+// TestJoltedStart: a sideways jolt on the first 50 ms of a still, tilted
+// clip leaves the picture within 1° of level from the first frame (the
+// jolt's own pull is what remains); the attitude starts where a backward run
+// of the filter settles, not on that first reading, which is 17° off.
+func TestJoltedStart(t *testing.T) {
+	imu := synth(4, rolled, [3]float64{})
+	for i := range imu[:50] {
+		imu[i].Accel[1] += 3
+	}
+	ts := frames(4)
+	for i, r := range rotations(t, imu, ts, Level) {
+		near(t, "Roll", ts[i], r.Roll, -12*deg, 1*deg)
+		near(t, "Pitch", ts[i], r.Pitch, 0, 1*deg)
+	}
+}
+
 // TestRotConvention pins what a Rot means: Rz(Yaw)·Ry(Pitch)·Rx(Roll) takes
 // a direction in the levelled picture to the camera direction it samples, so
 // the levelled picture's straight down lands on the camera's measured down.
