@@ -144,3 +144,83 @@ author  = "NOIRLab/AURA/NSF/D. Munizaga"
 licence = "CC BY 4.0"
 recipe  = "magick SOURCE -resize 2048x1024! -quality 90 -strip equirect-gemini-south.jpg (SOURCE sha1 b02eb19db51984e8c58e8051dfb7bdf012eae8b8)"
 sha256  = "a9368f9f0a7af0b4203acc556d5a04254551906c68021800bfd11a7f7d798397"
+
+[[asset]]
+file    = "crowd-sparse.jpg"
+source  = "https://commons.wikimedia.org/wiki/File:Sony_Alpha_A230_with_Helios-44-2_-_Blockade_of_Neonazi_March_-_Part_3_Blockade_of_Malinovsky%27s_Square_04_(17339384992).jpg"
+author  = "Jaroslav A. Polák"
+licence = "CC0"
+recipe  = "magick SOURCE -resize 3000x3000 -quality 88 -strip crowd-sparse.jpg (SOURCE sha1 1a7081adc1bf1823ab8ba61dfb68194f65ac1e70)"
+sha256  = "a52cdb2789863e0c36c933ef91ac6df7bf88a6f48dba09ae9858ca9d8de95963"
+
+[[asset]]
+file    = "crowd-sparse.points.tsv"
+source  = "synthetic"
+recipe  = "marked for plate: one x, y pixel row per visible person's head in crowd-sparse.jpg (where a head is hidden and the body shows, where the head is), marked on 1000 px tiles with a 150 px overlap and merged, duplicates within 70 px dropped"
+author  = "plate"
+licence = "CC0"
+sha256  = "6e98eb7900d203ebaf11875cc94b0928a1b20c06bc33ce0faf3aff8836481c1f"
+
+[[asset]]
+file    = "crowd-dense.jpg"
+source  = "https://commons.wikimedia.org/wiki/File:Crowd_in_front_of_a_church._(Unsplash).jpg"
+author  = "Andrei Ianovskii (Unsplash)"
+licence = "CC0"
+recipe  = "magick SOURCE -crop 3591x1300+0+4087 +repage -resize 3000x3000 -quality 88 -strip crowd-dense.jpg (SOURCE sha1 80b14b4e859a97de15a48f48bed74f2f2baaf81e)"
+sha256  = "3e31ccaa3257eefa5242c3794969b567f250e8f40930e3956b74a553cdabd207"
+
+[[asset]]
+file    = "crowd-dense.points.tsv"
+source  = "synthetic"
+recipe  = "marked for plate: one x, y pixel row per visible person's head in crowd-dense.jpg (where a head is hidden and the body shows, where the head is), the far crowd on 3x zooms of 400 x 200 px windows and the near crowd on 2x 600 px tiles with a 100 px overlap, merged with duplicates within 30 px dropped; heads outside the frame are not marked"
+author  = "plate"
+licence = "CC0"
+sha256  = "cc536102aabca6e047b1d38a1fa5c5f687d23f1f41cd8642cb00eaa89a0e690e"
+
+[[asset]]
+file    = "crowd-equirect.jpg"
+source  = "https://commons.wikimedia.org/wiki/File:Festival_liberta_digitali_2015_equirectangularVTOUR2.jpg"
+author  = "Francescosartori"
+licence = "CC BY-SA 4.0"
+recipe  = "magick SOURCE -quality 88 -strip crowd-equirect.jpg, kept at the source's 2500 x 1250 (SOURCE sha1 4bebd41c8ba9d9f9e4a2bca198f1e26cafe06bc7)"
+sha256  = "5b1415e6924a56ce5429ebe25ea83f3dffe4aab91ade29117304cd682cd6378a"
+
+[[asset]]
+file    = "crowd-equirect.points.tsv"
+source  = "synthetic"
+recipe  = "marked for plate: one x, y equirect pixel row per visible person's head in crowd-equirect.jpg, on 3x to 5x zooms along the horizon band; no one stands within 35 degrees of the nadir or 30 degrees of the zenith"
+author  = "plate"
+licence = "CC0"
+sha256  = "de28fa6f8a959035130e72a42728965fb36a85b3c679b27378a1b34994a5e2d1"
+
+[[asset]]
+file    = "crowd-equirect-holder.jpg"
+source  = "https://commons.wikimedia.org/wiki/File:Mississippi_River_Trail_-_Equirectangular_Panorama,_Minnesota_(Pine_Bend_Bluffs)_(27522421457).jpg"
+author  = "Tony Webster; the person is from portrait-foliage.jpg (Allef Vinicius, CC0)"
+licence = "CC BY 2.0"
+recipe  = "a camera holder composited near the nadir of an empty trail: magick SOURCE -resize 4000x2000 base.jpg (SOURCE sha1 fc882e8a3ea59173b32774ac8ae69108739bfbe6); plate cutout portrait-foliage.jpg person.png; magick person.png -trim +repage -resize x340 person-s.png; magick base.jpg person-s.png -geometry +1500+1655 -composite -quality 88 -strip crowd-equirect-holder.jpg"
+sha256  = "bbaaa9612c858e52a3a5629c407540b0dbd082570ad3050eaea3908e4edfa0e5"
+
+[[asset]]
+file    = "crowd-equirect-holder.points.tsv"
+source  = "synthetic"
+recipe  = "marked for plate: no rows; the only person in crowd-equirect-holder.jpg is the holder, whose head is about 26 degrees from the nadir"
+author  = "plate"
+licence = "CC0"
+sha256  = "2c2d61aa4b1b2e46cebc5507010bd5ca482763e103de850c8930b91ab4725788"
+
+[[asset]]
+file    = "crowd-empty.jpg"
+source  = "https://commons.wikimedia.org/wiki/File:Empty_park_bench_at_dusk_(Unsplash).jpg"
+author  = "Scott Van Daalen (Unsplash)"
+licence = "CC0"
+recipe  = "magick SOURCE -resize 3000x3000 -quality 88 -strip crowd-empty.jpg (SOURCE sha1 3823e8b8c39e9e61ad9910feef4df08d0a58d19a)"
+sha256  = "98fb12ab660acba085b356903f34fc271faa4aee10fbff1ffb9bd5c8aafcf34d"
+
+[[asset]]
+file    = "crowd-empty.points.tsv"
+source  = "synthetic"
+recipe  = "marked for plate: no rows; crowd-empty.jpg has no people"
+author  = "plate"
+licence = "CC0"
+sha256  = "2c2d61aa4b1b2e46cebc5507010bd5ca482763e103de850c8930b91ab4725788"
