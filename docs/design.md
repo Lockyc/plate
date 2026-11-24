@@ -85,12 +85,12 @@ ahead of the data directory and `PATH`; tests use it to stand in sh stubs.
 | ffmpeg, ffprobe | minimum version; each encoder clip and animate need is a pins.Capability doctor checks |
 | Apple Vision | the OS; macOS 14 or later, plus `swiftc` as a minimum-version engine |
 | Python ML scripts (ViTMatte, BiRefNet, DAT, grade fit, count) | PEP 723 header with `exclude-newer`, and a committed `uv lock --script` lockfile run with `--locked`; ViTMatte, DAT and count's weights pinned by Hugging Face commit in `internal/pins`, BiRefNet's by the pinned `rembg` version |
+| LaMa | the `iopaint` CLI, run through `uv tool run` at a pinned version and `exclude-newer` (`pins.IOPaint`) |
 
 Every model's weights are under an open licence. One carries a use limit
 from its training data: `count --track`'s re-ID model (`pins.CountReID`) is
 MIT but trained on MSMT17, whose terms are research and non-commercial, so
 commercial use of `count --track` is not covered.
-| LaMa | the `iopaint` CLI, run through `uv tool run` at a pinned version and `exclude-newer` (`pins.IOPaint`) |
 
 Python runs only for the ML steps, where no Go, Rust or shell tool of
 comparable quality exists. `uv` is the only Python tool a user installs.

@@ -566,14 +566,13 @@ def pano_frames(tsv):
 
 
 def track(a, views, det, dens, device):
-    """--track (the module docstring): writes track.tsv a row a frame and distinct.tsv last. Its
-    constants, and what each was fitted on, are beside GATE_MOVE."""
+    """--track (the module docstring): writes track.tsv and then distinct.tsv, whose presence is
+    the run's success. Its constants, and what each was fitted on, are beside GATE_MOVE."""
     frames = pano_frames(a.pano)
     reid = ReID(a.reid, a.reid_revision, a.reid_file, device)
     tracker = Tracker()
     dens_part, dens_at, shown, untracked = 0, None, 0, 0
     t0 = time.time()
-    # track.tsv is written a row a frame, so a run cut short keeps what it read
     out = open(os.path.join(a.out, "track.tsv"), "w")
     out.write("t\ton_screen\n")
     for n, (path, raw, t) in enumerate(frames):
