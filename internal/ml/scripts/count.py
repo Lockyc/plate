@@ -12,7 +12,7 @@
              (--photo PATH | --equirect PATH)...
     count.py --out DIR --detector ... --density ... --track
              --reid REPO --reid-revision SHA --reid-file FILE
-             [--min-seconds 3] --pano PANO_TSV
+             [--min-seconds 3] --frame-list LIST
 
 A person is counted one of two ways, never both:
   - a detector person box scoring CONF or better;
@@ -49,8 +49,11 @@ and with --marked DIR/marked/<frame>.jpg with each counted person dotted
 frame's views in DIR/marked/<frame>/view-NN.jpg with the region each view
 does not own shaded.
 
---track follows the boxed people through the equirect frames a `plate pano
---every` pano.tsv lists (--pano), in the order of its t column (seconds). Each frame's people are matched to the tracks alive in
+--track follows the boxed people through the equirect frames --frame-list
+lists, one "t<TAB>path" a line (t in seconds), read in the list's order:
+plate has read the run's pano.tsv, refused what it cannot track, and put
+the frames in time order, so the list is not re-sorted or re-checked here.
+Each frame's people are matched to the tracks alive in
 it by where their heads are on the sphere: one assignment minimising, per
 pair, the arc to the track's predicted place over the gate (GATE_MOVE body
 heights a second since the track was last seen, at least GATE_MIN degrees;
@@ -556,19 +559,17 @@ def size_deg(views, i, box):
     return float(np.degrees(np.arccos(np.clip(top @ bottom, -1, 1))))
 
 
-def pano_frames(tsv):
-    """The frames a `plate pano --every` pano.tsv lists: (path, t as written, t), in time order."""
-    with open(tsv) as f:
-        rows = [line.rstrip("\n").split("\t") for line in f if line.strip()]
-    fc, tc = rows[0].index("file"), rows[0].index("t")
-    frames = [(os.path.join(os.path.dirname(tsv), r[fc]), r[tc], float(r[tc])) for r in rows[1:]]
-    return sorted(frames, key=lambda f: f[2])
+def frame_list(path):
+    """The frames --frame-list lists: (path, t as written, t), in the list's order."""
+    with open(path) as f:
+        rows = [line.rstrip("\n").split("\t", 1) for line in f if line.strip()]
+    return [(p, t, float(t)) for t, p in rows]
 
 
 def track(a, views, det, dens, device):
     """--track (the module docstring): writes track.tsv and then distinct.tsv, whose presence is
     the run's success. Its constants, and what each was fitted on, are beside GATE_MOVE."""
-    frames = pano_frames(a.pano)
+    frames = frame_list(a.frame_list)
     reid = ReID(a.reid, a.reid_revision, a.reid_file, device)
     tracker = Tracker()
     dens_part, dens_at, shown, untracked = 0, None, 0, 0
@@ -615,13 +616,13 @@ def main() -> None:
     ap.add_argument("--photo", action=Frame)
     ap.add_argument("--equirect", action=Frame)
     ap.add_argument("--track", action="store_true")
-    for k in ("--reid", "--reid-revision", "--reid-file", "--pano"):
+    for k in ("--reid", "--reid-revision", "--reid-file", "--frame-list"):
         ap.add_argument(k)
     ap.add_argument("--min-seconds", type=float, default=3)
     ap.set_defaults(frames=[])
     a = ap.parse_args()
-    if a.track != bool(a.pano) or (a.track and a.frames):
-        sys.exit("count.py: --track takes its frames from --pano, and only --track takes --pano")
+    if a.track != bool(a.frame_list) or (a.track and a.frames):
+        sys.exit("count.py: --track takes its frames from --frame-list, and only --track takes --frame-list")
     if not a.frames and not a.track:
         sys.exit("count.py: no frames")
     gaps, live = geometry_gaps(a.nadir_deg, a.zenith_deg)
