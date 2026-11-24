@@ -167,20 +167,101 @@ func TestBiasFromMotion(t *testing.T) {
 	}
 	ts := frames(20)
 	for i, r := range rotations(t, imu, ts, Level) {
-		q := rocking(ts[i])
-		_, p, ro := toZYX(q)
-		// Undoing a pure tilt Ry(p)·Rx(ro) gives Rx(−ro)·Ry(−p), whose ZYX
-		// angles are not simply −p and −ro; compare the undone down instead.
-		got := zyx(r.Yaw, r.Pitch, r.Roll).rotate([3]float64{0, 0, 1})
-		down := q.conj().rotate([3]float64{0, 0, 1})
-		var e float64
-		for k := range got {
-			e += (got[k] - down[k]) * (got[k] - down[k])
-		}
-		if math.Sqrt(e) > 1*deg {
-			t.Fatalf("at %.2fs (pitch %.1f°, roll %.1f°) the levelled down is %.2f° off", ts[i], p/deg, ro/deg, math.Sqrt(e)/deg)
+		if e := downMiss(r, rocking(ts[i])); e > 1*deg {
+			t.Fatalf("at %.2fs the levelled down is %.2f° off", ts[i], e/deg)
 		}
 	}
+}
+
+// downMiss is how far r's levelled down lands from the camera's true down
+// under orientation q. Undoing a pure tilt Ry(p)·Rx(ro) gives Rx(−ro)·Ry(−p),
+// whose ZYX angles are not simply −p and −ro, so tilted poses compare the
+// undone down rather than the angles.
+func downMiss(r Rot, q quat) float64 {
+	got := zyx(r.Yaw, r.Pitch, r.Roll).rotate([3]float64{0, 0, 1})
+	down := q.conj().rotate([3]float64{0, 0, 1})
+	return math.Acos(clamp(dot(got, down)))
+}
+
+func finite(t *testing.T, rs []Rot) {
+	t.Helper()
+	for i, r := range rs {
+		for _, v := range []float64{r.Yaw, r.Pitch, r.Roll} {
+			if math.IsNaN(v) || math.IsInf(v, 0) {
+				t.Fatalf("rotation %d = %+v, not finite", i, r)
+			}
+		}
+	}
+}
+
+func TestNaNGyro(t *testing.T) {
+	imu := synth(2, rolled, [3]float64{})
+	imu[700].Gyro[1] = math.NaN()
+	ts := frames(2)
+	rs := rotations(t, imu, ts, Level)
+	finite(t, rs)
+	for i, r := range rs {
+		near(t, "Roll", ts[i], r.Roll, -12*deg, 0.5*deg)
+	}
+	finite(t, rotations(t, imu, ts, Lock))
+}
+
+func TestOneSample(t *testing.T) {
+	imu := synth(0, rolled, [3]float64{})
+	if len(imu) != 1 {
+		t.Fatalf("synth(0) gave %d samples", len(imu))
+	}
+	for _, m := range []Mode{Level, Lock} {
+		r := rotations(t, imu, []float64{-1, 0, 1}, m)
+		for i, x := range r {
+			near(t, "Roll", float64(i-1), x.Roll, -12*deg, 1e-9)
+			near(t, "Pitch", float64(i-1), x.Pitch, 0, 1e-9)
+			near(t, "Yaw", float64(i-1), x.Yaw, 0, 1e-9)
+		}
+	}
+}
+
+func TestTwoSamples(t *testing.T) {
+	imu := synth(1/testRate, rolled, [3]float64{})
+	if len(imu) != 2 {
+		t.Fatalf("got %d samples", len(imu))
+	}
+	r := rotations(t, imu, []float64{0, 0.0005, 0.001}, Level)
+	finite(t, r)
+	for i, x := range r {
+		near(t, "Roll", float64(i), x.Roll, -12*deg, 0.01*deg)
+	}
+}
+
+// TestShortClip: 50 samples (49 ms), shorter than one BiasWindow and far
+// shorter than Gain's 2 s, of a still 12° roll and of a camera rocking at
+// about 30°/s, come back finite and within 1° of the true down: the gyro
+// carries a short clip and the accelerometer only anchors its start.
+func TestShortClip(t *testing.T) {
+	for name, at := range map[string]func(float64) quat{
+		"still":   rolled,
+		"rocking": func(t float64) quat { return rocking(t + 3) },
+	} {
+		imu := synth(0.049, at, [3]float64{})
+		ts := []float64{0, 0.02, 0.049}
+		r := rotations(t, imu, ts, Level)
+		finite(t, r)
+		for i, x := range r {
+			if e := downMiss(x, at(ts[i])); e > 1*deg {
+				t.Fatalf("%s, %d samples, at %.3fs: the levelled down is %.2f° off", name, len(imu), ts[i], e/deg)
+			}
+		}
+	}
+}
+
+// TestOutsideIMU: frame times before the first sample and after the last
+// take the end samples' rotations.
+func TestOutsideIMU(t *testing.T) {
+	imu := synth(2, turning, [3]float64{})
+	r := rotations(t, imu, []float64{-5, 0, 2, 9}, Lock)
+	near(t, "Yaw", -5, r[0].Yaw, r[1].Yaw, 1e-9)
+	near(t, "Yaw", 9, r[3].Yaw, r[2].Yaw, 1e-9)
+	near(t, "Yaw", 9, r[3].Yaw, -60*deg, 1*deg)
 }
 
 func TestNoIMU(t *testing.T) {

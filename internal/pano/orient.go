@@ -137,15 +137,20 @@ func correct(q quat, accel [3]float64) quat {
 }
 
 // step is the body's turn from sample a to sample b: the mean of their gyro
-// readings, less bias, over the time between them.
+// readings, less bias, over the time between them. A step with no forward
+// time or a reading that is not a number does not turn: one bad sample
+// costs a millisecond of rotation instead of every frame after it.
 func step(a, b insv.IMU, bias [3]float64) quat {
 	dt := b.T - a.T
-	if dt <= 0 {
+	if !(dt > 0) || math.IsInf(dt, 0) {
 		return quat{1, 0, 0, 0}
 	}
 	var w [3]float64
 	for k := range w {
 		w[k] = ((a.Gyro[k]+b.Gyro[k])/2 - bias[k]) * dt
+		if math.IsNaN(w[k]) || math.IsInf(w[k], 0) {
+			return quat{1, 0, 0, 0}
+		}
 	}
 	return expq(w)
 }
