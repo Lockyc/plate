@@ -8,6 +8,16 @@
   const srcOf = (el) =>
     el.getAttribute("src") || el.querySelector("source")?.getAttribute("src") || el.currentSrc;
 
+  // deferred reports whether a lazy image is held back until it nears the
+  // viewport, which nothing in a capture scrolls it to: it has no box, or
+  // its box lies wholly outside the viewport.
+  const deferred = (img) => {
+    if (img.loading !== "lazy") return false;
+    if (!img.getClientRects().length) return true;
+    const r = img.getBoundingClientRect();
+    return r.bottom <= 0 || r.right <= 0 || r.top >= innerHeight || r.left >= innerWidth;
+  };
+
   window.__plateSettle = {
     srcOf,
 
@@ -15,18 +25,23 @@
     // video never loads unless played.
     unready: (el) => srcOf(el) + (el.preload === "none" ? ' (preload="none")' : ""),
 
-    // pending is everything this frame and its same-origin frames are still
-    // loading: the load event, a font, an image not yet decoded, a video
-    // without a frame.
+    // pending is everything this frame and its same-origin frames have
+    // started loading and not finished: the load event, a font, an image,
+    // a video still fetching its first frame. A load the page defers by
+    // design (a lazy image out of view, a video the browser is not
+    // fetching, as with preload="none") is not pending: nothing in a
+    // capture starts it.
     pending() {
       const p = [];
       if (document.readyState !== "complete") p.push("load event");
       if (document.fonts.status !== "loaded") p.push("fonts");
       for (const img of document.images) {
-        if (!img.complete) p.push("img " + (img.currentSrc || img.src));
+        if (!img.complete && !deferred(img)) p.push("img " + (img.currentSrc || img.src));
       }
       for (const v of document.querySelectorAll("video")) {
-        if (!v.error && v.readyState < 2) p.push("video " + this.unready(v));
+        if (!v.error && v.readyState < 2 && v.networkState === HTMLMediaElement.NETWORK_LOADING) {
+          p.push("video " + this.unready(v));
+        }
       }
       for (const f of document.querySelectorAll("iframe")) {
         try {
@@ -39,11 +54,14 @@
       return p;
     },
 
-    // painted resolves once every image is decoded and two frames have
-    // been drawn since, so the capture shows the layout the loaded fonts
-    // and images give.
+    // painted resolves once every loaded image is decoded and two frames
+    // have been drawn since, so the capture shows the layout the loaded
+    // fonts and images give. An image not loaded is left alone: decoding
+    // a deferred one would wait for a load that never starts.
     painted() {
-      const decoded = [...document.images].map((img) => img.decode().catch(() => {}));
+      const decoded = [...document.images]
+        .filter((img) => img.complete)
+        .map((img) => img.decode().catch(() => {}));
       return Promise.all(decoded).then(() => new Promise((r) => realRAF(() => realRAF(() => r(true)))));
     },
   };

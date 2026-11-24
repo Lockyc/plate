@@ -58,8 +58,9 @@ creates pixels the source never had (see *Synthesis* at the end).
 `render` captures a page once it has loaded and `--budget` ms (default 5000)
 of its own time have run, its timers fast-forwarded and its loads waited for,
 and then once nothing is still loading (fonts, images, videos, same-origin
-frames) and two frames have been drawn since. A page still loading something
-`--budget` ms later fails, naming what.
+frames) and two frames have been drawn since. A load the page defers, a
+`loading="lazy"` image out of view or a `preload="none"` video, is not waited
+for. A page still loading something `--budget` ms later fails, naming what.
 
 `render --html` writes the page's DOM after its scripts have run, a static
 copy to publish; it needs no `--size`, and refuses a page that does not end in
