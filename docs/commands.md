@@ -304,7 +304,18 @@ size, its sharpness, and every step's `start_ms` and `end_ms` on the
 video's clock. The poster is the last frame of the first step. A render
 that fails leaves none of its name's earlier outputs behind.
 
+## `pano`
+
+`--every` writes each frame as it goes and `pano.tsv` last, so a run that
+fails part way leaves the frames written so far and no `pano.tsv`.
+`--video` runs at about 0.045× real time at the default `--width` and
+0.155× at 2880: a minute of footage takes about 22 minutes, or 6½ at 2880.
+
 ## `reframe`
+
+A `pano --video` file's clock starts at the clip's `--from`; its `pano.tsv`
+gives each frame's clip time `t`, so a key's `t` is that time less the
+first row's.
 
 The path file is one or more `[[key]]` tables, each with `t` (seconds into
 the source, not the cut, so one path serves any `--from`), `yaw` (degrees

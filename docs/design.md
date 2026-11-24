@@ -29,7 +29,8 @@ internal/<op>/       one package per command (cutout, inpaint, infill, upscale,
                      doctor)
 internal/genai/      the one way a hosted image model is called
 internal/cdp/        a DevTools-protocol session with Chrome over --remote-debugging-pipe
-internal/video/      the encode, checks and whole-set publish clip and animate share
+internal/video/      the encode, checks and whole-set publish clip and animate share;
+                     the probe, seek, frame grid and sendcmd script pano and reframe share
 internal/frames/     the one clip decoder: video's measures, clip's extraction, diff's clips
 internal/sheet/      a PDF's pages redrawn as forms on new sheets (impose, marks)
 internal/cmm/        CMYK output profiles read and converted to sRGB in-process; the
@@ -42,13 +43,15 @@ internal/frame/      the source pre-pass the ML ops read: oriented, sRGB, 8-bit
                      RGB(A) PNG; or oriented only, for infill; and Probe, the
                      one read of a source's opacity, size and colourspace
 internal/icc/        the embedded sRGB profile
-internal/imgsize/    image dimensions without decoding pixels
+internal/imgsize/    image dimensions without decoding pixels; the one 2:1 equirect test
 internal/insv/       an Insta360 clip's trailer: lens calibration and IMU; insvtest
                      writes one onto any video for tests and fixtures
 internal/pano/       `pano`: the two lenses stitched by remap maps from their
                      calibration, levelled or locked by per-frame IMU rotations
+internal/reframe/    `reframe`: a flat view cut from an equirect along a keyframed path
 internal/count/      `count`: people per photo or equirect frame, through
                      internal/ml/scripts/count.py
+internal/tsv/        the one reader of plate's header-indexed TSV tables
 internal/enginetest/ sh stubs that stand in for engines in tests
 internal/pins/       the one table of engine versions and hosted image models
 internal/pdf/        PDF page count, page boxes and text through poppler; the
@@ -231,7 +234,18 @@ colours, or renders what it is given.
   within a minute when their appearance matches: the joined count is `low`,
   the unjoined `high`. People seen only in the density map have no box to
   follow, so they are reported as a share beside the range, not scaled into
-  it.
+  it. Go validates and orders the frames `pano.tsv` lists and hands
+  count.py that list.
+- **pano** — each lens is remapped onto the equirect by maps built from its
+  trailer calibration and cached per calibration and width, the two blended
+  across the seam, then v360 applies the frame's IMU rotation (level or
+  lock). `--every` runs ffmpeg once a frame; `--video` runs it once, sending
+  v360 a new rotation by sendcmd only when it has turned more than
+  `resendAngle`. `pano.tsv` (`pano.WriteTSV`) maps each frame to its clip
+  time and rotation.
+- **reframe** — v360 cuts a flat view from the equirect: a still is one
+  ffmpeg call at the path's view, a clip one call whose view moves by
+  sendcmd, sending only the values that changed since the frame before.
 - **clip** — ffmpeg only decodes and encodes (`clip.ExtractActivity`,
   `clip.ExtractFrames`, `video.Encode`); everything between is Go: the trim
   (`clip.TrimWindow`) and its idle cuts (`clip.IdleCuts`, applied to the
