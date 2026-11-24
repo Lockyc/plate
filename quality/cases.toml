@@ -2146,7 +2146,7 @@ max    = 0.045
 
 [[case]]
 name   = "count-sparse"
-why    = "a street of people standing large in a photo, partly hidden behind each other, must be counted person by person: a patterned shirt is not a crowd (DM-Count alone finds 83 here, the bake-off's count-only winner 28 with 18 of them on one floral jacket)"
+why    = "a street of people standing large in a photo, partly hidden behind each other, must come to the right total, with no crowd read into a patterned shirt (DM-Count alone finds 83 here); count-sparse-placed checks they are the right people"
 run    = ["count", "--out", "{tmp:out}", "{asset:crowd-sparse.jpg}"]
 metric = "count"
 params = { tsv = "{tmp:out/counts.tsv}", truth = "{asset:crowd-sparse.points.tsv}", frame = "crowd-sparse" }
@@ -2182,4 +2182,37 @@ why    = "the person holding a 360 camera stands under it and is not in the crow
 run    = ["count", "--out", "{tmp:out}", "{asset:crowd-equirect-holder.jpg}"]
 metric = "count"
 params = { tsv = "{tmp:out/counts.tsv}", truth = "{asset:crowd-equirect-holder.points.tsv}", frame = "crowd-equirect-holder" }
+max    = 0.5
+
+[[case]]
+name   = "count-sparse-placed"
+why    = "each person count-sparse counts is a marked person, within 90 px of their head (about a head's width there), and each marked person is counted: (false + missed) / truth, so a right total from wrong people fails"
+run    = ["count", "--out", "{tmp:out}", "{asset:crowd-sparse.jpg}"]
+metric = "points"
+params = { points = "{tmp:out/points/crowd-sparse.tsv}", truth = "{asset:crowd-sparse.points.tsv}", tol = 90.0 }
+max    = 0.36
+
+[[case]]
+name   = "count-dense-placed"
+why    = "each person count-dense counts is a marked person, within 40 px of their head, and each marked person is counted: (false + missed) / truth"
+run    = ["count", "--out", "{tmp:out}", "{asset:crowd-dense.jpg}"]
+metric = "points"
+params = { points = "{tmp:out/points/crowd-dense.tsv}", truth = "{asset:crowd-dense.points.tsv}", tol = 40.0 }
+max    = 0.47
+
+[[case]]
+name   = "count-equirect-placed"
+why    = "each person count-equirect counts is a marked person, within 2 degrees of arc of their head, and each marked person is counted once: (false + missed) / truth"
+run    = ["count", "--out", "{tmp:out}", "{asset:crowd-equirect.jpg}"]
+metric = "points"
+params = { points = "{tmp:out/points/crowd-equirect.tsv}", truth = "{asset:crowd-equirect.points.tsv}", tol = 2.0, image = "{asset:crowd-equirect.jpg}" }
+max    = 0.42
+
+[[case]]
+name   = "count-reads-whole-sphere"
+why    = "with no nadir or zenith cut every direction must lie inside the view that owns it, or count refuses to run; a blank frame then counts no one"
+setup  = [["magick", "-size", "800x400", "xc:gray50", "{tmp:blank.jpg}"]]
+run    = ["count", "--nadir-deg", "0", "--zenith-deg", "0", "--out", "{tmp:out}", "{tmp:blank.jpg}"]
+metric = "count"
+params = { tsv = "{tmp:out/counts.tsv}", truth = "{asset:crowd-empty.points.tsv}", frame = "blank" }
 max    = 0.5

@@ -552,3 +552,43 @@ func TestCountMetric(t *testing.T) {
 		}
 	}
 }
+
+func TestPointsMetric(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, body string) string {
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	truth := write("crowd.points.tsv", "x\ty\n100\t100\n200\t100\n500\t500\n")
+	// Two near the first marked person (one matches), one near the second,
+	// one far from everyone; the third marked person is missed.
+	got := write("crowd.tsv", "x\ty\tfrom\n105\t100\tdetector\n110\t100\tdensity\n200\t108\tdetector\n900\t900\tdensity\n")
+	if v, err := Metrics["points"](Params{"points": got, "truth": truth, "tol": 20.0}); err != nil || math.Abs(v-1) > 1e-9 {
+		t.Errorf("2 false + 1 missed over 3 = %v, %v; want 1", v, err)
+	}
+	if v, err := Metrics["points"](Params{"points": got, "truth": truth, "tol": 4.0}); err != nil || math.Abs(v-7.0/3) > 1e-9 {
+		t.Errorf("tol 4, nothing matched: %v, %v; want (4 false + 3 missed) / 3", v, err)
+	}
+
+	frame := filepath.Join(dir, "pano.png")
+	raster.SavePNG(frame, image.NewRGBA(image.Rect(0, 0, 400, 200)))
+	// (200,100) is lon 0 lat 0; (300,50) lon 90 lat 45; (0,100) lon -180 lat 0.
+	eqTruth := write("pano.points.tsv", "x\ty\n200\t100\n300\t50\n0\t100\n")
+	eqGot := write("pano.tsv", "lon\tlat\tfrom\n0.5\t0.2\tdetector\n90\t44\tdetector\n179.5\t0\tdensity\n-90\t0\tdensity\n")
+	if v, err := Metrics["points"](Params{"points": eqGot, "truth": eqTruth, "tol": 2.0, "image": frame}); err != nil || math.Abs(v-1.0/3) > 1e-9 {
+		t.Errorf("equirect: 1 false over 3 (across the seam too) = %v, %v; want 1/3", v, err)
+	}
+	if _, err := Metrics["points"](Params{"points": eqGot, "truth": eqTruth, "tol": 2.0}); err == nil || !strings.Contains(err.Error(), "image") {
+		t.Errorf("lon/lat without image: err = %v", err)
+	}
+	if _, err := Metrics["points"](Params{"points": got, "truth": truth}); err == nil || !strings.Contains(err.Error(), "tol") {
+		t.Errorf("no tol: err = %v", err)
+	}
+	none := write("empty.points.tsv", "x\ty\n")
+	if v, err := Metrics["points"](Params{"points": write("e.tsv", "x\ty\tfrom\n1\t1\tdensity\n"), "truth": none, "tol": 5.0}); err != nil || v != 1 {
+		t.Errorf("1 against no one = %v, %v; want 1", v, err)
+	}
+}

@@ -1,6 +1,7 @@
 package quality
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -18,6 +19,7 @@ import (
 	"github.com/lockyc/plate/internal/cmm"
 	"github.com/lockyc/plate/internal/cmm/gsref"
 	"github.com/lockyc/plate/internal/diff"
+	"github.com/lockyc/plate/internal/imgsize"
 	"github.com/lockyc/plate/internal/raster"
 )
 
@@ -841,6 +843,123 @@ func fogra39DE00(p Params) (float64, error) {
 
 func init() {
 	Metrics["count"] = count
+	Metrics["points"] = points
+}
+
+// points is how far count's people (points, a points/<frame>.tsv) are from
+// the hand-marked ones (truth, an x/y pixel points file): (false + missed) /
+// max(truth, 1), each counted person matched to at most one marked person
+// within tol, nearest pairs first. tol is in pixels when points are x/y; when
+// they are lon/lat it is degrees of arc, and image (the equirect frame)
+// gives the size that turns the truth's pixels into lon/lat.
+func points(p Params) (float64, error) {
+	pp, err := p.Path("points")
+	if err != nil {
+		return 0, err
+	}
+	tp, err := p.Path("truth")
+	if err != nil {
+		return 0, err
+	}
+	tol, err := p.Float("tol", 0)
+	if err != nil {
+		return 0, err
+	}
+	if !(tol > 0) {
+		return 0, fmt.Errorf("points: want a tol above 0")
+	}
+	got, err := readPoints(pp)
+	if err != nil {
+		return 0, err
+	}
+	truth, err := readPoints(tp)
+	if err != nil {
+		return 0, err
+	}
+	if !slices.Equal(truth.cols, []string{"x", "y"}) {
+		return 0, fmt.Errorf("points: %s: want an x, y header", tp)
+	}
+	dist := func(a, b [2]float64) float64 { return math.Hypot(a[0]-b[0], a[1]-b[1]) }
+	switch {
+	case slices.Equal(got.cols, []string{"x", "y"}):
+	case slices.Equal(got.cols, []string{"lon", "lat"}):
+		ip, err := p.Path("image")
+		if err != nil {
+			return 0, fmt.Errorf("points: lon/lat points need the equirect frame as image: %w", err)
+		}
+		w, h, err := imgsize.Dims(ip)
+		if err != nil {
+			return 0, err
+		}
+		for i, t := range truth.pts {
+			truth.pts[i] = [2]float64{(t[0]/float64(w) - 0.5) * 360, (0.5 - t[1]/float64(h)) * 180}
+		}
+		dist = arc
+	default:
+		return 0, fmt.Errorf("points: %s: want x, y or lon, lat columns first, header is %q", pp, strings.Join(got.cols, "\t"))
+	}
+	type pair struct {
+		d    float64
+		i, j int
+	}
+	var pairs []pair
+	for i, g := range got.pts {
+		for j, t := range truth.pts {
+			if d := dist(g, t); d <= tol {
+				pairs = append(pairs, pair{d, i, j})
+			}
+		}
+	}
+	slices.SortFunc(pairs, func(a, b pair) int { return cmp.Compare(a.d, b.d) })
+	usedG, usedT := map[int]bool{}, map[int]bool{}
+	for _, pr := range pairs {
+		if !usedG[pr.i] && !usedT[pr.j] {
+			usedG[pr.i], usedT[pr.j] = true, true
+		}
+	}
+	unmatched, missed := len(got.pts)-len(usedG), len(truth.pts)-len(usedT)
+	return float64(unmatched+missed) / math.Max(float64(len(truth.pts)), 1), nil
+}
+
+// arc is the angle in degrees between two lon/lat directions in degrees.
+func arc(a, b [2]float64) float64 {
+	r := math.Pi / 180
+	c := math.Sin(a[1]*r)*math.Sin(b[1]*r) + math.Cos(a[1]*r)*math.Cos(b[1]*r)*math.Cos((a[0]-b[0])*r)
+	return math.Acos(math.Max(-1, math.Min(1, c))) / r
+}
+
+type pointsFile struct {
+	cols []string // the first two column names
+	pts  [][2]float64
+}
+
+// readPoints reads a points file's first two columns, under a header.
+func readPoints(path string) (pointsFile, error) {
+	rows, err := readTSV(path)
+	if err != nil {
+		return pointsFile{}, err
+	}
+	if len(rows) == 0 || len(rows[0]) < 2 {
+		return pointsFile{}, fmt.Errorf("points: %s: want a header of at least two columns", path)
+	}
+	f := pointsFile{cols: rows[0][:2]}
+	for _, r := range rows[1:] {
+		if len(r) < 2 {
+			return pointsFile{}, fmt.Errorf("points: %s: short row %q", path, strings.Join(r, "\t"))
+		}
+		a, ok1 := finite(r[0])
+		b, ok2 := finite(r[1])
+		if !ok1 || !ok2 {
+			return pointsFile{}, fmt.Errorf("points: %s: row %q is not two numbers", path, strings.Join(r, "\t"))
+		}
+		f.pts = append(f.pts, [2]float64{a, b})
+	}
+	return f, nil
+}
+
+func finite(s string) (float64, bool) {
+	v, err := strconv.ParseFloat(s, 64)
+	return v, err == nil && !math.IsNaN(v) && !math.IsInf(v, 0)
 }
 
 // count is how far the estimate for frame in tsv (count's counts.tsv)
