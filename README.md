@@ -28,7 +28,7 @@ install command for any that is missing or too old, naming the commands that won
 it's fixed.
 
 `uv` is the only Python tool to install. The ML commands (`cutout`, `inpaint`, `upscale`,
-`grade fit`) run through it; the first run of each downloads its dependencies and model
+`grade fit`, `count`) run through it; the first run of each downloads its dependencies and model
 weights — several GB on Linux, where PyTorch ships with CUDA — into those tools' own caches.
 They run on the GPU when PyTorch finds one; `PLATE_DEVICE=cpu` (or `mps`, `cuda`) chooses the
 device.
@@ -58,6 +58,7 @@ plate build site.manifest                                    # every target, ski
 | | `icon` | A macOS `.icns` and PNGs from a tile, placed in Apple's icon grid |
 | | `diff` | Compares two images after lining them up, or two clips frame by frame |
 | | `qr` | A QR code SVG any phone camera decodes |
+| | `count` | Counts the people in photos and 360 frames, each counted person placed; with `--track`, how many different people passed through a run of 360 frames, as a range |
 | **Render** | `render` | HTML to PNG, JPEG, PDF or settled HTML with headless Chrome, skipped when nothing changed |
 | | `build` | Renders every target in a manifest in parallel |
 | | `fonts` | Embeds web fonts into a CSS file, optionally cut to one language's characters |
@@ -70,6 +71,8 @@ plate build site.manifest                                    # every target, ski
 | **Video** | `clip check` / `clip render` | A screen recording and its event log into a short looping demo clip |
 | | `animate` | A page's own animation captured frame by frame as MP4, WebM, WebP or GIF |
 | | `walkthrough check` / `walkthrough render` | A scripted tour of a live web app recorded in headless Chrome as a narrated, captioned MP4 |
+| | `pano` | An Insta360 clip's two lens files stitched into a level 360 picture: a still every so often, named by the time it was shot, or one MP4 |
+| | `reframe` | A flat view cut from a 360 video or picture along a keyframed path of direction and zoom, as a still or an MP4 with its sound |
 | **Generate** | `generate` ⚠ / `generate accept` | Rounds of attempts at a character pose from reference images through a hosted image model, each with provenance |
 | | `doctor` | Checks every engine against its pin and installs the ones plate manages |
 
@@ -81,10 +84,15 @@ that forbids this puts `synthesis = "forbid"` in a `plate.toml`, and they refuse
 `generate` is the only command that needs an API key or spends money, and nothing in a build
 can reach it.
 
+`count --track`'s re-ID model is MIT-licensed but trained on MSMT17, whose terms are research
+and non-commercial, so commercial use of `count --track` is not covered.
+
 ## Limits
 
-- **macOS 14 or later on Apple Silicon** runs every command; `clip`, `animate` and `walkthrough` need ffmpeg at
-  its pinned minimum.
+- **macOS 14 or later on Apple Silicon** runs every command; `clip`, `animate`, `walkthrough`, `pano` and `reframe`
+  need ffmpeg at its pinned minimum.
+- **`pano` reads the Insta360 X3 only**; another camera's clip is refused, since its IMU axes
+  are not known.
 - **Linux (glibc 2.28+, x86_64 or arm64)** runs every command except `cutout --coarse vision`,
   which needs Apple Vision; `cutout` uses `--coarse birefnet` there. On arm64, Chrome for
   Testing publishes no chrome-headless-shell, so supply one through

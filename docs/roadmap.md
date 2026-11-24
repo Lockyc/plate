@@ -23,6 +23,7 @@ Phases in build order. Each ships when its acceptance gate passes.
 | 8 | Shipped | Motion: `animate` (a page's animation captured on plate's clock, embedded video seeked with it), `internal/cdp`, clip's encode and checks moved to `internal/video`, video outputs and `dur=`/`fps=` in `plate build` | unit tests; `animate-*` quality cases: two captures frame-identical, thin moving text at clip's sharpness floor, embedded videos frame-matched to their sources, one started late, from partway in and looping, and a page whose animation never ran refused |
 | 9 | Shipped | Generation: `generate` and `generate accept` (character poses from reference images through hosted image models, `internal/genai` with four providers, a provenance record per attempt, a contact sheet per pose), kept off every build path | unit tests against httptest providers; `TestOnlyGenerateReachesGenai` |
 | 10 | Shipped | Narrated walkthroughs: a script of browser steps (go to, click, type, press, wait for), each with an audio file and a caption, recorded from headless Chrome driving a live web app in real time; each step held for its audio's length, the audio laid over it, the caption burned in; a long-form MP4 and poster with clip's measurements; a step whose target never appears fails the render, naming the step | unit tests; a quality case recording a fixture app twice to the same step timings, and one with a missing target refused |
+| 11 | Shipped | 360 footage: `pano` (an Insta360 X3 pair stitched from its lens calibration and levelled by its IMU, stills on a wall clock or one MP4, `pano.tsv`), `count` (people per photo or equirect frame from a detector and a crowd density map, each placed; `--track` gives distinct people over `pano` frames as a range), `reframe` (a flat view along a keyframed path, as a still or an MP4 with its sound), `internal/insv`, `internal/tsv`, `imgsize.IsEquirect`, and the `count`, `points`, `range` and `av-length` quality metrics | unit tests; `pano-seam`, `pano-level`, `pano-centre-back`, `count-*` (totals, placement, holder and sky cut, whole sphere, `count-track-distinct`), `reframe-aims` and `reframe-keeps-sound` quality cases at their recorded thresholds |
 
 **Phase 5 changes nothing in a consuming project until its owner approves
 that project's cutover.** The check runs plate beside the existing pipeline,
@@ -31,7 +32,7 @@ reading the project's assets without writing to its tree.
 ## Sequencing
 
 Phases run in order, except where one needs nothing from the phase before
-it: phases 6 to 9 add commands and cut no project over, so they run
+it: phases 6 onward add commands and cut no project over, so they run
 independently of phase 5. Within a phase, order is open.
 
 ## Deferred
@@ -277,3 +278,24 @@ independently of phase 5. Within a phase, order is open.
   `quality/cases.toml` restate shared inputs. Deferred because only the
   clip cases repeat them. Unlock: a case-include feature in the quality
   runner once a second op needs it.
+
+- **pano --video is slow.** It runs well under real time (measured in
+  [commands.md](commands.md) → `pano`), because ffmpeg's v360 rebuilds its
+  lookup table whenever the rotation changes, which a levelled clip does
+  every frame. Deferred because stills on a wall clock are the main use.
+  Unlock: a per-frame remap or GPU path measured faster on the same clip.
+- **pano feathers the seam; it does not flow it.** The lenses' overlap is
+  blended by a feather, so a subject close to the camera can double or
+  step there. Deferred because the `pano-*` cases pass. Unlock: a seam
+  case the feathered blend fails, then optical-flow blending measured on it.
+- **pano reads only the Insta360 X3.** Each model's lens field of view
+  (`lensFOV` in internal/pano) and IMU axes (`insv.Axes`) are fitted to its
+  own footage. Unlock: a file from another camera, then both fitted on it.
+- **count --track's accuracy on real footage is unmeasured.** Its distinct
+  range depends on how long a lost track is held for a rejoin, and the only
+  truth is the synthetic `count-track-distinct` walkers. Unlock: a
+  hand-tracked real clip as a quality case.
+- **count undercounts dense crowds.** `count-dense` is the case furthest
+  from its truth, its far crowd counted from DM-Count's density map.
+  Unlock: a density model with a stated licence that beats DM-Count on the
+  `count-*` cases.
