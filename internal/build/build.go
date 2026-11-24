@@ -6,6 +6,8 @@ package build
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,6 +20,7 @@ import (
 	"strings"
 
 	"github.com/lockyc/plate/internal/animate"
+	"github.com/lockyc/plate/internal/atomicfile"
 	"github.com/lockyc/plate/internal/cli"
 	"github.com/lockyc/plate/internal/engine"
 	"github.com/lockyc/plate/internal/impose"
@@ -43,28 +46,33 @@ type result struct {
 // sheet or the marked copy.
 type derivation struct {
 	option, verb, path string
+	opts               string // what shapes the file besides the PDF; see stale
 	run                func(ctx context.Context, in, out string) error
 }
 
 func (t Target) derivations() []derivation {
 	var ds []derivation
 	if t.TwoUp != "" {
-		ds = append(ds, derivation{"2up", "imposed", t.TwoUp, func(ctx context.Context, in, out string) error {
+		ds = append(ds, derivation{"2up", "imposed", t.TwoUp, "", func(ctx context.Context, in, out string) error {
 			return impose.Run(ctx, in, out, false, true)
 		}})
 	}
 	if t.Marks != "" {
-		ds = append(ds, derivation{"marks", "marked", t.Marks, func(ctx context.Context, in, out string) error {
+		ds = append(ds, derivation{"marks", "marked", t.Marks, t.marksOpts(), func(ctx context.Context, in, out string) error {
 			return marks.Run(ctx, in, out, marks.DefaultBleed, t.Trim, true)
 		}})
 	}
 	return ds
 }
 
+// marksOpts is what shapes t's marked copies besides the PDF they mark.
+func (t Target) marksOpts() string {
+	return fmt.Sprintf("bleed=%g trim=%gx%g", float64(marks.DefaultBleed), t.Trim.W, t.Trim.H)
+}
+
 // derive writes d after t's render: when the PDF was rendered, or d's file
-// is missing or older than the PDF. A render that failed leaves no PDF, so
-// d's file goes too.
-func derive(ctx context.Context, t Target, d derivation, res render.Result, renderErr error) (wrote bool, err error) {
+// is stale. A render that failed leaves no PDF, so d's file goes too.
+func derive(ctx context.Context, t Target, d derivation, res render.Result, renderErr error, warn io.Writer) (wrote bool, err error) {
 	if renderErr != nil {
 		if err := os.Remove(d.path); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return false, errors.Join(renderErr, err)
@@ -72,15 +80,11 @@ func derive(ctx context.Context, t Target, d derivation, res render.Result, rend
 		return false, renderErr
 	}
 	if res.Outcome == render.Unchanged {
-		pdf, err := os.Stat(t.Opts.PDF)
-		if err != nil {
+		if s, err := stale(d.path, d.opts, t.Opts.PDF); err != nil || !s {
 			return false, err
 		}
-		if out, err := os.Stat(d.path); err == nil && !out.ModTime().Before(pdf.ModTime()) {
-			return false, nil
-		}
 	}
-	if err := d.run(ctx, t.Opts.PDF, d.path); err != nil {
+	if err := write(d.path, d.opts, warn, func() error { return d.run(ctx, t.Opts.PDF, d.path) }); err != nil {
 		os.Remove(d.path)
 		return false, fmt.Errorf("%s: %w", d.option, err)
 	}
@@ -212,7 +216,7 @@ func Main(ctx context.Context, args []string, _, stderr io.Writer) int {
 			// Once one fails, the rest see its error and remove their files.
 			for _, d := range t.derivations() {
 				var wrote bool
-				wrote, r.err = derive(ctx, t, d, r.res, r.err)
+				wrote, r.err = derive(ctx, t, d, r.res, r.err, &r.warn)
 				if wrote {
 					r.derived = append(r.derived, d.verb+" "+filepath.Base(d.path))
 				}
@@ -237,7 +241,7 @@ func Main(ctx context.Context, args []string, _, stderr io.Writer) int {
 				back = results[j]
 			}
 			var wrote []string
-			wrote, r.err = writeDuplex(ctx, t, r, back)
+			wrote, r.err = writeDuplex(ctx, t, r, back, stderr)
 			r.derived = append(r.derived, wrote...)
 		}
 		switch {
@@ -276,7 +280,7 @@ func Main(ctx context.Context, args []string, _, stderr io.Writer) int {
 // earlier one is used. A failed render on either side leaves neither file.
 // Main calls it as it collects results, so the back's render, in parallel
 // or later in the manifest, is never read half-written.
-func writeDuplex(ctx context.Context, t Target, own, back *result) ([]string, error) {
+func writeDuplex(ctx context.Context, t Target, own, back *result, warn io.Writer) ([]string, error) {
 	fail := func(err error) ([]string, error) {
 		for _, p := range []string{t.Duplex, t.DuplexMarks} {
 			if rmErr := os.Remove(p); p != "" && rmErr != nil && !errors.Is(rmErr, fs.ErrNotExist) {
@@ -297,12 +301,12 @@ func writeDuplex(ctx context.Context, t Target, own, back *result) ([]string, er
 		rendered = rendered || back.res.Outcome != render.Unchanged
 	}
 	var wrote []string
-	stale, err := older(t.Duplex, t.Opts.PDF, t.BackPDF)
+	s, err := stale(t.Duplex, "", t.Opts.PDF, t.BackPDF)
 	if err != nil {
 		return fail(fmt.Errorf("back: %w", err))
 	}
-	if rendered || stale {
-		if err := pdf.Duplex(ctx, t.Opts.PDF, t.BackPDF, t.Duplex, true); err != nil {
+	if rendered || s {
+		if err := write(t.Duplex, "", warn, func() error { return pdf.Duplex(ctx, t.Opts.PDF, t.BackPDF, t.Duplex, true) }); err != nil {
 			return fail(fmt.Errorf("back: %w", err))
 		}
 		wrote = append(wrote, "duplexed "+filepath.Base(t.Duplex))
@@ -310,18 +314,22 @@ func writeDuplex(ctx context.Context, t Target, own, back *result) ([]string, er
 	if t.DuplexMarks == "" {
 		return wrote, nil
 	}
-	if stale, err := older(t.DuplexMarks, t.Duplex); err != nil || (len(wrote) == 0 && !stale) {
+	if s, err := stale(t.DuplexMarks, t.marksOpts(), t.Duplex); err != nil || (len(wrote) == 0 && !s) {
 		return wrote, err
 	}
-	if err := marks.Run(ctx, t.Duplex, t.DuplexMarks, marks.DefaultBleed, t.Trim, true); err != nil {
+	if err := write(t.DuplexMarks, t.marksOpts(), warn, func() error {
+		return marks.Run(ctx, t.Duplex, t.DuplexMarks, marks.DefaultBleed, t.Trim, true)
+	}); err != nil {
 		return fail(fmt.Errorf("marks: %w", err))
 	}
 	return append(wrote, "marked "+filepath.Base(t.DuplexMarks)), nil
 }
 
-// older reports whether out is missing or older than any of ins, each of
-// which must exist.
-func older(out string, ins ...string) (bool, error) {
+// stale reports whether the derived file out needs writing again: it is
+// missing, older than any of ins (each of which must exist), or its stamp
+// does not name opts and out's bytes. opts is everything besides ins that
+// shapes out, so a trim= edit alone rewrites a marked copy.
+func stale(out, opts string, ins ...string) (bool, error) {
 	o, err := os.Stat(out)
 	for _, p := range ins {
 		in, inErr := os.Stat(p)
@@ -332,7 +340,76 @@ func older(out string, ins ...string) (bool, error) {
 			return true, nil
 		}
 	}
-	return err != nil, nil
+	if err != nil {
+		return true, nil
+	}
+	s, ok := readStamp(out)
+	return !ok || s.Opts != opts || s.SHA256 != render.HashFile(out), nil
+}
+
+// stamp records the options a derived file was written with and the hash
+// of the bytes written, in plate's cache dir beside the render records so
+// it never ships with the outputs.
+type stamp struct {
+	Opts   string
+	SHA256 string
+}
+
+// stampPath is where out's stamp lives, named for out's absolute path.
+func stampPath(out string) (string, error) {
+	dir, err := engine.CacheDir()
+	if err != nil {
+		return "", err
+	}
+	abs, err := filepath.Abs(out)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256([]byte(abs))
+	return filepath.Join(dir, "build", hex.EncodeToString(sum[:])+".json"), nil
+}
+
+// readStamp reads out's stamp; anything short of a well-formed one is a
+// miss, which costs one rewrite.
+func readStamp(out string) (stamp, bool) {
+	p, err := stampPath(out)
+	if err != nil {
+		return stamp{}, false
+	}
+	b, err := os.ReadFile(p)
+	if err != nil {
+		return stamp{}, false
+	}
+	var s stamp
+	return s, json.Unmarshal(b, &s) == nil
+}
+
+// write writes the derived file out with run, from opts, and stamps it.
+// The old stamp goes first, so a write that fails or is killed never
+// leaves one vouching for the old bytes. A stamp that cannot be kept is a
+// warning: its cost is one rewrite next run.
+func write(out, opts string, warn io.Writer, run func() error) error {
+	p, err := stampPath(out)
+	if err == nil {
+		if rmErr := os.Remove(p); rmErr != nil && !errors.Is(rmErr, fs.ErrNotExist) {
+			err = rmErr
+		}
+	}
+	if err != nil {
+		fmt.Fprintf(warn, "plate build: warning: stamp for %s: %v\n", filepath.Base(out), err)
+		return run()
+	}
+	if err := run(); err != nil {
+		return err
+	}
+	b, _ := json.Marshal(stamp{opts, render.HashFile(out)})
+	if err = os.MkdirAll(filepath.Dir(p), 0o755); err == nil {
+		err = atomicfile.WriteFile(p, b, 0o644)
+	}
+	if err != nil {
+		fmt.Fprintf(warn, "plate build: warning: stamp for %s: %v\n", filepath.Base(out), err)
+	}
+	return nil
 }
 
 // loadsOutput refuses t when one of its inputs is another target's output:

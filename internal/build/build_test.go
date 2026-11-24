@@ -3,6 +3,7 @@ package build
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"image"
 	"image/png"
 	"math"
@@ -640,5 +641,41 @@ func TestBuildDuplexMarksWritesTheCopy(t *testing.T) {
 	os.Remove(marked)
 	if code := e.run(e.manifest); code != 0 || e.stderr.String() != "unchanged f\nmarked f-duplex-marks.pdf\nunchanged b\n0 rendered, 2 unchanged\n" {
 		t.Errorf("missing copy: code %d, stderr %q", code, e.stderr.String())
+	}
+}
+
+// TestBuildTrimChangeRemarks: a target whose only change is its trim=
+// writes its marked copies again, at the new trim, though its PDF is
+// unchanged.
+func TestBuildTrimChangeRemarks(t *testing.T) {
+	e := setupDuplex(t)
+	manifest := func(trim string) {
+		os.WriteFile(e.manifest, []byte("f  f.html  560x792  1  pdf  marks trim="+trim+" back=b\nb  b.html  560x792  1  pdf\n"), 0o644)
+	}
+	manifest("148x210")
+	if code := e.run(e.manifest); code != 0 {
+		t.Fatalf("code %d: %s", code, e.stderr.String())
+	}
+	manifest("154x216")
+	if code := e.run(e.manifest); code != 0 || e.stderr.String() != "unchanged f\nmarked f-marks.pdf\nmarked f-duplex-marks.pdf\nunchanged b\n0 rendered, 2 unchanged\n" {
+		t.Errorf("new trim: code %d, stderr %q", code, e.stderr.String())
+	}
+	for _, name := range []string{"f-marks.pdf", "f-duplex-marks.pdf"} {
+		out := filepath.Join(e.dir, "dist", name)
+		res, err := engine.Run(context.Background(), engine.Cmd{Engine: "pdfinfo", Args: []string{"-box", "-f", "1", "-l", "1", out}, Inputs: []string{out}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var b [4]float64
+		_, after, _ := strings.Cut(string(res.Stdout), "Page    1 TrimBox:")
+		if _, err := fmt.Sscan(after, &b[0], &b[1], &b[2], &b[3]); err != nil {
+			t.Fatalf("%s: no TrimBox in %s", name, res.Stdout)
+		}
+		if w, h := (b[2]-b[0])*25.4/72, (b[3]-b[1])*25.4/72; math.Abs(w-154) > 0.05 || math.Abs(h-216) > 0.05 {
+			t.Errorf("%s: trim %.2fx%.2f mm, want 154x216", name, w, h)
+		}
+	}
+	if code := e.run(e.manifest); code != 0 || e.stderr.String() != "unchanged f\nunchanged b\n0 rendered, 2 unchanged\n" {
+		t.Errorf("same trim: code %d, stderr %q", code, e.stderr.String())
 	}
 }
