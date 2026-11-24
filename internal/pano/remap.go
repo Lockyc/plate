@@ -23,6 +23,13 @@ var lensFOV = map[string]float64{
 	"Insta360 X3": 189.5,
 }
 
+// LensFOV is model's lens field of view in degrees as pano stitches it;
+// ok is false for a model pano has none for.
+func LensFOV(model string) (fov float64, ok bool) {
+	fov, ok = lensFOV[model]
+	return fov, ok
+}
+
 // lens is one lens's projection: its centre and focal length in pixels of
 // its own frame, the widest angle off its axis it sees, and its axes (out
 // of the lens, its picture's right and its picture's down) on the camera's

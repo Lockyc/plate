@@ -2112,15 +2112,11 @@ max    = 0.20
 
 [[case]]
 name   = "pano-seam"
-why    = "an Insta360 pair stitched from its calibration must give back the sphere it was shot from, with no step at the lenses' overlap; the fixture is an equirect cut into two ideal back-to-back 189.5° lenses and an upright, still IMU"
-setup  = [
-  ["ffmpeg", "-loop", "1", "-i", "{asset:equirect-gemini-south.jpg}", "-t", "3", "-r", "30", "-vf", "v360=e:fisheye:h_fov=189.5:v_fov=189.5:w=1024:h=1024:yaw=0:interp=cubic,format=yuv420p", "-c:v", "libx264", "-crf", "12", "-f", "mp4", "{tmp:VID_20260101_120000_00_001.insv}"],
-  ["ffmpeg", "-loop", "1", "-i", "{asset:equirect-gemini-south.jpg}", "-t", "3", "-r", "30", "-vf", "v360=e:fisheye:h_fov=189.5:v_fov=189.5:w=1024:h=1024:yaw=180:interp=cubic,format=yuv420p", "-c:v", "libx264", "-crf", "12", "-f", "mp4", "{tmp:VID_20260101_120000_10_001.insv}"],
-  ["insv-trailer", "--size", "1024", "--seconds", "3", "{tmp:VID_20260101_120000_00_001.insv}"],
-]
-run    = ["pano", "--every", "30s", "--width", "2048", "--out", "{tmp:out}", "{tmp:VID_20260101_120000_00_001.insv}"]
+why    = "an Insta360 pair stitched from its calibration must give back the sphere it was shot from, with no step at the lenses' overlap; the fixture is an equirect cut into two ideal back-to-back lenses at the X3's field of view and an upright, still IMU"
+setup  = [["insv-pair", "--size", "1024", "--seconds", "3", "{asset:equirect-gemini-south.jpg}", "{tmp:VID_20260101_120000_00_001.insv}"]]
+run    = ["pano", "--every", "30s", "--width", "2048", "--centre", "front", "--out", "{tmp:out}", "{tmp:VID_20260101_120000_00_001.insv}"]
 metric = "rmse"
-params = { a = "{tmp:out/120001.jpg}", b = "{asset:equirect-gemini-south.jpg}" }
+params = { a = "{tmp:out/120001_500.jpg}", b = "{asset:equirect-gemini-south.jpg}" }
 max    = 0.045
 
 [[case]]
@@ -2128,11 +2124,22 @@ name   = "pano-level"
 why    = "a pair shot with the camera rolled 10° and pitched 20°, the IMU saying so, must come out level and facing where it did: the Rot's sign and order as ffmpeg's v360 applies them"
 setup  = [
   ["ffmpeg", "-i", "{asset:equirect-gemini-south.jpg}", "-vf", "v360=e:e:pitch=20:roll=10:interp=cubic", "-frames:v", "1", "{tmp:tilted.png}"],
-  ["ffmpeg", "-loop", "1", "-i", "{tmp:tilted.png}", "-t", "3", "-r", "30", "-vf", "v360=e:fisheye:h_fov=189.5:v_fov=189.5:w=1024:h=1024:yaw=0:interp=cubic,format=yuv420p", "-c:v", "libx264", "-crf", "12", "-f", "mp4", "{tmp:VID_20260101_120000_00_001.insv}"],
-  ["ffmpeg", "-loop", "1", "-i", "{tmp:tilted.png}", "-t", "3", "-r", "30", "-vf", "v360=e:fisheye:h_fov=189.5:v_fov=189.5:w=1024:h=1024:yaw=180:interp=cubic,format=yuv420p", "-c:v", "libx264", "-crf", "12", "-f", "mp4", "{tmp:VID_20260101_120000_10_001.insv}"],
-  ["insv-trailer", "--size", "1024", "--seconds", "3", "--roll", "10", "--pitch", "20", "{tmp:VID_20260101_120000_00_001.insv}"],
+  ["insv-pair", "--size", "1024", "--seconds", "3", "--roll", "10", "--pitch", "20", "{tmp:tilted.png}", "{tmp:VID_20260101_120000_00_001.insv}"],
+]
+run    = ["pano", "--every", "30s", "--width", "2048", "--centre", "front", "--out", "{tmp:out}", "{tmp:VID_20260101_120000_00_001.insv}"]
+metric = "rmse"
+params = { a = "{tmp:out/120001_500.jpg}", b = "{asset:equirect-gemini-south.jpg}" }
+max    = 0.056
+
+[[case]]
+name   = "pano-centre-back"
+why    = "by default the picture's centre is the back lens's axis, away from the person holding the camera: the tilted pair of pano-level, levelled, must face the source's opposite way and stay level"
+setup  = [
+  ["ffmpeg", "-i", "{asset:equirect-gemini-south.jpg}", "-vf", "v360=e:e:pitch=20:roll=10:interp=cubic", "-frames:v", "1", "{tmp:tilted.png}"],
+  ["ffmpeg", "-i", "{asset:equirect-gemini-south.jpg}", "-vf", "v360=e:e:yaw=180:interp=cubic", "-frames:v", "1", "{tmp:turned.png}"],
+  ["insv-pair", "--size", "1024", "--seconds", "3", "--roll", "10", "--pitch", "20", "{tmp:tilted.png}", "{tmp:VID_20260101_120000_00_001.insv}"],
 ]
 run    = ["pano", "--every", "30s", "--width", "2048", "--out", "{tmp:out}", "{tmp:VID_20260101_120000_00_001.insv}"]
 metric = "rmse"
-params = { a = "{tmp:out/120001.jpg}", b = "{asset:equirect-gemini-south.jpg}" }
-max    = 0.056
+params = { a = "{tmp:out/120001_500.jpg}", b = "{tmp:turned.png}" }
+max    = 0.045

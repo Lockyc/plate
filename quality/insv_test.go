@@ -2,33 +2,46 @@ package quality
 
 import (
 	"context"
+	"fmt"
 	"math"
-	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/lockyc/plate/internal/enginetest"
 	"github.com/lockyc/plate/internal/insv"
+	"github.com/lockyc/plate/internal/pano"
 )
 
-func TestInsvTrailerStep(t *testing.T) {
+func TestInsvPairStep(t *testing.T) {
 	tmp := t.TempDir()
-	clip := filepath.Join(tmp, "VID_20260101_120000_00_001.insv")
-	if err := os.WriteFile(clip, []byte("video"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	log := enginetest.Stub(t, "ffmpeg", `for a; do last=$a; done; printf video > "$last"`)
 	env := Env{Tmp: tmp}
-	step := []string{"insv-trailer", "--size", "1024", "--seconds", "2", "--roll", "10", "--pitch", "20", "{tmp:VID_20260101_120000_00_001.insv}"}
+	step := []string{"insv-pair", "--size", "1024", "--seconds", "2", "--roll", "10", "--pitch", "20", "{tmp:src.jpg}", "{tmp:VID_20260101_120000_00_001.insv}"}
 	if err := env.step(context.Background(), step); err != nil {
 		t.Fatal(err)
 	}
-	m, err := insv.Read(clip)
+	calls := enginetest.Calls(t, log)
+	if len(calls) != 2 {
+		t.Fatalf("%d ffmpeg calls, want one a lens", len(calls))
+	}
+	fov, _ := pano.LensFOV("Insta360 X3")
+	for i, c := range calls {
+		args := strings.Join(c, " ")
+		for _, w := range []string{fmt.Sprintf("h_fov=%g:", fov), []string{"yaw=0:", "yaw=180:"}[i], []string{"_00_", "_10_"}[i]} {
+			if !strings.Contains(args, w) {
+				t.Errorf("lens %d: ffmpeg lacks %q: %s", i, w, args)
+			}
+		}
+	}
+	m, err := insv.Read(filepath.Join(tmp, "VID_20260101_120000_00_001.insv"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if m.Width != 1024 || m.Lenses[1].CX != 512 || m.Lenses[0].R != 512 || math.Abs(m.Lenses[1].Roll-math.Pi/2) > 1e-9 {
 		t.Errorf("meta %+v", m)
 	}
-	if n := len(m.IMU); n < 200 {
+	if n := len(m.IMU); n < 2000 {
 		t.Fatalf("%d IMU samples for 2 s", n)
 	}
 	g := insv.StandardGravity

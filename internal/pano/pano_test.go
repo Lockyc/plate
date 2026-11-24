@@ -3,6 +3,8 @@ package pano
 import (
 	"bytes"
 	"context"
+	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -65,7 +67,7 @@ func TestEveryShortClip(t *testing.T) {
 	if !strings.Contains(args, "v360=e:e:") {
 		t.Errorf("no levelling rotation: %s", args)
 	}
-	if _, err := os.Stat(filepath.Join(out, "120702.jpg")); err != nil {
+	if _, err := os.Stat(filepath.Join(out, "120702_500.jpg")); err != nil {
 		t.Error(err)
 	}
 	tsv, err := os.ReadFile(filepath.Join(out, "pano.tsv"))
@@ -73,8 +75,61 @@ func TestEveryShortClip(t *testing.T) {
 		t.Fatal(err)
 	}
 	lines := strings.Split(strings.TrimSpace(string(tsv)), "\n")
-	if len(lines) != 2 || lines[0] != "file\tt\tclock\tyaw\tpitch\troll" || !strings.HasPrefix(lines[1], "120702.jpg\t1.500\t12:07:02\t") {
+	if len(lines) != 2 || lines[0] != "file\tt\tclock\tyaw\tpitch\troll" || !strings.HasPrefix(lines[1], "120702_500.jpg\t1.500\t12:07:02.500\t") {
 		t.Errorf("pano.tsv = %q", tsv)
+	}
+}
+
+// An upright, still camera: the back lens's axis is the picture's centre by
+// default, a half turn of yaw; --centre front leaves the picture alone.
+func TestCentre(t *testing.T) {
+	for _, c := range []struct {
+		flag []string
+		yaw  []string
+	}{{nil, []string{"yaw=180.0000", "yaw=-180.0000"}}, {[]string{"--centre", "front"}, []string{"yaw=0.0000", "yaw=-0.0000"}}} {
+		front, _ := clip(t, "VID_20261122_120701_00_001.insv", 3)
+		_, mpeg := stubs(t, "3.0")
+		var stdout, stderr bytes.Buffer
+		args := append(append([]string{"--width", "256", "--out", t.TempDir()}, c.flag...), front)
+		if code := Main(context.Background(), args, &stdout, &stderr); code != 0 {
+			t.Fatalf("exit %d: %s", code, stderr.String())
+		}
+		got := strings.Join(enginetest.Calls(t, mpeg)[0], " ")
+		if !strings.Contains(got, c.yaw[0]) && !strings.Contains(got, c.yaw[1]) {
+			t.Errorf("%v: want %s: %s", c.flag, c.yaw[0], got)
+		}
+	}
+}
+
+// --every goes down to one frame interval; frames are named to the
+// millisecond.
+func TestEverySubSecond(t *testing.T) {
+	front, _ := clip(t, "VID_20261122_120701_00_001.insv", 2)
+	_, mpeg := stubs(t, "2.0")
+	out := t.TempDir()
+	var stdout, stderr bytes.Buffer
+	if code := Main(context.Background(), []string{"--every", "0.5s", "--width", "256", "--out", out, front}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr.String())
+	}
+	if n := len(enginetest.Calls(t, mpeg)); n != 2 {
+		t.Errorf("%d frames from 2 s every 0.5 s, want 2 (1.0, 1.5 s)", n)
+	}
+	for _, f := range []string{"120702_000.jpg", "120702_500.jpg"} {
+		if _, err := os.Stat(filepath.Join(out, f)); err != nil {
+			t.Error(err)
+		}
+	}
+	stderr.Reset()
+	if code := Main(context.Background(), []string{"--every", "20ms", "--width", "256", "--out", t.TempDir(), front}, &stdout, &stderr); code != 1 || !strings.Contains(stderr.String(), "frame") {
+		t.Errorf("--every under a frame interval: exit %d, %s", code, stderr.String())
+	}
+}
+
+// A time near the end rounds to the frame grid but never past the last frame.
+func TestEveryTimesLastFrame(t *testing.T) {
+	got := everyTimes(0, 10.02, 5.0175, 30)
+	if len(got) != 2 || got[0] != 5 || got[1] != 10 {
+		t.Errorf("everyTimes = %v, want [5 10]: the last frame of a 10.02 s clip at 30 fps is at 10 s", got)
 	}
 }
 
@@ -89,7 +144,7 @@ func TestEveryFrames(t *testing.T) {
 	if n := len(enginetest.Calls(t, mpeg)); n != 3 {
 		t.Errorf("%d frames from 70 s every 30 s, want 3 (5, 35, 65 s)", n)
 	}
-	for _, f := range []string{"120706.jpg", "120736.jpg", "120806.jpg"} {
+	for _, f := range []string{"120706_000.jpg", "120736_000.jpg", "120806_000.jpg"} {
 		if _, err := os.Stat(filepath.Join(out, f)); err != nil {
 			t.Error(err)
 		}
@@ -114,9 +169,16 @@ func TestVideo(t *testing.T) {
 			t.Errorf("ffmpeg lacks %q: %s", want, args)
 		}
 	}
-	cmds, err := os.ReadFile(filepath.Join(out, ".pano-commands.txt"))
-	if err == nil {
-		t.Errorf("the command file is left in --out: %q", cmds[:min(len(cmds), 80)])
+	_, after, ok := strings.Cut(args, "sendcmd=f=")
+	if !ok {
+		t.Fatal("no sendcmd file")
+	}
+	cmdFile := strings.ReplaceAll(strings.SplitN(after, ",v360", 2)[0], `\`, "")
+	if !filepath.IsAbs(cmdFile) {
+		t.Fatalf("sendcmd file %q", cmdFile)
+	}
+	if _, err := os.Stat(cmdFile); !os.IsNotExist(err) {
+		t.Errorf("the sendcmd file %s is left behind: %v", cmdFile, err)
 	}
 	tsv, _ := os.ReadFile(filepath.Join(out, "pano.tsv"))
 	if n := strings.Count(string(tsv), "\n"); n != 1+60 {
@@ -141,9 +203,14 @@ func TestPairMissing(t *testing.T) {
 }
 
 func TestFrameNames(t *testing.T) {
-	got, err := clockName("/x/VID_20261122_120701_00_001.insv", 905)
-	if err != nil || got != "12:22:06" {
-		t.Errorf("clockName = %q, %v; want 12:22:06", got, err)
+	for _, c := range []struct {
+		t    float64
+		want string
+	}{{905, "12:22:06.000"}, {1.5, "12:07:02.500"}, {0.0334, "12:07:01.033"}} {
+		got, err := clockName("/x/VID_20261122_120701_00_001.insv", c.t)
+		if err != nil || got != c.want {
+			t.Errorf("clockName(%v) = %q, %v; want %s", c.t, got, err, c.want)
+		}
 	}
 	if _, err := clockName("/x/clip_00_001.insv", 0); err == nil {
 		t.Error("a name with no start time gave a clock")
@@ -156,12 +223,31 @@ func TestUsage(t *testing.T) {
 		{"--every", "30s", "--video", "--out", "o", front},
 		{"--width", "1001", "--out", "o", front},
 		{"--mode", "spin", "--out", "o", front},
-		{"--every", "1.5s", "--out", "o", front},
+		{"--every", "0s", "--out", "o", front},
+		{"--centre", "side", "--out", "o", front},
 		{front},
 	} {
 		var stdout, stderr bytes.Buffer
 		if code := Main(context.Background(), args, &stdout, &stderr); code != 2 {
 			t.Errorf("%v: exit %d, want 2", args, code)
 		}
+	}
+}
+
+// A rotation turning 0.1° a frame is re-sent each time it has turned more
+// than the threshold from the last one sent.
+func TestResent(t *testing.T) {
+	rots := make([]Rot, 10)
+	for k := range rots {
+		rots[k].Roll = float64(k) * 0.1 * math.Pi / 180
+	}
+	var got []int
+	for k, s := range resent(rots, 0.25*math.Pi/180) {
+		if s {
+			got = append(got, k)
+		}
+	}
+	if fmt.Sprint(got) != "[0 3 6 9]" {
+		t.Errorf("sent at %v, want [0 3 6 9]", got)
 	}
 }
