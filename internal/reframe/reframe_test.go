@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/lockyc/plate/internal/enginetest"
 )
 
 func near(a, b float64) bool { return math.Abs(a-b) < 1e-9 }
@@ -48,12 +50,12 @@ func writePath(t *testing.T, body string) string {
 
 func TestLoadPathRefuses(t *testing.T) {
 	for body, want := range map[string]string{
-		"":                                    "no [[key]]",
+		"":                                     "no [[key]]",
 		"[[key]]\nt = 0\nyaw = 0\npitch = 0\n": "key 1 (t = 0) lacks fov",
 		"[[key]]\nt = 0\nyaw = 0\npitch = 0\nfov = 80\n[[key]]\nt = 0\nyaw = 1\npitch = 0\nfov = 80\n": "key 2 (t = 0) is not after",
-		"[[key]]\nt = 0\nyaw = 0\npitch = 95\nfov = 80\n":                                                "pitch 95",
-		"[[key]]\nt = 0\nyaw = 0\npitch = 0\nfov = 180\n":                                               "fov 180",
-		"[[key]]\nt = 0\nyaw = 0\npitch = 0\nfov = 80\nroll = 3\n":                                      "roll",
+		"[[key]]\nt = 0\nyaw = 0\npitch = 95\nfov = 80\n":                                              "pitch 95",
+		"[[key]]\nt = 0\nyaw = 0\npitch = 0\nfov = 180\n":                                              "fov 180",
+		"[[key]]\nt = 0\nyaw = 0\npitch = 0\nfov = 80\nroll = 3\n":                                     "roll",
 	} {
 		_, err := LoadPath(writePath(t, body))
 		if err == nil || !strings.Contains(err.Error(), want) {
@@ -100,5 +102,44 @@ func TestStillAt(t *testing.T) {
 	code, stderr = run(t, "--path", path, "--out", filepath.Join(t.TempDir(), "out.mp4"), img)
 	if code != 2 || !strings.Contains(stderr, "an image gives a still") {
 		t.Fatalf("mp4 from an image: exit %d: %s", code, stderr)
+	}
+}
+
+func TestCommandsSendOnlyChanges(t *testing.T) {
+	p := Path{{T: 1, Yaw: 0, Pitch: 0, FOV: 80}, {T: 2, Yaw: 30, Pitch: 0, FOV: 80}}
+	got := commands(p, []float64{0, 1, 1.5, 2, 2.5}, 1080, 1920, 2)
+	want := "1.375000 v360@view yaw 15.0000;\n1.875000 v360@view yaw 30.0000;\n"
+	if got != want {
+		t.Fatalf("commands =\n%s\nwant\n%s", got, want)
+	}
+	if got := commands(Path{{FOV: 80}}, []float64{0, 1}, 1080, 1920, 30); got != "" {
+		t.Fatalf("a fixed view sends %q", got)
+	}
+}
+
+func TestClipCutsAndKeepsSound(t *testing.T) {
+	enginetest.Stub(t, "ffprobe", `printf '{"streams":[{"width":2048,"height":1024,"r_frame_rate":"30/1","duration":"20.0"}]}'`)
+	mpeg := enginetest.Stub(t, "ffmpeg", `for a; do last=$a; done; printf x > "$last"`)
+	src := filepath.Join(t.TempDir(), "pano.mp4")
+	os.WriteFile(src, []byte("v"), 0o644)
+	path := writePath(t, "[[key]]\nt = 5\nyaw = 0\npitch = 0\nfov = 80\n[[key]]\nt = 15\nyaw = 90\npitch = 0\nfov = 80\n")
+	out := filepath.Join(t.TempDir(), "c.mp4")
+	if code, stderr := run(t, "--path", path, "--from", "5", "--to", "15", "--out", out, src); code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr)
+	}
+	a := strings.Join(enginetest.Calls(t, mpeg)[0], " ")
+	for _, want := range []string{"-ss 4.991667 -t 10.000000 -i " + src, "sendcmd=f=", "v360@view=e:flat:yaw=0.0000", "-map 0:a:0? -c:a copy", "-r 30/1"} {
+		if !strings.Contains(a, want) {
+			t.Errorf("argv lacks %q:\n%s", want, a)
+		}
+	}
+
+	late := writePath(t, "[[key]]\nt = 25\nyaw = 0\npitch = 0\nfov = 80\n")
+	if code, stderr := run(t, "--path", late, "--out", out, src); code != 1 || !strings.Contains(stderr, "key 1 (t = 25) is past the source's end at 20.000 s") {
+		t.Fatalf("a key past the end: exit %d: %s", code, stderr)
+	}
+	enginetest.Stub(t, "ffprobe", `printf '{"streams":[{"width":1920,"height":1080,"r_frame_rate":"30/1","duration":"20.0"}]}'`)
+	if code, stderr := run(t, "--path", path, "--out", out, src); code != 1 || !strings.Contains(stderr, "is 1920x1080, not a 2:1 equirect") {
+		t.Fatalf("a flat source: exit %d: %s", code, stderr)
 	}
 }

@@ -2225,3 +2225,23 @@ run    = ["count", "--track", "{tmp:run}", "--out", "{tmp:out}"]
 metric = "range"
 params = { tsv = "{tmp:out/distinct.tsv}", truth = 10 }
 max    = 2.0
+
+[[case]]
+name   = "reframe-aims"
+why    = "a view aimed at yaw 60, pitch 0 must look at what sits 60 degrees right of the equirect's centre on the horizon: the path's signs as v360 takes them"
+files  = { "path.toml" = "[[key]]\nt = 0\nyaw = 60\npitch = 0\nfov = 60\n" }
+setup  = [["magick", "-size", "2048x1024", "xc:#3a5a7a", "-fill", "#ff0000", "-draw", "circle 1365,512 1365,452", "{tmp:eq.png}"]]
+run    = ["reframe", "--path", "{tmp:path.toml}", "--size", "400x300", "--out", "{tmp:view.jpg}", "{tmp:eq.png}"]
+metric = "pixel"
+params = { image = "{tmp:view.jpg}", at = "0.5,0.5", color = "#ff0000" }
+max    = 0.05
+
+[[case]]
+name   = "reframe-keeps-sound"
+why    = "a clip cut with --from and --to from an equirect video with sound must keep the sound, trimmed with the picture to the cut's length"
+files  = { "path.toml" = "[[key]]\nt = 1\nyaw = 0\npitch = 0\nfov = 70\n[[key]]\nt = 4\nyaw = 40\npitch = -10\nfov = 60\n" }
+setup  = [["ffmpeg", "-f", "lavfi", "-i", "testsrc2=size=1024x512:rate=30:duration=6", "-f", "lavfi", "-i", "sine=frequency=440:duration=6", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", "{tmp:src.mp4}"]]
+run    = ["reframe", "--path", "{tmp:path.toml}", "--size", "360x640", "--from", "1", "--to", "4", "--out", "{tmp:cut.mp4}", "{tmp:src.mp4}"]
+metric = "av-length"
+params = { file = "{tmp:cut.mp4}", want = 3.0 }
+max    = 0.05

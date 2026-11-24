@@ -19,6 +19,7 @@ import (
 	"github.com/lockyc/plate/internal/cmm"
 	"github.com/lockyc/plate/internal/cmm/gsref"
 	"github.com/lockyc/plate/internal/diff"
+	"github.com/lockyc/plate/internal/engine"
 	"github.com/lockyc/plate/internal/imgsize"
 	"github.com/lockyc/plate/internal/raster"
 )
@@ -1063,4 +1064,56 @@ func readTSV(path string) ([][]string, error) {
 		}
 	}
 	return rows, nil
+}
+
+func init() {
+	Metrics["av-length"] = avLength
+}
+
+// avLength is the furthest, in seconds, that the video or the audio stream
+// of the media file `file` runs from `want` seconds: a cut whose sound was
+// kept and trimmed with its picture. A file with no audio stream is an
+// error, not a number.
+func avLength(p Params) (float64, error) {
+	path, err := p.Path("file")
+	if err != nil {
+		return 0, err
+	}
+	want, err := p.Float("want", 0)
+	if err != nil || want <= 0 {
+		return 0, fmt.Errorf("av-length: want a length in seconds")
+	}
+	res, err := engine.Run(context.Background(), engine.Cmd{Engine: "ffprobe", Inputs: []string{path}, Args: []string{"-v", "error",
+		"-show_entries", "stream=codec_type,duration", "-of", "json", path}})
+	if err != nil {
+		return 0, err
+	}
+	var probe struct {
+		Streams []struct {
+			Type     string `json:"codec_type"`
+			Duration string `json:"duration"`
+		} `json:"streams"`
+	}
+	if err := json.Unmarshal(res.Stdout, &probe); err != nil {
+		return 0, fmt.Errorf("av-length: %s: %w", path, err)
+	}
+	var worst float64
+	seen := map[string]bool{}
+	for _, s := range probe.Streams {
+		if s.Type != "video" && s.Type != "audio" {
+			continue
+		}
+		d, err := strconv.ParseFloat(s.Duration, 64)
+		if err != nil {
+			return 0, fmt.Errorf("av-length: %s: %s stream duration %q", path, s.Type, s.Duration)
+		}
+		seen[s.Type] = true
+		worst = math.Max(worst, math.Abs(d-want))
+	}
+	for _, t := range []string{"video", "audio"} {
+		if !seen[t] {
+			return 0, fmt.Errorf("av-length: %s has no %s stream", path, t)
+		}
+	}
+	return worst, nil
 }

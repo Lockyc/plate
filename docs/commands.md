@@ -44,6 +44,7 @@ creates pixels the source never had (see *Synthesis* at the end).
 | `walkthrough check` | Validates a walkthrough script and prints it normalised | `plate walkthrough check [--json] <script>` |
 | `walkthrough render` | Records a scripted tour of a live web app in headless Chrome, narrated by each step's audio file and captioned: MP4, poster, and a JSON of its measurements and step timings | `plate walkthrough render --script FILE --base-url URL [--warmup PATH]... --out DIR` |
 | `pano` | Stitches an Insta360 clip's two lens files into a level 360 equirect from its lens calibration and IMU: a JPEG every `--every`, named by wall-clock time to the millisecond, or one MP4 with the front file's sound, centred on the back lens unless `--centre front`, and each frame's rotation in `pano.tsv` | `plate pano [--every 30s \| --video] [--width 5760] [--mode level\|lock] [--centre back\|front] [--from 0] [--to end] --out <dir> <either .insv>` |
+| `reframe` | Cuts a flat view out of a 2:1 equirect along a keyframed path of yaw, pitch and field of view: from a video an MP4 with its sound, cut to `--from` and `--to`, or with `--at` a still; from an image a still | `plate reframe --path <path.toml> [--size 1080x1920] [--from 0] [--to end] [--at <s>] --out <out.mp4\|out.jpg\|out.png> <equirect video\|image>` |
 | `count` | Counts the people in photos and 360 equirect frames (a 2:1 frame is one unless `--equirect no`), leaving out the camera's holder below `--nadir-deg` and the sky above `--zenith-deg`: `counts.tsv` with, per frame, the people a detector boxed (`detected`), the people counted from the crowd density map (`density`) and their sum (`estimate`), each counted person's position in `points/<frame>.tsv`, and with `--marked` each frame dotted over its crowd density to check the count by eye, an equirect frame's views beside it. With `--track`, follows the people through a directory of `pano --every` frames and writes `track.tsv` (the people on screen at each time `t`) and `distinct.tsv`: how many different people passed as a range, `low` to `high`, with the `tracks` behind it and the `untracked_share` of people seen only in the crowd density, who are in neither | `plate count [--equirect auto\|yes\|no] [--nadir-deg 35] [--zenith-deg 30] [--marked] --out <dir> <image\|dir>...`, `plate count --track <pano-dir> [--min-seconds 3] --out <dir>` |
 | `fonts` | Embeds web fonts, from files or from Google Fonts by family name, into a CSS file so a page renders from the filesystem, optionally cut to the characters a language uses | `plate fonts [--display block] [--subset latin] [--google FAMILY:WEIGHT:STYLE]... -o fonts.css [FILE:FAMILY:WEIGHT:STYLE]...` |
 | `qr` | Makes a QR code SVG that any phone camera decodes | `plate qr [--ec L\|M\|Q\|H] [--fg RRGGBB] [--bg RRGGBB] -o out.svg <text>` |
@@ -302,6 +303,32 @@ holds the video's size, frame rate, frame count and duration, each file's
 size, its sharpness, and every step's `start_ms` and `end_ms` on the
 video's clock. The poster is the last frame of the first step. A render
 that fails leaves none of its name's earlier outputs behind.
+
+## `reframe`
+
+The path file is one or more `[[key]]` tables, each with `t` (seconds into
+the source, not the cut, so one path serves any `--from`), `yaw` (degrees
+right of the equirect's centre), `pitch` (degrees up) and `fov` (degrees
+across the output's width), in increasing `t`:
+
+```toml
+[[key]]
+t = 30
+yaw = 10
+pitch = -5
+fov = 70
+
+[[key]]
+t = 40
+yaw = -70
+pitch = -5
+fov = 70
+```
+
+Between two keys each value eases with smoothstep; the view holds at the
+first key before it and at the last after it, so one key is a fixed view.
+A key past the source's end is refused by name, as is a view wider than
+`maxFOV` (internal/reframe) across either side of the output. An image takes a one-key path.
 
 ## `generate` — making a pose
 
