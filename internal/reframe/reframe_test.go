@@ -22,6 +22,10 @@ func TestPathInterp(t *testing.T) {
 	if v := p.At(0.5); !near(v.Yaw, 14.0625) {
 		t.Fatalf("At(0.5).Yaw = %v, want 14.0625 (smoothstep)", v.Yaw)
 	}
+	wrap := Path{{T: 0, Yaw: 350, FOV: 80}, {T: 2, Yaw: 370, FOV: 80}}
+	if v := wrap.At(1); !near(v.Yaw, 360) {
+		t.Fatalf("350 to 370 at its midpoint: yaw %v, want 360 (the short way, through 0)", v.Yaw)
+	}
 	if v := p.At(-1); v != (View{0, 0, 80}) {
 		t.Fatalf("before the first key: %+v", v)
 	}

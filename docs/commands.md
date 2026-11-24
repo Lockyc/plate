@@ -327,8 +327,12 @@ fov = 70
 
 Between two keys each value eases with smoothstep; the view holds at the
 first key before it and at the last after it, so one key is a fixed view.
+Yaw eases literally between keys: 350 to 10 turns 340°; write 370 for the short way.
+
 A key past the source's end is refused by name, as is a view wider than
-`maxFOV` (internal/reframe) across either side of the output. An image takes a one-key path.
+`maxFOV` (internal/reframe) across either side of the output.
+
+An image takes a one-key path.
 
 ## `generate` — making a pose
 

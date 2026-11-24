@@ -37,7 +37,8 @@ path.toml is one or more keys, in time order:
   fov = 80     # degrees across the output's width
 
 Between keys each value eases with smoothstep; before the first key and
-after the last the view holds. One key is a fixed view.`
+after the last the view holds. One key is a fixed view.
+Yaw eases literally between keys: 350 to 10 turns 340°; write 370 for the short way.`
 
 // maxFOV is the widest a view may be across either side of the output, in
 // degrees: a flat view stretches its edges by 1/cos² of the half angle,
