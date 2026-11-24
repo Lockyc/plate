@@ -24,7 +24,10 @@ A person is counted one of two ways, never both:
 An equirect frame is read as perspective views, HFOV wide and VIEW px
 square, centred on RINGS. Each direction on the sphere is owned by the
 nearest view centre, and a box counts in the view that owns its head (the
-top tenth of the box), so a person two views see is counted once.
+top tenth of the box), so a person two views see is counted once; two boxes
+from different views whose heads are within DUP box heights of each other,
+of heights within DUP_SIZE of each other, are one person on the line between
+two owned regions, and the larger box is kept.
 Directions within --nadir-deg of straight down (the camera's holder) and
 --zenith-deg of straight up are owned by no view.
 
@@ -52,7 +55,7 @@ it by where their heads are on the sphere: one assignment minimising, per
 pair, the arc to the track's predicted place over the gate (GATE_MOVE body
 heights a second since the track was last seen, at least GATE_MIN degrees;
 a pair past the gate is never matched) plus APPEAR times how unlike their
-re-ID appearance is. A person unmatched starts a track; a track unseen for
+re-ID appearance is (a pair less alike than SIM_MIN is never matched). A person unmatched starts a track; a track unseen for
 LOST seconds ends. The density map is read every DENSITY_EVERY seconds and
 its part carried to the frames between. Writes DIR/track.tsv (t, on_screen:
 the estimate) and DIR/distinct.tsv:
@@ -108,12 +111,13 @@ DET_BATCH = 8  # views a detector run
 # a peak needs around it.
 CONF, TILE = 0.5, 1280
 PEAK, PEAK_WIN, CROWD, CROWD_R = 0.1, 5, 2, 16
+DUP, DUP_SIZE = 0.15, 1.25
 MEAN = np.array([0.485, 0.456, 0.406], np.float32)
 STD = np.array([0.229, 0.224, 0.225], np.float32)
 DET_DOT, DENS_DOT = (40, 220, 90), (235, 60, 220)
 # Tracking (see the docstring), fitted on the count-track-distinct quality
 # case and checked on real festival footage.
-GATE_MOVE, GATE_MIN, APPEAR, LOST = 1.5, 1.0, 1.0, 2.0
+GATE_MOVE, GATE_MIN, APPEAR, SIM_MIN, LOST = 1.5, 1.0, 1.0, 0.5, 2.0
 REID_SIM, MERGE_GAP, DENSITY_EVERY = 0.7, 60.0, 2.0
 REID_H, REID_W = 256, 128
 
@@ -393,9 +397,20 @@ def read_equirect(img, views, det, dens, density=True):
     v = views.read(img)
     boxes = det.views(v)
     maps = dens.views(v) if density else [None] * len(v)
+    # a person on the line between two views' owned regions can have their head on either side
+    # of it in each view's box: keep the larger box of two from different views whose heads are
+    # within DUP of the box height apart and whose heights differ by under DUP_SIZE
+    found = sorted(
+        ((size_deg(views, i, b), i, b, views.lonlat(i, *head(b)[:2])) for i in range(len(v)) for b in boxes[i] if views.owns(i, *head(b)[:2])),
+        key=lambda f: -f[0],
+    )
+    kept = []
+    for s, i, b, (lon, lat) in found:
+        if not any(j != i and arc(lon, lat, lo, la) < DUP * s2 and s2 / s < DUP_SIZE for s2, j, _, (lo, la) in kept):
+            kept.append((s, i, b, (lon, lat)))
     per_view, pts = [], []
     for i in range(len(v)):
-        counted = [b for b in boxes[i] if views.owns(i, *head(b)[:2])]
+        counted = [b for _, j, b, _ in kept if j == i]
         people = [head(b) for b in counted]
         if density:
             people += crowd(maps[i], views.cells[i], boxes[i], dens.red)
@@ -484,7 +499,7 @@ class Tracker:
             size = np.maximum(np.array([tr.size for tr in self.alive])[:, None], np.array([p[2] for p in people])[None])
             gate = np.maximum(GATE_MIN, GATE_MOVE * size * np.array([t - tr.last for tr in self.alive])[:, None])
             sim = np.stack([tr.appearance() for tr in self.alive]) @ np.stack([p[3] for p in people]).T
-            cost = np.where(d <= gate, d / gate + APPEAR * (1 - sim), 1e6)
+            cost = np.where((d <= gate) & (sim >= SIM_MIN), d / gate + APPEAR * (1 - sim), 1e6)
             for a, b in zip(*linear_sum_assignment(cost)):
                 if cost[a, b] < 1e6:
                     self.alive[a].update(t, *people[b])

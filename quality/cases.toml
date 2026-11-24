@@ -2216,3 +2216,12 @@ run    = ["count", "--nadir-deg", "0", "--zenith-deg", "0", "--out", "{tmp:out}"
 metric = "count"
 params = { tsv = "{tmp:out/counts.tsv}", truth = "{asset:crowd-empty.points.tsv}", frame = "blank" }
 max    = 0.5
+
+[[case]]
+name   = "count-track-distinct"
+why    = "ten people walking a 360 run, two crossing and two leaving and coming back, must come out as a range of distinct people that holds ten and is at most 4 wide: tracking alone counts a returner twice, and joining by appearance must not fold different people together"
+setup  = [["track-walkers", "{asset:crowd-equirect-holder.jpg}", "{asset:track-walkers.png}", "{tmp:run}"]]
+run    = ["count", "--track", "{tmp:run}", "--out", "{tmp:out}"]
+metric = "range"
+params = { tsv = "{tmp:out/distinct.tsv}", truth = 10 }
+max    = 4.0
