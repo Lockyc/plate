@@ -11,8 +11,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lockyc/plate/internal/enginetest"
+	"github.com/lockyc/plate/internal/chrometest"
 )
+
+func TestMain(m *testing.M) { chrometest.Main(m) }
 
 func captionHTML(t *testing.T, text, css string) string {
 	t.Helper()
@@ -59,13 +61,7 @@ func TestRenderSpritesUsesPNGAlpha(t *testing.T) {
 		f.Close()
 	}
 	t.Setenv("FIXTURE_DIR", fix)
-	log := enginetest.Stub(t, "chrome-headless-shell", `for a in "$@"; do
-  case "$a" in
-    --window-size=*) size=$(echo "${a#--window-size=}" | tr , x) ;;
-    --screenshot=*) out="${a#--screenshot=}" ;;
-  esac
-done
-cp "$FIXTURE_DIR/$size.png" "$out"`)
+	fake := chrometest.Stub(t)
 	specs := []SpriteSpec{
 		{Key: "caption-0", Kind: "caption", Text: "Tap", W: 60, H: 104, RegionH: 90, Scale: 1},
 		{Key: "tap", Kind: "tap", W: 52, H: 52, Scale: 1.15},
@@ -75,16 +71,25 @@ cp "$FIXTURE_DIR/$size.png" "$out"`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	calls := enginetest.Calls(t, log)
-	if len(calls) != len(specs) || len(imgs) != len(specs) {
-		t.Fatalf("%d chrome calls, %d images, want %d", len(calls), len(imgs), len(specs))
+	if n := fake.Starts(t); n != len(specs) || len(imgs) != len(specs) {
+		t.Fatalf("%d chrome starts, %d images, want %d", n, len(imgs), len(specs))
+	}
+	var captured []string
+	transparent := 0
+	for _, c := range fake.Calls(t) {
+		switch c.Method {
+		case "Emulation.setDeviceMetricsOverride":
+			captured = append(captured, fmt.Sprintf("%vx%v", c.Params["width"], c.Params["height"]))
+		case "Emulation.setDefaultBackgroundColorOverride":
+			transparent++
+		}
+	}
+	if transparent != len(specs) {
+		t.Errorf("%d transparent captures, want %d", transparent, len(specs))
 	}
 	for i, sp := range specs {
-		args := strings.Join(calls[i], " ")
-		for _, want := range []string{"--default-background-color=00000000", fmt.Sprintf("--window-size=%d,%d", sp.W, sp.H)} {
-			if !strings.Contains(args, want) {
-				t.Errorf("call %d lacks %s: %s", i, want, args)
-			}
+		if want := fmt.Sprintf("%dx%d", sp.W, sp.H); i >= len(captured) || captured[i] != want {
+			t.Errorf("capture %d: sizes %v, want %s", i, captured, want)
 		}
 		if b := imgs[sp.Key].Bounds(); b.Dx() != sp.W || b.Dy() != sp.H {
 			t.Errorf("%s image is %v", sp.Key, b)

@@ -13,35 +13,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lockyc/plate/internal/chrometest"
 	"github.com/lockyc/plate/internal/enginetest"
 	"github.com/lockyc/plate/internal/raster"
 )
 
-const chromeStub = `for a in "$@"; do
-  case "$a" in
-    --screenshot=*) [ -n "$FIXTURE_PNG" ] && cp "$FIXTURE_PNG" "${a#--screenshot=}" ;;
-    --print-to-pdf=*) printf '%%PDF-1.4 stub' > "${a#--print-to-pdf=}" ;;
-    --dump-dom) printf '%s' "$FIXTURE_DOM" ;;
-    --proxy-server=*) proxy="${a#--proxy-server=}" ;;
-  esac
-done
-page=
-for a in "$@"; do page=$a; done
-[ -n "$proxy" ] && curl -s -o /dev/null -x "$proxy" "$page"
-origin=$(printf '%s' "$page" | sed -E 's|^(http://[^/]+).*|\1|')
-load() {
-  for p in $FIXTURE_LOADS; do
-    [ -n "$proxy" ] && curl -s -o /dev/null -x "$proxy" "$origin$p"
-  done
-}
-load
-for u in $FIXTURE_URLS; do
-  [ -n "$proxy" ] && curl -s -o /dev/null -x "$proxy" "$u"
-done
-[ -n "$FIXTURE_STDERR" ] && printf '%s\n' "$FIXTURE_STDERR" >&2
-[ -n "$FIXTURE_AFTER" ] && sh -c "$FIXTURE_AFTER"
-[ -n "$FIXTURE_RELOAD" ] && load
-exit ${CHROME_EXIT:-0}`
+func TestMain(m *testing.M) { chrometest.Main(m) }
 
 func fixturePNG(t *testing.T, w, h int) string {
 	t.Helper()
@@ -53,13 +30,15 @@ func fixturePNG(t *testing.T, w, h int) string {
 }
 
 type env struct {
-	chrome, dir, page string
+	chrome, dir, page string // chrome is the log of Chrome's starts
+	fake              chrometest.Fake
 	stdout, stderr    bytes.Buffer
 }
 
 func setup(t *testing.T, fixW, fixH int) *env {
 	t.Helper()
-	e := &env{chrome: enginetest.Stub(t, "chrome-headless-shell", chromeStub), dir: t.TempDir()}
+	fake := chrometest.Stub(t)
+	e := &env{chrome: fake.Launches, fake: fake, dir: t.TempDir()}
 	t.Setenv("FIXTURE_PNG", fixturePNG(t, fixW, fixH))
 	t.Setenv("FIXTURE_DOM", "<html><body>fine</body></html>")
 	t.Setenv("CHROME_EXIT", "0")
@@ -87,13 +66,19 @@ func TestRenderPNG(t *testing.T) {
 		t.Errorf("DPI %v, want 192", d)
 	}
 	calls := enginetest.Calls(t, e.chrome)
-	if len(calls) != 1 || slices.Contains(calls[0], "--dump-dom") {
-		t.Fatalf("chrome calls %q, want 1 without --dump-dom (no --fail-if)", calls)
+	if len(calls) != 1 || e.dumped(t) {
+		t.Fatalf("chrome started %d times, dumped the DOM %v; want once without a dump (no --fail-if)", len(calls), e.dumped(t))
 	}
-	for _, want := range []string{"--window-size=100,50", "--force-device-scale-factor=2", "--virtual-time-budget=5000", "--hide-scrollbars", "--proxy-bypass-list=<-loopback>"} {
+	for _, want := range []string{"--hide-scrollbars", "--proxy-bypass-list=<-loopback>"} {
 		if !slices.Contains(calls[0], want) {
 			t.Errorf("chrome args lack %s: %q", want, calls[0])
 		}
+	}
+	if p := e.call(t, "Emulation.setDeviceMetricsOverride").Params; p["width"] != 100.0 || p["height"] != 50.0 || p["deviceScaleFactor"] != 2.0 {
+		t.Errorf("viewport %v, want 100x50 at scale 2", p)
+	}
+	if p := e.call(t, "Emulation.setVirtualTimePolicy").Params; p["budget"] != 5000.0 || p["policy"] != "pauseIfNetworkFetchesPending" {
+		t.Errorf("virtual time %v, want a 5000 ms budget paused on fetches", p)
 	}
 	for _, a := range calls[0] {
 		if strings.HasPrefix(a, "--user-data-dir") {
@@ -176,8 +161,8 @@ func TestRenderFailIfDOM(t *testing.T) {
 	if !strings.Contains(e.stderr.String(), `"could not be read"`) || exists(e.out("p.png")) {
 		t.Errorf("stderr %q", e.stderr.String())
 	}
-	if calls := enginetest.Calls(t, e.chrome); len(calls) != 1 || !slices.Contains(calls[0], "--dump-dom") {
-		t.Errorf("chrome calls %q, want one screenshot that also dumps the DOM", calls)
+	if n := len(enginetest.Calls(t, e.chrome)); n != 1 || !e.dumped(t) {
+		t.Errorf("chrome started %d times, dumped the DOM %v; want one screenshot that also dumps the DOM", n, e.dumped(t))
 	}
 }
 
@@ -186,8 +171,67 @@ func TestRenderPDF(t *testing.T) {
 	if code := e.run("--size", "1200x900", "--pdf", e.out("p.pdf"), e.page); code != 0 {
 		t.Fatalf("code %d: %s", code, e.stderr.String())
 	}
-	if !slices.Contains(enginetest.Calls(t, e.chrome)[0], "--no-pdf-header-footer") {
-		t.Error("PDF printed with header and footer")
+	p := e.call(t, "Page.printToPDF").Params
+	if p["displayHeaderFooter"] != false || p["printBackground"] != true || p["preferCSSPageSize"] != true {
+		t.Errorf("printed with %v, want backgrounds and the page's @page size, without header and footer", p)
+	}
+}
+
+// TestCaptureWaitsForSettle: every capture, screenshot, print or DOM, is
+// taken once the page has nothing pending and has been painted since.
+func TestCaptureWaitsForSettle(t *testing.T) {
+	for name, c := range map[string]struct {
+		args    []string
+		capture string
+	}{
+		"png":  {[]string{"--size", "100x50", "--scale", "2", "--png"}, "Page.captureScreenshot"},
+		"pdf":  {[]string{"--pdf"}, "Page.printToPDF"},
+		"html": {[]string{"--html"}, "Runtime.evaluate"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := setup(t, 200, 100)
+			t.Setenv("PDF_BOX", "75 x 37.5 pts")
+			if code := e.run(append(c.args, e.out("p."+name), e.page)...); code != 0 {
+				t.Fatalf("code %d: %s", code, e.stderr.String())
+			}
+			var order []string
+			for _, call := range e.fake.Calls(t) {
+				expr, _ := call.Params["expression"].(string)
+				switch {
+				case call.Method == "Page.navigate", call.Method == "Emulation.setVirtualTimePolicy":
+					order = append(order, call.Method)
+				case strings.Contains(expr, "__plateSettle.pending"):
+					order = append(order, "pending")
+				case strings.Contains(expr, "__plateSettle.painted"):
+					order = append(order, "painted")
+				case call.Method == c.capture && (c.capture != "Runtime.evaluate" || strings.Contains(expr, "outerHTML")):
+					order = append(order, "capture")
+				}
+			}
+			want := []string{"Page.navigate", "Emulation.setVirtualTimePolicy", "pending", "painted", "pending", "capture"}
+			if !slices.Equal(order, want) {
+				t.Errorf("calls %q, want %q", order, want)
+			}
+			if p := e.call(t, "Page.addScriptToEvaluateOnNewDocument").Params; p["source"] != SettleJS {
+				t.Error("settle.js was not added to every document")
+			}
+		})
+	}
+}
+
+// TestRenderRefusesUnsettledPage: a page still loading something once the
+// budget has run fails, naming what, and leaves no output.
+func TestRenderRefusesUnsettledPage(t *testing.T) {
+	e := setup(t, 200, 100)
+	t.Setenv("FIXTURE_PENDING", "fonts,img /late.png")
+	if code := e.run("--budget", "50", "--size", "100x50", "--scale", "2", "--png", e.out("p.png"), e.page); code != 1 {
+		t.Fatalf("code %d", code)
+	}
+	if s := e.stderr.String(); !strings.Contains(s, "page not settled after 50 ms: fonts, img /late.png") {
+		t.Errorf("stderr %q", s)
+	}
+	if exists(e.out("p.png")) {
+		t.Error("an unsettled page's screenshot was written")
 	}
 }
 
@@ -377,9 +421,8 @@ func TestRenderTransparent(t *testing.T) {
 	if code := e.run("--size", "100x50", "--scale", "2", "--transparent", "--png", e.out("p.png"), e.page); code != 0 {
 		t.Fatalf("code %d: %s", code, e.stderr.String())
 	}
-	calls := enginetest.Calls(t, e.chrome)
-	if len(calls) != 1 || !slices.Contains(calls[0], "--default-background-color=00000000") {
-		t.Fatalf("chrome calls %q, want one with a transparent default background", calls)
+	if n := len(enginetest.Calls(t, e.chrome)); n != 1 || !e.transparent(t) {
+		t.Fatalf("chrome started %d times, transparent %v; want once with a transparent default background", n, e.transparent(t))
 	}
 }
 
@@ -388,11 +431,45 @@ func TestRenderOpaqueByDefault(t *testing.T) {
 	if code := e.run("--size", "100x50", "--scale", "2", "--png", e.out("p.png"), e.page); code != 0 {
 		t.Fatalf("code %d: %s", code, e.stderr.String())
 	}
-	for _, a := range enginetest.Calls(t, e.chrome)[0] {
-		if strings.HasPrefix(a, "--default-background-color") {
-			t.Errorf("chrome given %s without --transparent", a)
+	if slices.Contains(e.fake.Methods(t), "Emulation.setDefaultBackgroundColorOverride") {
+		t.Error("chrome's background overridden without --transparent")
+	}
+}
+
+// transparent reports whether Chrome was given a transparent default
+// background.
+func (e *env) transparent(t *testing.T) bool {
+	t.Helper()
+	for _, c := range e.fake.Calls(t) {
+		if c.Method == "Emulation.setDefaultBackgroundColorOverride" {
+			col, _ := c.Params["color"].(map[string]any)
+			return col["a"] == 0.0
 		}
 	}
+	return false
+}
+
+// dumped reports whether the page's DOM was read.
+func (e *env) dumped(t *testing.T) bool {
+	t.Helper()
+	for _, c := range e.fake.Calls(t) {
+		if expr, _ := c.Params["expression"].(string); strings.Contains(expr, "outerHTML") {
+			return true
+		}
+	}
+	return false
+}
+
+// call is the first protocol call to method.
+func (e *env) call(t *testing.T, method string) chrometest.Call {
+	t.Helper()
+	for _, c := range e.fake.Calls(t) {
+		if c.Method == method {
+			return c
+		}
+	}
+	t.Fatalf("no %s call in %q", method, e.fake.Methods(t))
+	return chrometest.Call{}
 }
 
 func TestRenderTransparentRefusesOpaqueResult(t *testing.T) {
@@ -510,8 +587,8 @@ func TestRenderPDFFailIfReadsDOM(t *testing.T) {
 	if !strings.Contains(e.stderr.String(), `data-source-error=\"yes\"`) || exists(e.out("p.pdf")) {
 		t.Errorf("stderr %q, pdf left: %v", e.stderr.String(), exists(e.out("p.pdf")))
 	}
-	if calls := enginetest.Calls(t, e.chrome); len(calls) != 1 || !slices.Contains(calls[0], "--dump-dom") {
-		t.Errorf("chrome calls %q, want one print that also dumps the DOM", calls)
+	if n := len(enginetest.Calls(t, e.chrome)); n != 1 || !e.dumped(t) {
+		t.Errorf("chrome started %d times, dumped the DOM %v; want one print that also dumps the DOM", n, e.dumped(t))
 	}
 }
 
@@ -522,8 +599,7 @@ func TestRenderPageURLIsPlateOrigin(t *testing.T) {
 	if code := e.run("--pdf", e.out("p.pdf"), arg); code != 0 {
 		t.Fatalf("code %d: %s", code, e.stderr.String())
 	}
-	args := chromeArgs(t, e)
-	last := args[len(args)-1]
+	last, _ := e.call(t, "Page.navigate").Params["url"].(string)
 	u, err := url.Parse(last)
 	if err != nil || !strings.HasSuffix(u.Hostname(), ".plate.invalid") || !strings.HasSuffix(last, "page.html?x=1") {
 		t.Errorf("page URL = %q", last)
@@ -643,8 +719,8 @@ func TestPNGAlphaIsTransparent(t *testing.T) {
 	if err := PNGAlpha(context.Background(), e.page, e.out("a.png"), 100, 50, 2); err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Contains(chromeArgs(t, e), "--default-background-color=00000000") {
-		t.Errorf("chrome args %q lack the transparent background", chromeArgs(t, e))
+	if !e.transparent(t) {
+		t.Error("chrome not given a transparent background")
 	}
 }
 

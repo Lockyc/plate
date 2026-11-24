@@ -15,11 +15,15 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lockyc/plate/internal/chrometest"
 	"github.com/lockyc/plate/internal/enginetest"
 )
 
+func TestMain(m *testing.M) { chrometest.Main(m) }
+
 // stubChrome answers each screenshot with a mostly transparent PNG of the
-// window's size, as render.PNGAlpha requires.
+// viewport's size, as render.PNGAlpha requires, and returns the log of
+// Chrome's starts.
 func stubChrome(t *testing.T) string {
 	t.Helper()
 	fix := t.TempDir()
@@ -31,13 +35,7 @@ func stubChrome(t *testing.T) string {
 		f.Close()
 	}
 	t.Setenv("FIXTURE_DIR", fix)
-	return enginetest.Stub(t, "chrome-headless-shell", `for a in "$@"; do
-  case "$a" in
-    --window-size=*) size=$(echo "${a#--window-size=}" | tr , x) ;;
-    --screenshot=*) out="${a#--screenshot=}" ;;
-  esac
-done
-cp "$FIXTURE_DIR/$size.png" "$out"`)
+	return chrometest.Stub(t).Launches
 }
 
 func tile(t *testing.T) string {

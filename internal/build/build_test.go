@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lockyc/plate/internal/chrometest"
 	"github.com/lockyc/plate/internal/engine"
 	"github.com/lockyc/plate/internal/enginetest"
 	"github.com/lockyc/plate/internal/pdf"
@@ -22,41 +23,18 @@ import (
 	"github.com/lockyc/plate/internal/render"
 )
 
-// chromeStub writes the fixture as the screenshot and fetches the page
-// through plate's proxy, as Chrome does, so the render cache can record it.
-const chromeStub = `for a in "$@"; do
-  case "$a" in
-    --screenshot=*) cp "$FIXTURE_PNG" "${a#--screenshot=}" ;;
-    --print-to-pdf=*) cp "$FIXTURE_PDF" "${a#--print-to-pdf=}" ;;
-    --proxy-server=*) proxy="${a#--proxy-server=}" ;;
-  esac
-done
-page=
-for a in "$@"; do page=$a; done
-[ -n "$proxy" ] && curl -s -o /dev/null -x "$proxy" "$page"
-origin=$(printf '%s' "$page" | sed -E 's|^(http://[^/]+).*|\1|')
-for p in $FIXTURE_LOADS; do
-  [ -n "$proxy" ] && curl -s -o /dev/null -x "$proxy" "$origin$p"
-done
-for u in $FIXTURE_URLS; do
-  [ -n "$proxy" ] && curl -s -o /dev/null -x "$proxy" "$u"
-done
-if [ -n "$CANCEL_URL" ]; then
-  curl -s -o /dev/null "$CANCEL_URL"
-  sleep 30
-fi
-exit 0`
-
 type env struct {
-	chrome, dir, manifest string
+	chrome, dir, manifest string // chrome is the log of Chrome's starts
+	fake                  chrometest.Fake
 	stdout, stderr        bytes.Buffer
 }
 
 // setup writes a manifest of PNG targets, one per name, each with its own
-// page, under a stub Chrome and a private render cache.
+// page, under a fake Chrome and a private render cache.
 func setup(t *testing.T, names ...string) *env {
 	t.Helper()
-	e := &env{chrome: enginetest.Stub(t, "chrome-headless-shell", chromeStub), dir: t.TempDir()}
+	fake := chrometest.Stub(t)
+	e := &env{chrome: fake.Launches, fake: fake, dir: t.TempDir()}
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	t.Setenv("SOURCE_DATE_EPOCH", "")
 	t.Setenv("FIXTURE_URLS", "")
@@ -199,9 +177,14 @@ func TestBuildQueryPageInSpacedDir(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "dist", "q.png")); err != nil {
 		t.Error(err)
 	}
-	calls := enginetest.Calls(t, e.chrome)
-	if len(calls) != 1 || !strings.HasSuffix(calls[0][len(calls[0])-1], "?m=date") {
-		t.Errorf("chrome calls %q", calls)
+	var navs []string
+	for _, c := range e.fake.Calls(t) {
+		if c.Method == "Page.navigate" {
+			navs = append(navs, c.Params["url"].(string))
+		}
+	}
+	if len(navs) != 1 || !strings.HasSuffix(navs[0], "?m=date") {
+		t.Errorf("chrome loaded %q", navs)
 	}
 }
 

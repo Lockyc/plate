@@ -10,7 +10,8 @@
     // A cross-origin parent: the top frame refuses this frame at its seek.
   }
   let seeks = 0;
-  let budget = 5000; // ms a video may take to show a frame; settle sets it
+  let budget = 5000; // ms a video may take to show a frame; setBudget sets it
+  const { srcOf, unready } = window.__plateSettle; // render's settle.js, installed first
   const realSetTimeout = window.setTimeout.bind(window);
   const realRAF = window.requestAnimationFrame.bind(window);
   const painted = () => new Promise((r) => realRAF(() => realRAF(r)));
@@ -442,12 +443,6 @@
     return nativeRemoveAttribute.call(this, name);
   };
 
-  const srcOf = (el) =>
-    el.getAttribute("src") || el.querySelector("source")?.getAttribute("src") || el.currentSrc;
-  // unready names a video without a frame, marking preload="none": plate
-  // never plays a video natively, so such a video never loads.
-  const unready = (el) => srcOf(el) + (el.preload === "none" ? ' (preload="none")' : "");
-
   // ready resolves true once el has a frame to show (or an error to
   // report), false after budget ms.
   const ready = (el) =>
@@ -584,29 +579,9 @@
     return out;
   };
 
-  const pending = () => {
-    const p = [];
-    if (document.readyState !== "complete") p.push("load event");
-    if (document.fonts.status !== "loaded") p.push("fonts");
-    for (const img of document.images) if (!img.complete) p.push("img " + (img.currentSrc || img.src));
-    for (const v of document.querySelectorAll("video")) {
-      if (!v.error && v.readyState < 2) p.push("video " + unready(v));
-    }
-    for (const f of document.querySelectorAll("iframe")) {
-      try {
-        const child = f.contentWindow?.__plate;
-        if (child) p.push(...child.pending().map((s) => `${s} in iframe ${f.src}`));
-      } catch {
-        // Cross-origin: seek refuses it.
-      }
-    }
-    return p;
-  };
-
   window.__plate = {
     now: () => now,
     seekFrame,
-    pending,
 
     // seek moves the clock to t ms and resolves once every frame shows it:
     // media errors, videos without a frame, and cross-origin iframes.
@@ -614,20 +589,9 @@
       return seekFrame(t, seeks++ === 0);
     },
 
-    // settle resolves with what is still loading: nothing once the page has
-    // loaded, or what is pending after ms; ms is also how long a seek waits
-    // for a video's frame.
-    settle(ms) {
+    // setBudget sets how long, in ms, a seek waits for a video's frame.
+    setBudget(ms) {
       budget = ms;
-      const end = RealDate.now() + ms;
-      return new Promise((resolve) => {
-        const poll = () => {
-          const p = pending();
-          if (!p.length || RealDate.now() >= end) resolve(p);
-          else realSetTimeout(poll, 10);
-        };
-        poll();
-      });
     },
   };
 })();

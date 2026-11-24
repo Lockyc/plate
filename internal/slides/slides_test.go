@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"image"
 	"image/png"
 	"net/http"
@@ -14,7 +15,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lockyc/plate/internal/enginetest"
+	"github.com/lockyc/plate/internal/chrometest"
 	"github.com/lockyc/plate/internal/fonts"
 )
 
@@ -195,14 +196,12 @@ func TestPick(t *testing.T) {
 	}
 }
 
-const chromeStub = `for a in "$@"; do
-  case "$a" in --screenshot=*) cp "$FIXTURE_PNG" "${a#--screenshot=}" ;; esac
-done`
+func TestMain(m *testing.M) { chrometest.Main(m) }
 
 // commandSetup stubs Chrome and fills plate's font cache, so nothing asks
 // Google, and writes deckJSON with its picture served by pic. It returns the
-// temporary directory, the deck and the Chrome call log.
-func commandSetup(t *testing.T, pic http.HandlerFunc) (dir, deck, chrome string) {
+// temporary directory, the deck and the fake Chrome.
+func commandSetup(t *testing.T, pic http.HandlerFunc) (dir, deck string, chrome chrometest.Fake) {
 	t.Helper()
 	dir = t.TempDir()
 	fix := filepath.Join(dir, "fixture.png")
@@ -210,7 +209,7 @@ func commandSetup(t *testing.T, pic http.HandlerFunc) (dir, deck, chrome string)
 	png.Encode(f, image.NewRGBA(image.Rect(0, 0, 720, 405)))
 	f.Close()
 	t.Setenv("FIXTURE_PNG", fix)
-	chrome = enginetest.Stub(t, "chrome-headless-shell", chromeStub)
+	chrome = chrometest.Stub(t)
 	cache := filepath.Join(dir, "cache")
 	t.Setenv("XDG_CACHE_HOME", cache)
 	os.MkdirAll(filepath.Join(cache, "plate", "google-fonts"), 0o755)
@@ -253,8 +252,14 @@ func TestCommand(t *testing.T) {
 	if b, _ := os.ReadFile(filepath.Join(out, name)); string(b) != "PICTURE" || pics != 1 {
 		t.Errorf("picture %s: %q after %d fetches", name, b, pics)
 	}
-	if calls := enginetest.Calls(t, chrome); len(calls) != 1 || !slices.Contains(calls[0], "--window-size=720,405") {
-		t.Errorf("chrome calls %q", calls)
+	var sizes []string
+	for _, c := range chrome.Calls(t) {
+		if c.Method == "Emulation.setDeviceMetricsOverride" {
+			sizes = append(sizes, fmt.Sprintf("%vx%v", c.Params["width"], c.Params["height"]))
+		}
+	}
+	if n := chrome.Starts(t); n != 1 || !slices.Equal(sizes, []string{"720x405"}) {
+		t.Errorf("chrome started %d times, captured at %v; want once at 720x405", n, sizes)
 	}
 
 	// A second run into the same directory is refused, not mixed in.

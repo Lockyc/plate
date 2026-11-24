@@ -9,18 +9,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lockyc/plate/internal/chrometest"
 	"github.com/lockyc/plate/internal/enginetest"
 	"github.com/lockyc/plate/internal/render"
 )
 
-// chromeStub writes the PDF and fetches the page it was given (the last
-// argument, served by plate's proxy) to $CAPTURE.
-const chromeStub = `for a in "$@"; do
-  case "$a" in --print-to-pdf=*) printf '%%PDF-1.4 stub' > "${a#--print-to-pdf=}" ;; esac
-  case "$a" in --proxy-server=*) proxy=${a#--proxy-server=} ;; esac
-  page=$a
-done
-curl -s -x "$proxy" -o "$CAPTURE" "$page"`
+func TestMain(m *testing.M) { chrometest.Main(m) }
 
 // pandocStub writes a standalone page to the path after -o.
 const pandocStub = `while [ "$1" != "-o" ]; do shift; done
@@ -35,8 +29,10 @@ func setup(t *testing.T) *env {
 	t.Helper()
 	e := &env{dir: t.TempDir()}
 	e.capture = filepath.Join(e.dir, "captured.html")
-	t.Setenv("CAPTURE", e.capture)
-	e.chrome = enginetest.Stub(t, "chrome-headless-shell", chromeStub)
+	// The fake Chrome writes the page it was served there, and its
+	// stylesheet beside it.
+	t.Setenv("FIXTURE_CAPTURE", e.capture)
+	e.chrome = chrometest.Stub(t).Launches
 	e.pandoc = enginetest.Stub(t, "pandoc", pandocStub)
 	return e
 }
@@ -91,10 +87,6 @@ func TestMarkdownGoesThroughPandocWithTheDefaultLook(t *testing.T) {
 // The default stylesheet the staged page links is the embedded one.
 func TestDefaultStylesheetIsLinked(t *testing.T) {
 	e := setup(t)
-	enginetest.Stub(t, "chrome-headless-shell", chromeStub+`
-origin=$(printf '%s' "$page" | sed -E 's|^(http://[^/]+).*|\1|')
-css=$origin$(sed -n 's|.*<link rel="stylesheet" href="\(/[^"]*\)">.*|\1|p' "$CAPTURE")
-curl -s -x "$proxy" -o "$CAPTURE.css" "$css"`)
 	in := e.write("a.html", "<html><head></head><body></body></html>")
 	if code := e.run(in, filepath.Join(e.dir, "a.pdf")); code != 0 {
 		t.Fatalf("code %d: %s", code, e.stderr.String())

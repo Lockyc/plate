@@ -14,7 +14,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lockyc/plate/internal/enginetest"
+	"github.com/lockyc/plate/internal/chrometest"
 	"pgregory.net/rapid"
 )
 
@@ -212,14 +212,6 @@ func (m *ownership) check(t *rapid.T) {
 	}
 }
 
-// failStub is chromeStub that fails, writing nothing, for a page whose name
-// FIXTURE_FAIL lists, and prints a page for --dump-dom.
-const failStub = `for a in "$@"; do page=$a; done
-n=${page##*/}; n=${n%%.html*}
-for f in $FIXTURE_FAIL; do [ "$f" = "$n" ] && exit 1; done
-for a in "$@"; do [ "$a" = --dump-dom ] && printf '<html>%s</html>' "$n"; done
-` + chromeStub
-
 // TestBuildNeverRemovesForeignFiles builds a random manifest (lines with
 // any of pdf, png, jpeg and html, 2up, marks and back=) over a file under
 // each line's name that plate never writes, then edits it, plants more such
@@ -229,7 +221,7 @@ for a in "$@"; do [ "$a" = --dump-dom ] && printf '<html>%s</html>' "$n"; done
 func TestBuildNeverRemovesForeignFiles(t *testing.T) {
 	needPDFEngines(t)
 	setup(t)
-	enginetest.Stub(t, "chrome-headless-shell", failStub)
+	// Chrome fails, writing nothing, for a page whose name FIXTURE_FAIL lists.
 	t.Setenv("FIXTURE_PDF", twoA5)
 	t.Setenv("FIXTURE_FAIL", "")
 	fix := filepath.Join(t.TempDir(), "page.png")
@@ -270,6 +262,7 @@ func TestBuildNeverRemovesForeignFiles(t *testing.T) {
 // RAPID_CHECKS asks for more: every build runs qpdf for 2up, marks and
 // duplex, so rapid's default 100 would add twenty seconds to the gate.
 func TestMain(m *testing.M) {
+	chrometest.ServeIfFake()
 	flag.Parse()
 	set := os.Getenv("RAPID_CHECKS") != ""
 	flag.Visit(func(f *flag.Flag) { set = set || f.Name == "rapid.checks" })

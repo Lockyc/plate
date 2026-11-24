@@ -53,6 +53,7 @@ internal/count/      `count`: people per photo or equirect frame, through
                      internal/ml/scripts/count.py
 internal/tsv/        the one reader of plate's header-indexed TSV tables
 internal/enginetest/ sh stubs that stand in for engines in tests
+internal/chrometest/ the fake Chrome tests drive over the debugging pipe
 internal/pins/       the one table of engine versions and hosted image models
 internal/pdf/        PDF page count, page boxes and text through poppler; the
                      pdf command; pinning a written PDF's dates
@@ -165,7 +166,11 @@ colours, or renders what it is given.
   `$XDG_CACHE_HOME/plate/render/`, named by `render.cacheKey`, and the next
   run with that key skips Chrome while
   every input and output keeps its hash. A remote page or an external load is
-  never cached, nor are `render.PDF` and `render.PNG`. Each output is written,
+  never cached, nor are `render.PDF` and `render.PNG`. Each capture
+  (screenshot, print, DOM) drives Chrome over the debugging pipe
+  (`render.job.capture`): the page loads, the budget runs on virtual time,
+  and then `render.Settle` waits on `settle.js`, the one test of a settled
+  page, which `animate` waits on too. Each output is written,
   checked and hashed under a temp name beside it, then renamed in. The checks:
   a PNG beyond `render.maxSide` is refused, since Chrome has cut large
   screenshots short with exit 0, and must be exactly size × scale, pHYs at
@@ -174,10 +179,9 @@ colours, or renders what it is given.
   matching `@page` prints Letter); a `--fail-if` string in the dumped DOM, or
   a PDF's `pdftotext`, fails; so does ink in the `--blank-margin` band
   (`render.checkMargin`), and a `file://` load Chrome refused, which it
-  reports only on stderr (`render.blockedRe`). `--jpeg` converts the same screenshot. `--html`
-  judges Chrome's output by content: a dump ending in `</html>` is whole,
-  since Chrome's teardown watchdog can exit non-zero after writing the full
-  page (`engine.Cmd.AllowExit`).
+  reports only in its log (`render.blockedRe`). `--jpeg` converts the same
+  screenshot. `--html` judges Chrome's output by content: a dump ending in
+  `</html>` is whole, whatever Chrome exits with.
 - **build** — parses a manifest into `render.Options`, each checked by
   `render.Validate` before anything renders, and runs `render.Run` on up to
   `--jobs` workers, logging in manifest order (`build.ParseManifest`). A

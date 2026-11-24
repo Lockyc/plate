@@ -1,72 +1,20 @@
 package cdp
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/lockyc/plate/internal/chrometest"
 	"github.com/lockyc/plate/internal/engine"
 )
 
-func TestMain(m *testing.M) {
-	if os.Getenv("PLATE_FAKE_CHROME") != "" {
-		fakeChrome()
-		return
-	}
-	os.Exit(m.Run())
-}
-
-// fakeChrome speaks the debugging pipe: NUL-delimited JSON on fd 3 (in) and
-// fd 4 (out). It exits 0 when fd 3 reaches EOF, as Chrome does.
-func fakeChrome() {
-	in, out := os.NewFile(3, "in"), os.NewFile(4, "out")
-	r := bufio.NewReader(in)
-	send := func(v any) {
-		b, _ := json.Marshal(v)
-		out.Write(append(b, 0))
-	}
-	for {
-		line, err := r.ReadBytes(0)
-		if err != nil {
-			return
-		}
-		var m struct {
-			ID      int             `json:"id"`
-			Method  string          `json:"method"`
-			Params  json.RawMessage `json:"params"`
-			Session string          `json:"sessionId"`
-		}
-		if json.Unmarshal(line[:len(line)-1], &m) != nil {
-			continue
-		}
-		reply := func(result any) {
-			send(map[string]any{"id": m.ID, "result": result, "sessionId": m.Session})
-		}
-		switch m.Method {
-		case "Target.createTarget":
-			reply(map[string]any{"targetId": "T1"})
-		case "Target.attachToTarget":
-			reply(map[string]any{"sessionId": "S1"})
-		case "Echo":
-			reply(m.Params)
-		case "Fail":
-			send(map[string]any{"id": m.ID, "error": map[string]any{"code": -32000, "message": "nope"}})
-		case "Emit":
-			reply(map[string]any{})
-			send(map[string]any{"method": "Ev", "params": m.Params, "sessionId": m.Session})
-		case "Die":
-			fmt.Fprintln(os.Stderr, "fake chrome crashed")
-			os.Exit(3)
-		}
-	}
-}
+func TestMain(m *testing.M) { chrometest.Main(m) }
 
 func launch(t *testing.T) *Conn {
 	t.Helper()

@@ -20,11 +20,11 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/lockyc/plate/internal/cdp"
 	"github.com/lockyc/plate/internal/cli"
 	"github.com/lockyc/plate/internal/engine"
 	"github.com/lockyc/plate/internal/pdf"
@@ -334,15 +334,6 @@ func address(u, local, query string) string {
 	return PlateURL(local, query)
 }
 
-// inputs lists the local page as an engine input, so the engine refuses an
-// output that is the page itself.
-func (j job) inputs() []string {
-	if j.local == "" {
-		return nil
-	}
-	return []string{j.local}
-}
-
 // run renders the page as l loads it and returns the sha256 of each output
 // it wrote under its absolute destination.
 //
@@ -517,13 +508,6 @@ func baseArgs(proxy string) []string {
 	return args
 }
 
-// base is the Load's flags with the virtual-time budget. That fast-forwards
-// timers only on chrome-headless-shell, which is why that is the pinned
-// engine and not full Chrome.
-func (j job) base() []string {
-	return slices.Concat(j.args, []string{"--virtual-time-budget=" + strconv.Itoa(j.budget)})
-}
-
 // CheckSize refuses a w×h CSS px capture at scale whose pixels go beyond
 // the largest screenshot verified whole.
 func CheckSize(w, h int, scale float64) error {
@@ -546,24 +530,35 @@ func (j job) screenshot(ctx context.Context) error {
 		return err
 	}
 	pw, ph := Pixels(j.w, j.h, j.scale)
-	args := append(j.base(),
-		"--force-device-scale-factor="+strconv.FormatFloat(j.scale, 'f', -1, 64),
-		fmt.Sprintf("--window-size=%d,%d", j.w, j.h),
-		"--screenshot="+j.png)
+	setup := []call{{"Emulation.setDeviceMetricsOverride", map[string]any{
+		"width": j.w, "height": j.h, "deviceScaleFactor": j.scale, "mobile": false}}}
 	if j.transparent {
 		// Chrome paints an opaque white ground under the page unless its
 		// default background is itself transparent.
-		args = append(args, "--default-background-color=00000000")
+		setup = append(setup, call{"Emulation.setDefaultBackgroundColorOverride", map[string]any{
+			"color": map[string]any{"r": 0, "g": 0, "b": 0, "a": 0}}})
 	}
-	if len(j.failIf) > 0 {
+	var dom string
+	err := j.capture(ctx, setup, false, func(ctx context.Context, c *cdp.Conn, s string) error {
+		var shot struct {
+			Data string `json:"data"`
+		}
+		if err := c.Call(ctx, s, "Page.captureScreenshot", map[string]any{"format": "png"}, &shot); err != nil {
+			return err
+		}
+		if err := writeData("screenshot", shot.Data, j.png); err != nil {
+			return err
+		}
+		if len(j.failIf) == 0 {
+			return nil
+		}
 		// The DOM comes from the same page load the screenshot shows.
-		args = append(args, "--dump-dom")
-	}
-	res, err := j.chromeRun(ctx, engine.Cmd{Args: append(args, j.url), Outputs: []string{j.png}})
+		return c.Eval(ctx, s, dumpDOM, &dom)
+	})
 	if err != nil {
 		return err
 	}
-	if err := Sentinel(string(res.Stdout), j.failIf); err != nil {
+	if err := Sentinel(dom, j.failIf); err != nil {
 		return err
 	}
 	f, err := os.Open(j.png)
@@ -603,14 +598,28 @@ func (j job) print(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	args := append(j.base(), "--no-pdf-header-footer", "--print-to-pdf="+j.pdf)
-	if len(j.failIf) > 0 {
+	var dom string
+	err = j.capture(ctx, nil, false, func(ctx context.Context, c *cdp.Conn, s string) error {
+		var out struct {
+			Data string `json:"data"`
+		}
+		// As Chrome's --print-to-pdf prints, byte for byte: backgrounds,
+		// the page's own @page size, no header or footer.
+		if err := c.Call(ctx, s, "Page.printToPDF", map[string]any{
+			"printBackground": true, "preferCSSPageSize": true, "displayHeaderFooter": false}, &out); err != nil {
+			return err
+		}
+		if err := writeData("print", out.Data, j.pdf); err != nil {
+			return err
+		}
+		if len(j.failIf) == 0 {
+			return nil
+		}
 		// The DOM comes from the same load the PDF prints. Attribute
 		// markers never reach the PDF's text, so the text alone cannot see
 		// them.
-		args = append(args, "--dump-dom")
-	}
-	res, err := j.chromeRun(ctx, engine.Cmd{Args: append(args, j.url), Outputs: []string{j.pdf}})
+		return c.Eval(ctx, s, dumpDOM, &dom)
+	})
 	if err != nil {
 		return err
 	}
@@ -618,7 +627,7 @@ func (j job) print(ctx context.Context) error {
 		return err
 	}
 	if len(j.failIf) > 0 {
-		if err := Sentinel(string(res.Stdout), j.failIf); err != nil {
+		if err := Sentinel(dom, j.failIf); err != nil {
 			return err
 		}
 		text, err := pdf.Text(ctx, j.pdf)
@@ -654,17 +663,16 @@ func (j job) print(ctx context.Context) error {
 	return nil
 }
 
-// dump writes the DOM Chrome holds once the virtual-time budget has run.
-// Chrome's exit status is not the verdict: its teardown watchdog can exit
-// non-zero after writing the whole document, so a complete page — one that
-// ends in </html> — is the test.
+// dump writes the DOM Chrome holds once the page has settled. Chrome's exit
+// status is not the verdict: a complete page, one that ends in </html>, is.
 func (j job) dump(ctx context.Context) error {
-	args := append(j.base(), "--dump-dom", j.url)
-	res, err := j.chromeRun(ctx, engine.Cmd{Args: args, AllowExit: true})
-	if err != nil {
+	var dom string
+	if err := j.capture(ctx, nil, true, func(ctx context.Context, c *cdp.Conn, s string) error {
+		return c.Eval(ctx, s, dumpDOM, &dom)
+	}); err != nil {
 		return err
 	}
-	dom := strings.TrimSpace(string(res.Stdout))
+	dom = strings.TrimSpace(dom)
 	if !strings.HasSuffix(dom, "</html>") {
 		return fmt.Errorf("Chrome produced no complete page (%d bytes, no closing </html>)", len(dom))
 	}
@@ -674,30 +682,10 @@ func (j job) dump(ctx context.Context) error {
 	return os.WriteFile(j.html, []byte(dom), 0o644)
 }
 
-// blockedRe is the console line Chrome logs on stderr, and nowhere else,
-// when it refuses a file:// subresource of an http page, which every local
-// page is under plate's proxy.
+// blockedRe is the log entry Chrome writes, and nowhere else, when it
+// refuses a file:// subresource of an http page, which every local page is
+// under plate's proxy.
 var blockedRe = regexp.MustCompile(`Not allowed to load local resource: ([^\s"]+)`)
-
-// chromeRun runs Chrome with args and fails when it refused a file://
-// subresource: Chrome draws the page without it and exits 0.
-func (j job) chromeRun(ctx context.Context, c engine.Cmd) (engine.Result, error) {
-	c.Engine, c.Inputs, c.Timeout = chrome, j.inputs(), 15*time.Minute
-	res, err := engine.Run(ctx, c)
-	if err != nil {
-		return res, err
-	}
-	var urls []string
-	for _, m := range blockedRe.FindAllStringSubmatch(string(res.Stderr), -1) {
-		if !slices.Contains(urls, m[1]) {
-			urls = append(urls, m[1])
-		}
-	}
-	if len(urls) > 0 {
-		return res, fmt.Errorf("Chrome blocked %s: a local page cannot load file:// URLs; reference the file by a relative or absolute path", strings.Join(urls, ", "))
-	}
-	return res, nil
-}
 
 // Sentinel refuses text that contains any of the --fail-if strings.
 func Sentinel(text string, failIf []string) error {

@@ -500,8 +500,8 @@ func TestCacheKeyQualityDefaultEqualsExplicit(t *testing.T) {
 }
 
 // Chrome blocks a file:// subresource of a served page and says so only in
-// a console line on stderr, exiting 0. Each Chrome stage fails on it, names
-// the URL, and leaves no output and no record.
+// its log. Each Chrome stage fails on it, names the URL, and leaves no
+// output and no record.
 func TestBlockedFileURLFails(t *testing.T) {
 	const blocked = "file:///art/hero.png"
 	for name, args := range map[string][]string{
@@ -512,7 +512,7 @@ func TestBlockedFileURLFails(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			e := cacheEnv(t)
 			t.Setenv("PDF_BOX", "75 x 37.5 pts")
-			t.Setenv("FIXTURE_STDERR", `[1017/120000.000000:INFO:CONSOLE(1)] "Not allowed to load local resource: `+blocked+`", source: http://plate.invalid/page.html (1)`)
+			t.Setenv("FIXTURE_LOG", "Not allowed to load local resource: "+blocked)
 			out := e.out("p." + name)
 			if code := e.run(append(args, out, e.page)...); code != 1 {
 				t.Fatalf("code %d: %s", code, e.stderr.String())
