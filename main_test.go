@@ -142,17 +142,57 @@ func TestCommandsDocCarriesEveryUsageLine(t *testing.T) {
 		for _, args := range calls {
 			var out, errb bytes.Buffer
 			run(context.Background(), args, &out, &errb)
-			for _, line := range strings.Split(out.String()+errb.String(), "\n") {
-				l := strings.TrimSpace(strings.TrimPrefix(line, "usage: "))
-				// A note after two spaces (diff's "(two images, or two clips…)") is help text, not usage.
-				l, _, _ = strings.Cut(l, "  ")
-				if !strings.HasPrefix(l, "plate ") || strings.Contains(l, "<check|render>") {
+			for _, l := range synopses(out.String()+errb.String(), c.name) {
+				if strings.Contains(l, "<check|render>") {
 					continue
 				}
 				if !bytes.Contains(doc, []byte(strings.ReplaceAll(l, "|", `\|`))) {
 					t.Errorf("docs/commands.md lacks %q", l)
 				}
 			}
+		}
+	}
+}
+
+// synopses are the usage lines in a command's -h output: each line that
+// starts "plate ", and each line of the usage block (from "usage: " to the
+// first blank line) that starts, unindented, with the command's name, as
+// count's second form does, read as "plate <line>".
+func synopses(help, name string) []string {
+	var out []string
+	block := false
+	for _, line := range strings.Split(help, "\n") {
+		l := strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(l, "usage: "):
+			block = true
+			l = strings.TrimPrefix(l, "usage: ")
+		case l == "":
+			block = false
+		case block && strings.HasPrefix(line, name+" "):
+			l = "plate " + l
+		}
+		// A note after two spaces (diff's "(two images, or two clips…)") is help text, not usage.
+		l, _, _ = strings.Cut(l, "  ")
+		if strings.HasPrefix(l, "plate ") {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
+func TestSynopses(t *testing.T) {
+	for _, c := range []struct {
+		help, name string
+		want       []string
+	}{
+		{"usage: plate count [--a] <x>\ncount --track <d> [--b]\n\ncount --track is described here.\n  -a\tflag\n",
+			"count", []string{"plate count [--a] <x>", "plate count --track <d> [--b]"}},
+		{"usage: plate render [--force]\n  -force\n    \trender even when nothing changed\n",
+			"render", []string{"plate render [--force]"}},
+	} {
+		if got := synopses(c.help, c.name); !slices.Equal(got, c.want) {
+			t.Errorf("synopses(%q) = %q, want %q", c.help, got, c.want)
 		}
 	}
 }
