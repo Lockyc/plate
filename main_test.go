@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -72,6 +73,53 @@ func TestEngineUsedByNamesCommands(t *testing.T) {
 	for _, e := range pins.Engines {
 		if (slices.Contains(e.UsedBy, "render") || slices.Contains(e.UsedBy, "impose")) && !slices.Contains(e.UsedBy, "build") {
 			t.Errorf("%s UsedBy %q lacks build", e.Name, e.UsedBy)
+		}
+	}
+}
+
+// engineImports are the imports through which a command's package runs an
+// engine: ml runs uv; video and frames run ffmpeg and ffprobe.
+var engineImports = map[string][]string{
+	`"github.com/lockyc/plate/internal/ml"`:     {"uv"},
+	`"github.com/lockyc/plate/internal/video"`:  {"ffmpeg", "ffprobe"},
+	`"github.com/lockyc/plate/internal/frames"`: {"ffmpeg", "ffprobe"},
+}
+
+// A command whose package runs ffmpeg, ffprobe or uv, directly or through
+// an engineImports package, is in that engine's UsedBy, so doctor names it.
+func TestEngineUsedByNamesEveryCaller(t *testing.T) {
+	for _, c := range commands {
+		files, _ := filepath.Glob(filepath.Join("internal", c.name, "*.go"))
+		need := map[string]bool{}
+		for _, f := range files {
+			if strings.HasSuffix(f, "_test.go") {
+				continue
+			}
+			b, err := os.ReadFile(f)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for imp, engines := range engineImports {
+				if bytes.Contains(b, []byte(imp)) {
+					for _, e := range engines {
+						need[e] = true
+					}
+				}
+			}
+			for _, e := range []string{"ffmpeg", "ffprobe", "uv"} {
+				if bytes.Contains(b, []byte(`Engine: "`+e+`"`)) {
+					need[e] = true
+				}
+			}
+		}
+		for e := range need {
+			p, ok := pins.Lookup(e)
+			if !ok {
+				t.Fatalf("no engine %q", e)
+			}
+			if !slices.Contains(p.UsedBy, c.name) {
+				t.Errorf("%s runs %s, whose UsedBy %q lacks it", c.name, e, p.UsedBy)
+			}
 		}
 	}
 }

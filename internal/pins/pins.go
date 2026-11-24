@@ -82,7 +82,7 @@ func ffmpegTool(name string, caps ...Capability) Engine {
 		Name: name, Kind: Minimum,
 		VersionArgs: []string{"-hide_banner", "-version"}, VersionRe: name + ` version n?(\d+\.\d+(?:\.\d+)?)`, Min: "7.1",
 		Install: map[string]string{"darwin": "brew install ffmpeg", "linux": "install ffmpeg 7.1 or later from https://ffmpeg.org/download.html (distribution packages are often too old)"},
-		UsedBy:  []string{"clip", "animate", "build", "walkthrough", "pano"}, Capabilities: caps,
+		UsedBy:  []string{"clip", "animate", "build", "walkthrough", "pano", "reframe", "diff"}, Capabilities: caps,
 	}
 }
 
@@ -140,7 +140,7 @@ var Engines = []Engine{
 		Name: "uv", Kind: Minimum,
 		VersionArgs: []string{"--version"}, VersionRe: `uv (\d+\.\d+\.\d+)`, Min: "0.12.0",
 		Install: map[string]string{"darwin": "brew install uv", "linux": "curl -LsSf https://astral.sh/uv/install.sh | sh"},
-		UsedBy:  []string{"cutout", "grade", "inpaint", "upscale"},
+		UsedBy:  []string{"cutout", "grade", "inpaint", "upscale", "count"},
 	},
 	{
 		Name: "swiftc", Kind: Minimum, GOOS: []string{"darwin"},
