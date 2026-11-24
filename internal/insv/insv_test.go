@@ -19,14 +19,141 @@ func near(a, b float64) bool { return math.Abs(a-b) < 1e-9 }
 // clip writes a file of placeholder video bytes with m's trailer appended.
 func clip(t *testing.T, m insv.Meta, offset string) string {
 	t.Helper()
+	return clipWith(t, m, insvtest.Options{Offset: offset})
+}
+
+func clipWith(t *testing.T, m insv.Meta, o insvtest.Options) string {
+	t.Helper()
 	path := filepath.Join(t.TempDir(), "VID_20260101_000000_00_001.insv")
 	if err := os.WriteFile(path, []byte("not really video"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := insvtest.Write(path, m, offset); err != nil {
+	if err := insvtest.Write(path, m, o); err != nil {
 		t.Fatal(err)
 	}
 	return path
+}
+
+// patch rewrites the file at path through fn.
+func patch(t *testing.T, path string, fn func(b []byte)) {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fn(b)
+	if err := os.WriteFile(path, b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAxes(t *testing.T) {
+	x3 := insv.Axes["Insta360 X3"]
+	// yzX: camera x = -sensor y, camera y = -sensor z, camera z = sensor x.
+	if got := x3.ToCamera([3]float64{1, 2, 3}); got != [3]float64{-2, -3, 1} {
+		t.Errorf("ToCamera(1,2,3) = %v, want [-2 -3 1]", got)
+	}
+	if got := x3.ToSensor(x3.ToCamera([3]float64{1, 2, 3})); got != [3]float64{1, 2, 3} {
+		t.Errorf("ToSensor(ToCamera(1,2,3)) = %v", got)
+	}
+}
+
+// TestReadRawIMU writes the X3's raw layout and checks both the counts on
+// disk (sensor axes) and what Read makes of them (camera axes).
+func TestReadRawIMU(t *testing.T) {
+	acc, gyro := insv.RawScales(32, 2000)
+	if !near(acc, insv.StandardGravity/1024) || !near(gyro, 2000.0/32768*math.Pi/180) {
+		t.Fatalf("RawScales(32, 2000) = %v, %v", acc, gyro)
+	}
+	// Upright and turning about the front lens's axis: sensor gyro y alone,
+	// 1000 counts; gravity's reaction on sensor -x, 1024 counts (1 g at 32 g).
+	sample := insv.IMU{T: 0.002, Gyro: [3]float64{-1000 * gyro, 0, 0}, Accel: [3]float64{0, 0, -insv.StandardGravity}}
+	m := insv.Meta{Model: "Insta360 X3", Width: 2880, Height: 2880, FPS: 30, IMU: []insv.IMU{sample}}
+	path := clipWith(t, m, insvtest.Options{Offset: testOffset, Raw: true, AccRange: 32, GyroRange: 2000})
+
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	trailer := int(binary.LittleEndian.Uint32(b[len(b)-insv.FooterSize+32:]))
+	rec := b[len(b)-trailer:] // the IMU is the trailer's first record
+	if ts := binary.LittleEndian.Uint64(rec); ts != 2000 {
+		t.Errorf("timestamp = %d µs, want 2000", ts)
+	}
+	wantCounts := []int{-1024, 0, 0, 0, 1000, 0} // accel xyz, gyro xyz
+	for k, want := range wantCounts {
+		if c := int(binary.LittleEndian.Uint16(rec[8+2*k:])) - insv.RawZero; c != want {
+			t.Errorf("count %d = %d, want %d", k, c, want)
+		}
+	}
+
+	got, err := insv.Read(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.IMU) != 1 {
+		t.Fatalf("len(IMU) = %d", len(got.IMU))
+	}
+	g := got.IMU[0]
+	if !near(g.T, 0.002) || !near(g.Gyro[0], sample.Gyro[0]) || g.Gyro[1] != 0 || g.Gyro[2] != 0 ||
+		!near(g.Accel[2], -insv.StandardGravity) || g.Accel[0] != 0 || g.Accel[1] != 0 {
+		t.Errorf("IMU[0] = %+v, want %+v", g, sample)
+	}
+}
+
+func TestReadFPS(t *testing.T) {
+	m := insv.Meta{Model: "Insta360 X3", Width: 2880, Height: 2880, FPS: 30000.0 / 1001}
+	got, err := insv.Read(clipWith(t, m, insvtest.Options{Offset: testOffset, Raw: true, AccRange: 32, GyroRange: 2000, Frames: 300}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if math.Abs(got.FPS-m.FPS) > 1e-3 {
+		t.Errorf("FPS = %v, want %v", got.FPS, m.FPS)
+	}
+}
+
+func TestMalformedProtobuf(t *testing.T) {
+	path := clip(t, insv.Meta{Model: "Insta360 X3", Width: 2880, Height: 2880, FPS: 30}, testOffset)
+	patch(t, path, func(b []byte) {
+		// The metadata is the last record: its descriptor sits before the footer.
+		desc := len(b) - insv.FooterSize - insv.DescriptorSize
+		n := int(binary.LittleEndian.Uint32(b[desc+2:]))
+		for i := desc - n; i < desc; i++ {
+			b[i] = 0xff // a varint key that never ends
+		}
+	})
+	if _, err := insv.Read(path); err == nil || !strings.Contains(err.Error(), "metadata") {
+		t.Fatalf("err = %v, want a metadata error", err)
+	}
+}
+
+func TestFooterLargerThanFile(t *testing.T) {
+	path := clip(t, insv.Meta{Model: "Insta360 X3", Width: 2880, Height: 2880, FPS: 30}, testOffset)
+	patch(t, path, func(b []byte) {
+		binary.LittleEndian.PutUint32(b[len(b)-insv.FooterSize+32:], uint32(len(b)+1))
+	})
+	if _, err := insv.Read(path); err == nil || !strings.Contains(err.Error(), "trailer") {
+		t.Fatalf("err = %v, want a trailer-size error", err)
+	}
+}
+
+func TestRecordOverLimit(t *testing.T) {
+	// A metadata record of 17 MiB of zeros: structurally whole, too big to take in.
+	n := 17 << 20
+	b := make([]byte, n, n+insv.DescriptorSize+insv.FooterSize)
+	b = append(b, insv.FormatProtobuf, insv.RecordMetadata)
+	b = binary.LittleEndian.AppendUint32(b, uint32(n))
+	b = append(b, make([]byte, 32)...)
+	b = binary.LittleEndian.AppendUint32(b, uint32(len(b)+insv.FooterSize-32))
+	b = binary.LittleEndian.AppendUint32(b, 3)
+	b = append(b, insv.Magic...)
+	path := filepath.Join(t.TempDir(), "big.insv")
+	if err := os.WriteFile(path, b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := insv.Read(path); err == nil || !strings.Contains(err.Error(), "over the") {
+		t.Fatalf("err = %v, want the record refused for its size", err)
+	}
 }
 
 func TestReadOffset(t *testing.T) {
@@ -191,5 +318,12 @@ func TestRealFile(t *testing.T) {
 	if rate < 500 || rate > 2000 {
 		t.Errorf("IMU rate = %.1f Hz, want 500-2000", rate)
 	}
-	t.Logf("%s %dx%d %v fps; lenses %+v; %d IMU samples at %.1f Hz from T=%.3f s", m.Model, m.Width, m.Height, m.FPS, m.Lenses, len(m.IMU), rate, m.IMU[0].T)
+	var mean [3]float64
+	for _, s := range m.IMU {
+		for k := range mean {
+			mean[k] += s.Accel[k] / float64(len(m.IMU))
+		}
+	}
+	t.Logf("%s %dx%d %.4f fps; lenses %+v; %d IMU samples at %.1f Hz from T=%.3f s; mean accel %.2f m/s²",
+		m.Model, m.Width, m.Height, m.FPS, m.Lenses, len(m.IMU), rate, m.IMU[0].T, mean)
 }
