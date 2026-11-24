@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.12"
-# dependencies = ["torch", "transformers", "onnxruntime", "huggingface_hub", "pillow", "numpy", "scipy"]
+# dependencies = ["torch", "transformers", "onnxruntime", "onnx", "onnx2torch", "huggingface_hub", "pillow", "numpy", "scipy"]
 # [tool.uv]
 # exclude-newer = "2026-11-15T00:00:00Z"
 # ///
@@ -10,6 +10,9 @@
              --density REPO --density-revision SHA --density-file FILE
              [--nadir-deg 35] [--zenith-deg 30] [--marked]
              (--photo PATH | --equirect PATH)...
+    count.py --out DIR --detector ... --density ... --track
+             --reid REPO --reid-revision SHA --reid-file FILE
+             [--min-seconds 3] --times T1,T2,... (--equirect PATH)...
 
 A person is counted one of two ways, never both:
   - a detector person box scoring CONF or better;
@@ -42,6 +45,26 @@ and with --marked DIR/marked/<frame>.jpg with each counted person dotted
 (detector green, density magenta) over the density at 30%, an equirect
 frame's views in DIR/marked/<frame>/view-NN.jpg with the region each view
 does not own shaded.
+
+--track follows the boxed people through equirect frames taken at --times
+(seconds), in order. Each frame's people are matched to the tracks alive in
+it by where their heads are on the sphere: one assignment minimising, per
+pair, the arc to the track's predicted place over the gate (GATE_MOVE body
+heights a second since the track was last seen, at least GATE_MIN degrees;
+a pair past the gate is never matched) plus APPEAR times how unlike their
+re-ID appearance is. A person unmatched starts a track; a track unseen for
+LOST seconds ends. The density map is read every DENSITY_EVERY seconds and
+its part carried to the frames between. Writes DIR/track.tsv (t, on_screen:
+the estimate) and DIR/distinct.tsv:
+  - high: tracks lasting --min-seconds or more;
+  - low: those after joining any whose mean appearance is REID_SIM alike or
+    more across a gap of up to MERGE_GAP seconds, most alike first, never
+    joining tracks that overlap in time (one person is in one place);
+  - tracks: every track;
+  - untracked_share: the density part's share of the estimate over the
+    frames it was read in -- people counted but never tracked, in neither
+    low nor high.
+Appearance features stay in memory and are never written.
 """
 
 import argparse
@@ -51,13 +74,16 @@ import sys
 import time
 
 import numpy as np
+import onnx
 import onnxruntime as ort
 import torch
 import torch.nn.functional as F
 from huggingface_hub import hf_hub_download
+from onnx2torch import convert
 from PIL import Image, ImageDraw, ImageOps
 from plate_device import pick
 from scipy.ndimage import maximum_filter, uniform_filter
+from scipy.optimize import linear_sum_assignment
 from transformers import AutoImageProcessor, AutoModelForObjectDetection
 
 Image.MAX_IMAGE_PIXELS = None
@@ -75,6 +101,8 @@ RINGS = (
     + [(0.0, -90.0), (0.0, 90.0)]
 )
 WIN, STRIDE = 512, 384  # density windows, px
+DENS_BATCH = 9  # density windows a run: a view's 3 x 3
+DET_BATCH = 8  # views a detector run
 # Fitted on plate's five quality crowd assets (the bake-off): the detector's
 # confidence, the photo tile, and the density peak, its window, and the crowd
 # a peak needs around it.
@@ -83,6 +111,11 @@ PEAK, PEAK_WIN, CROWD, CROWD_R = 0.1, 5, 2, 16
 MEAN = np.array([0.485, 0.456, 0.406], np.float32)
 STD = np.array([0.229, 0.224, 0.225], np.float32)
 DET_DOT, DENS_DOT = (40, 220, 90), (235, 60, 220)
+# Tracking (see the docstring), fitted on the count-track-distinct quality
+# case and checked on real festival footage.
+GATE_MOVE, GATE_MIN, APPEAR, LOST = 1.5, 1.0, 1.0, 2.0
+REID_SIM, MERGE_GAP, DENSITY_EVERY = 0.7, 60.0, 2.0
+REID_H, REID_W = 256, 128
 
 
 class Frame(argparse.Action):
@@ -105,6 +138,14 @@ def view_dirs(yaw, pitch):
     d = np.stack([u, -v, np.ones_like(u)], -1)
     d /= np.linalg.norm(d, axis=-1, keepdims=True)
     return (d @ rot(yaw, pitch).T).astype(np.float32)
+
+
+def pixel_dir(yaw, pitch, x, y):
+    """The unit direction of the view pixel holding (x, y): view_dirs at one pixel."""
+    t = math.tan(math.radians(HFOV) / 2)
+    xi, yi = min(max(int(x), 0), VIEW - 1), min(max(int(y), 0), VIEW - 1)
+    d = np.array([((xi + 0.5) / VIEW * 2 - 1) * t, -((yi + 0.5) / VIEW * 2 - 1) * t, 1.0])
+    return (d / np.linalg.norm(d)) @ rot(yaw, pitch).T
 
 
 def lonlat(d):
@@ -141,22 +182,35 @@ def geometry_gaps(nadir, zenith):
     return gaps, sorted(set(own[own >= 0].tolist()))
 
 
-class Sphere:
-    """The equirect's views and who owns each direction."""
+class Views:
+    """The live views of an equirect, built once a run: each view's sampling grid, and the view
+    pixels and density cells it owns."""
 
-    def __init__(self, img, nadir, zenith):
-        self.eq = torch.from_numpy(np.asarray(img, dtype=np.float32)).permute(2, 0, 1)[None]
-        self.nadir, self.zenith = nadir, zenith
+    def __init__(self, live, nadir, zenith, red, device):
+        self.live, self.device = live, device
+        grids, self.own, self.cells = [], [], []
+        c = np.minimum((np.arange(math.ceil(VIEW / red)) + 0.5) * red, VIEW - 1).astype(int)
+        for k in live:
+            d = view_dirs(*RINGS[k])
+            lon, lat = lonlat(d)
+            grids.append(torch.from_numpy(np.stack([lon / 180.0, -lat / 90.0], -1)).float())
+            o = owner(d, nadir, zenith) == k
+            self.own.append(o)
+            self.cells.append(o[c][:, c])
+        self.grid = torch.stack(grids).to(device)
 
-    def view(self, k):
-        d = view_dirs(*RINGS[k])
-        lon, lat = lonlat(d)
-        grid = torch.from_numpy(np.stack([lon / 180.0, -lat / 90.0], -1)[None]).float()
-        rgb = F.grid_sample(self.eq, grid, mode="bilinear", padding_mode="border", align_corners=False)
-        return rgb[0].permute(1, 2, 0).clamp(0, 255).byte().numpy(), d
+    def read(self, img):
+        """Every live view of img, as uint8 (views, 3, VIEW, VIEW) on the device."""
+        eq = torch.from_numpy(np.array(img, dtype=np.uint8)).to(self.device).permute(2, 0, 1)[None].float()
+        out = [F.grid_sample(eq, self.grid[i : i + 1], mode="bilinear", padding_mode="border", align_corners=False) for i in range(len(self.live))]
+        return torch.cat(out).clamp(0, 255).byte()
 
-    def owned(self, k, d):
-        return owner(d, self.nadir, self.zenith) == k
+    def owns(self, i, x, y):
+        return bool(self.own[i][min(max(int(y), 0), VIEW - 1), min(max(int(x), 0), VIEW - 1)])
+
+    def lonlat(self, i, x, y):
+        lon, lat = lonlat(pixel_dir(*RINGS[self.live[i]], x, y))
+        return float(lon), float(lat)
 
 
 class Detector:
@@ -166,43 +220,103 @@ class Detector:
         self.device = device
         self.person = next(int(k) for k, v in self.model.config.id2label.items() if v.lower() == "person")
 
+    def _boxes(self, out, sizes):
+        rs = self.proc.post_process_object_detection(out, threshold=CONF, target_sizes=sizes)
+        return [[b for s, l, b in zip(r["scores"].tolist(), r["labels"].tolist(), r["boxes"].tolist()) if l == self.person] for r in rs]
+
     def __call__(self, rgb):
         h, w, _ = rgb.shape
         inp = self.proc(images=Image.fromarray(rgb), return_tensors="pt").to(self.device)
         with torch.no_grad():
             out = self.model(**inp)
-        r = self.proc.post_process_object_detection(out, threshold=CONF, target_sizes=[(h, w)])[0]
-        return [b for s, l, b in zip(r["scores"].tolist(), r["labels"].tolist(), r["boxes"].tolist()) if l == self.person]
+        return self._boxes(out, [(h, w)])[0]
+
+    def views(self, v):
+        """The person boxes in each of a batch of uint8 views on the device, resized and scaled as
+        the processor does."""
+        size = (self.proc.size["height"], self.proc.size["width"])
+        boxes = []
+        for i in range(0, len(v), DET_BATCH):
+            x = F.interpolate(v[i : i + DET_BATCH].float(), size=size, mode="bilinear", antialias=True, align_corners=False)
+            x = x * self.proc.rescale_factor
+            if self.proc.do_normalize:
+                x = (x - torch.tensor(self.proc.image_mean, device=x.device).view(1, 3, 1, 1)) / torch.tensor(self.proc.image_std, device=x.device).view(1, 3, 1, 1)
+            with torch.no_grad():
+                out = self.model(pixel_values=x)
+            boxes += self._boxes(out, [v.shape[-2:]] * len(x))
+        return boxes
 
 
 class Density:
-    """DM-Count: a person-density map at 1/8 scale whose sum is the count."""
+    """DM-Count: a person-density map at 1/8 scale whose sum is the count. The pinned graph reads
+    one window and ends in a reshape to that one window's map; widening the reshape and the input
+    to DENS_BATCH windows reads them in one run, each window's arithmetic unchanged."""
 
     def __init__(self, repo, rev, file, device):
         prov = {"mps": ["CoreMLExecutionProvider"], "cuda": ["CUDAExecutionProvider"]}.get(device, []) + ["CPUExecutionProvider"]
         prov = [p for p in prov if p in ort.get_available_providers()]
-        self.s = ort.InferenceSession(hf_hub_download(repo, file, revision=rev), providers=prov)
+        m = onnx.load(hf_hub_download(repo, file, revision=rev))
+        last = m.graph.node[-1]
+        shape = next(i for i in m.graph.initializer if i.name == last.input[1]) if last.op_type == "Reshape" else None
+        if shape is None or onnx.numpy_helper.to_array(shape)[0] != 1:
+            sys.exit(f"count.py: {repo}'s graph does not end in a reshape to one window")
+        shape.CopyFrom(onnx.numpy_helper.from_array(np.array([DENS_BATCH, *onnx.numpy_helper.to_array(shape)[1:]], np.int64), shape.name))
+        for t in (m.graph.input[0], m.graph.output[0]):
+            t.type.tensor_type.shape.dim[0].dim_value = DENS_BATCH
+        self.s = ort.InferenceSession(m.SerializeToString(), providers=prov)
         self.name = self.s.get_inputs()[0].name
         self.red = 8
 
-    def __call__(self, rgb):
-        h, w, _ = rgb.shape
-        x = ((rgb.astype(np.float32) / 255 - MEAN) / STD).transpose(2, 0, 1)
+    def map(self, x):
+        """The density map of x, a normalised (3, h, w) float32 array."""
+        _, h, w = x.shape
         ph, pw = max(WIN, h), max(WIN, w)
         x = np.pad(x, ((0, 0), (0, ph - h), (0, pw - w)))
 
         def starts(n):
             return sorted({min(i * STRIDE, n - WIN) for i in range(math.ceil((n - WIN) / STRIDE) + 1)})
 
+        wins = [(y0, x0) for y0 in starts(ph) for x0 in starts(pw)]
         r, acc = self.red, np.zeros((ph // self.red, pw // self.red), np.float32)
         cnt = np.zeros_like(acc)
-        for y0 in starts(ph):
-            for x0 in starts(pw):
-                o = self.s.run(None, {self.name: np.ascontiguousarray(x[None, :, y0 : y0 + WIN, x0 : x0 + WIN])})[0]
-                o = o.reshape(o.shape[-2:]) if o.shape[1] == 1 else o[0, ..., 0]
+        for i in range(0, len(wins), DENS_BATCH):
+            part = wins[i : i + DENS_BATCH]
+            b = np.zeros((DENS_BATCH, 3, WIN, WIN), np.float32)
+            for j, (y0, x0) in enumerate(part):
+                b[j] = x[:, y0 : y0 + WIN, x0 : x0 + WIN]
+            out = self.s.run(None, {self.name: b})[0]
+            for j, (y0, x0) in enumerate(part):
+                o = out[j, 0]
                 acc[y0 // r : y0 // r + o.shape[0], x0 // r : x0 // r + o.shape[1]] += o
                 cnt[y0 // r : y0 // r + o.shape[0], x0 // r : x0 // r + o.shape[1]] += 1
         return (acc / np.maximum(cnt, 1))[: math.ceil(h / r), : math.ceil(w / r)]
+
+    def __call__(self, rgb):
+        return self.map(((rgb.astype(np.float32) / 255 - MEAN) / STD).transpose(2, 0, 1))
+
+    def views(self, v):
+        """The density map of each of a batch of uint8 views on the device."""
+        mean = torch.from_numpy(MEAN).to(v.device).view(3, 1, 1)
+        std = torch.from_numpy(STD).to(v.device).view(3, 1, 1)
+        return [self.map(((v[i].float() / 255 - mean) / std).cpu().numpy()) for i in range(len(v))]
+
+
+class ReID:
+    """OSNet appearance: one unit vector per person crop, alike for the same person."""
+
+    def __init__(self, repo, rev, file, device):
+        self.model = convert(onnx.load(hf_hub_download(repo, file, revision=rev))).eval().to(device)
+        self.mean = torch.from_numpy(MEAN).to(device).view(1, 3, 1, 1)
+        self.std = torch.from_numpy(STD).to(device).view(1, 3, 1, 1)
+
+    def __call__(self, crops):
+        """crops: uint8 (3, h, w) tensors on the device."""
+        if not crops:
+            return np.zeros((0, 512), np.float32)
+        x = torch.cat([F.interpolate(c[None].float(), size=(REID_H, REID_W), mode="bilinear", align_corners=False) for c in crops])
+        with torch.no_grad():
+            f = self.model((x / 255 - self.mean) / self.std).cpu().numpy()
+        return f / np.maximum(np.linalg.norm(f, axis=1, keepdims=True), 1e-6)
 
 
 def head(box):
@@ -220,15 +334,6 @@ def crowd(m, own, boxes, r):
     side = 2 * CROWD_R + 1
     near = uniform_filter(peaks.astype(np.float32), side, mode="constant") * side * side - 1
     return [((cx + 0.5) * r, (cy + 0.5) * r, "density") for cy, cx in zip(*np.nonzero(peaks & keep & (near >= CROWD - 0.01)))]
-
-
-def count_view(rgb, owned_px, owned_cells, det, dens):
-    """One equirect view: its counted people in view pixels, and its owned density."""
-    boxes = det(rgb)
-    m = dens(rgb)
-    own = owned_cells(m.shape, dens.red)
-    people = [p for p in map(head, boxes) if owned_px(p[0], p[1])]
-    return people + crowd(m, own, boxes, dens.red), np.where(own, m, 0)
 
 
 def tiles(n):
@@ -281,45 +386,187 @@ def photo(img, det, dens):
     return people, people, lambda: dots(heat(img, m), people), None
 
 
-def equirect(img, det, dens, nadir, zenith, live):
+def read_equirect(img, views, det, dens, density=True):
+    """An equirect's counted people. Returns the views (uint8 on the device); per view, its counted
+    people in view pixels (x, y, source), its counted boxes and, when density is read, its owned
+    density map; and every counted person as (lon, lat, source)."""
+    v = views.read(img)
+    boxes = det.views(v)
+    maps = dens.views(v) if density else [None] * len(v)
+    per_view, pts = [], []
+    for i in range(len(v)):
+        counted = [b for b in boxes[i] if views.owns(i, *head(b)[:2])]
+        people = [head(b) for b in counted]
+        if density:
+            people += crowd(maps[i], views.cells[i], boxes[i], dens.red)
+            maps[i] = np.where(views.cells[i], maps[i], 0)
+        per_view.append((people, counted, maps[i]))
+        pts += [(*views.lonlat(i, x, y), s) for x, y, s in people]
+    return v, per_view, pts
+
+
+def equirect(img, views, det, dens):
     W, H = img.size
-    sp = Sphere(img, nadir, zenith)
-    pts, marked_views, splat = [], [], np.zeros((math.ceil(H / dens.red), math.ceil(W / dens.red)), np.float32)
-    for k in live:
-        rgb, d = sp.view(k)
-
-        def owned_px(x, y, k=k, d=d):
-            return bool(sp.owned(k, d[min(int(y), VIEW - 1), min(int(x), VIEW - 1)][None])[0])
-
-        def cells(shape, r, k=k, d=d):
-            ys = np.minimum((np.arange(shape[0]) + 0.5) * r, VIEW - 1).astype(int)
-            xs = np.minimum((np.arange(shape[1]) + 0.5) * r, VIEW - 1).astype(int)
-            return sp.owned(k, d[ys][:, xs])
-
-        people, m = count_view(rgb, owned_px, cells, det, dens)
-        for x, y, s in people:
-            lon, lat = lonlat(d[min(int(y), VIEW - 1), min(int(x), VIEW - 1)])
-            pts.append((float(lon), float(lat), s))
-        # the owned density, splatted back onto the equirect at 1/8 scale
-        ys, xs = np.nonzero(m)
-        if len(ys):
-            r = dens.red
-            lon, lat = lonlat(d[np.minimum((ys + 0.5) * r, VIEW - 1).astype(int), np.minimum((xs + 0.5) * r, VIEW - 1).astype(int)])
-            ex = np.clip(((lon / 360 + 0.5) * W / r).astype(int), 0, splat.shape[1] - 1)
-            ey = np.clip(((0.5 - lat / 180) * H / r).astype(int), 0, splat.shape[0] - 1)
-            np.add.at(splat, (ey, ex), m[ys, xs])
-        marked_views.append((k, rgb, m, people, cells))
+    v, per_view, pts = read_equirect(img, views, det, dens)
     eq_pts = [((lon / 360 + 0.5) * W, (0.5 - lat / 180) * H, s) for lon, lat, s in pts]
 
-    def views():
-        for k, rgb, m, people, cells in marked_views:
-            v = heat(Image.fromarray(rgb), m)
-            own = cells((VIEW // 8, VIEW // 8), 8)
-            shade = Image.fromarray(np.where(own, 0, 110).astype(np.uint8)).resize(v.size, Image.NEAREST)
-            v.paste(Image.new("RGB", v.size, (0, 0, 0)), (0, 0), shade)
-            yield k, dots(v, people)
+    def marked():
+        # the owned density, splatted back onto the equirect at 1/8 scale
+        r = dens.red
+        splat = np.zeros((math.ceil(H / r), math.ceil(W / r)), np.float32)
+        for i, (_, _, m) in enumerate(per_view):
+            ys, xs = np.nonzero(m)
+            if len(ys):
+                d = view_dirs(*RINGS[views.live[i]])
+                lon, lat = lonlat(d[np.minimum((ys + 0.5) * r, VIEW - 1).astype(int), np.minimum((xs + 0.5) * r, VIEW - 1).astype(int)])
+                ex = np.clip(((lon / 360 + 0.5) * W / r).astype(int), 0, splat.shape[1] - 1)
+                ey = np.clip(((0.5 - lat / 180) * H / r).astype(int), 0, splat.shape[0] - 1)
+                np.add.at(splat, (ey, ex), m[ys, xs])
+        return dots(heat(img, uniform_filter(splat, 3)), eq_pts)
 
-    return pts, eq_pts, lambda: dots(heat(img, uniform_filter(splat, 3)), eq_pts), views
+    def views_marked():
+        for i, (people, _, m) in enumerate(per_view):
+            out = heat(Image.fromarray(v[i].permute(1, 2, 0).cpu().numpy()), m)
+            shade = Image.fromarray(np.where(views.own[i], 0, 110).astype(np.uint8))
+            out.paste(Image.new("RGB", out.size, (0, 0, 0)), (0, 0), shade)
+            yield views.live[i], dots(out, people)
+
+    return pts, eq_pts, marked, views_marked
+
+
+def wrap(d):
+    return (d + 180.0) % 360.0 - 180.0
+
+
+def arc(lon1, lat1, lon2, lat2):
+    """Degrees of arc between directions (broadcasting)."""
+    r = math.pi / 180
+    c = np.sin(lat1 * r) * np.sin(lat2 * r) + np.cos(lat1 * r) * np.cos(lat2 * r) * np.cos((lon1 - lon2) * r)
+    return np.degrees(np.arccos(np.clip(c, -1, 1)))
+
+
+class Track:
+    def __init__(self, t, lon, lat, size, feat):
+        self.first = self.last = t
+        self.lon, self.lat, self.size = lon, lat, size
+        self.vlon = self.vlat = 0.0
+        self.feat = feat.copy()
+
+    def predict(self, t):
+        dt = t - self.last
+        return self.lon + self.vlon * dt, self.lat + self.vlat * dt
+
+    def appearance(self):
+        return self.feat / max(np.linalg.norm(self.feat), 1e-6)
+
+    def update(self, t, lon, lat, size, feat):
+        dt = t - self.last
+        self.vlon = 0.5 * self.vlon + 0.5 * wrap(lon - self.lon) / dt
+        self.vlat = 0.5 * self.vlat + 0.5 * (lat - self.lat) / dt
+        self.lon, self.lat, self.size, self.last = lon, lat, size, t
+        self.feat += feat
+
+
+class Tracker:
+    def __init__(self):
+        self.alive, self.done = [], []
+
+    def step(self, t, people):
+        """people: (lon, lat, size in degrees, unit appearance) of each boxed person at time t."""
+        self.done += [tr for tr in self.alive if t - tr.last > LOST]
+        self.alive = [tr for tr in self.alive if t - tr.last <= LOST]
+        matched = set()
+        if self.alive and people:
+            pred = np.array([tr.predict(t) for tr in self.alive])
+            lon = np.array([p[0] for p in people])
+            lat = np.array([p[1] for p in people])
+            d = arc(pred[:, 0:1], pred[:, 1:2], lon[None], lat[None])
+            size = np.maximum(np.array([tr.size for tr in self.alive])[:, None], np.array([p[2] for p in people])[None])
+            gate = np.maximum(GATE_MIN, GATE_MOVE * size * np.array([t - tr.last for tr in self.alive])[:, None])
+            sim = np.stack([tr.appearance() for tr in self.alive]) @ np.stack([p[3] for p in people]).T
+            cost = np.where(d <= gate, d / gate + APPEAR * (1 - sim), 1e6)
+            for a, b in zip(*linear_sum_assignment(cost)):
+                if cost[a, b] < 1e6:
+                    self.alive[a].update(t, *people[b])
+                    matched.add(b)
+        self.alive += [Track(t, *p) for i, p in enumerate(people) if i not in matched]
+
+    def finish(self):
+        return self.done + self.alive
+
+
+def distinct(tracks, min_seconds):
+    """low, high and every track (see the docstring)."""
+    long = [tr for tr in tracks if tr.last - tr.first >= min_seconds - 1e-6]
+    parent = list(range(len(long)))
+    spans = [[(tr.first, tr.last)] for tr in long]
+
+    def find(i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    feats = np.stack([tr.appearance() for tr in long]) if long else np.zeros((0, 512))
+    sim = feats @ feats.T
+    pairs = sorted(
+        ((sim[a, b], a, b) for a in range(len(long)) for b in range(len(long)) if 0 < long[b].first - long[a].last <= MERGE_GAP and sim[a, b] >= REID_SIM),
+        reverse=True,
+    )
+    for _, a, b in pairs:
+        ga, gb = find(a), find(b)
+        if ga == gb or any(f1 <= l2 and f2 <= l1 for f1, l1 in spans[ga] for f2, l2 in spans[gb]):
+            continue
+        parent[gb] = ga
+        spans[ga] += spans[gb]
+    return len({find(i) for i in range(len(long))}), len(long), len(tracks)
+
+
+def size_deg(views, i, box):
+    """A box's height in degrees of arc."""
+    x0, y0, x1, y1 = box
+    yaw, pitch = RINGS[views.live[i]]
+    top, bottom = pixel_dir(yaw, pitch, (x0 + x1) / 2, y0), pixel_dir(yaw, pitch, (x0 + x1) / 2, y1 - 1)
+    return float(np.degrees(np.arccos(np.clip(top @ bottom, -1, 1))))
+
+
+def track(a, views, det, dens, device):
+    times = [float(s) for s in a.times.split(",")]
+    raw = a.times.split(",")
+    if len(times) != len(a.frames) or any(k != "equirect" for k, _ in a.frames):
+        sys.exit("count.py: --track wants one --times value per --equirect frame")
+    reid = ReID(a.reid, a.reid_revision, a.reid_file, device)
+    tracker = Tracker()
+    rows, dens_part, dens_at, shown, untracked = [], 0, None, 0, 0
+    t0 = time.time()
+    for n, ((_, path), t) in enumerate(zip(a.frames, times)):
+        img = ImageOps.exif_transpose(Image.open(path)).convert("RGB")
+        read_dens = dens_at is None or t - dens_at >= DENSITY_EVERY - 1e-6
+        v, per_view, pts = read_equirect(img, views, det, dens, density=read_dens)
+        boxed = [(i, b) for i, (_, counted, _) in enumerate(per_view) for b in counted]
+        crops = [v[i, :, max(0, int(b[1])) : max(int(b[1]) + 1, int(b[3])), max(0, int(b[0])) : max(int(b[0]) + 1, int(b[2]))] for i, b in boxed]
+        feats = reid(crops)
+        people = []
+        for (i, b), f in zip(boxed, feats):
+            lon, lat = views.lonlat(i, *head(b)[:2])
+            people.append((lon, lat, size_deg(views, i, b), f))
+        tracker.step(t, people)
+        if read_dens:
+            dens_at, dens_part = t, sum(1 for p in pts if p[2] == "density")
+            shown, untracked = shown + len(pts), untracked + dens_part
+        rows.append(f"{raw[n]}\t{len(boxed) + dens_part}\n")
+        if (n + 1) % 50 == 0:
+            print(f"count: {n + 1}/{len(times)} frames, {(time.time() - t0) / (n + 1):.2f}s a frame", file=sys.stderr)
+    low, high, tracks = distinct(tracker.finish(), a.min_seconds)
+    share = untracked / shown if shown else 0.0
+    with open(os.path.join(a.out, "track.tsv"), "w") as f:
+        f.write("t\ton_screen\n" + "".join(rows))
+    # distinct.tsv last: its presence is the run's success
+    tmp = os.path.join(a.out, ".distinct.tsv.part")
+    with open(tmp, "w") as f:
+        f.write(f"low\thigh\ttracks\tmin_seconds\tuntracked_share\n{low}\t{high}\t{tracks}\t{a.min_seconds:g}\t{share:.3f}\n")
+    os.replace(tmp, os.path.join(a.out, "distinct.tsv"))
+    print(f"count: {len(times)} frames on {device}, {(time.time() - t0) / len(times):.2f}s a frame; distinct {low} to {high} ({tracks} tracks)", file=sys.stderr)
 
 
 def main() -> None:
@@ -331,6 +578,10 @@ def main() -> None:
     ap.add_argument("--marked", action="store_true")
     ap.add_argument("--photo", action=Frame)
     ap.add_argument("--equirect", action=Frame)
+    ap.add_argument("--track", action="store_true")
+    for k in ("--reid", "--reid-revision", "--reid-file", "--times"):
+        ap.add_argument(k)
+    ap.add_argument("--min-seconds", type=float, default=3)
     ap.set_defaults(frames=[])
     a = ap.parse_args()
     if not a.frames:
@@ -342,16 +593,22 @@ def main() -> None:
     device = pick()
     det = Detector(a.detector, a.detector_revision, device)
     dens = Density(a.density, a.density_revision, a.density_file, device)
+    views = Views(live, a.nadir_deg, a.zenith_deg, dens.red, device) if any(k == "equirect" for k, _ in a.frames) else None
+    if a.track:
+        track(a, views, det, dens, device)
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os._exit(0)
     os.makedirs(os.path.join(a.out, "points"), exist_ok=True)
     rows = []
     for kind, path in a.frames:
         stem = os.path.splitext(os.path.basename(path))[0]
         img = ImageOps.exif_transpose(Image.open(path)).convert("RGB")
         if kind == "equirect":
-            pts, _, marked, views = equirect(img, det, dens, a.nadir_deg, a.zenith_deg, live)
+            pts, _, marked, views_marked = equirect(img, views, det, dens)
             cols = "lon\tlat\tfrom"
         else:
-            pts, _, marked, views = photo(img, det, dens)
+            pts, _, marked, views_marked = photo(img, det, dens)
             cols = "x\ty\tfrom"
         nd = sum(1 for p in pts if p[2] == "detector")
         rows.append(f"{stem}\t{nd}\t{len(pts) - nd}\t{len(pts)}")
@@ -360,10 +617,10 @@ def main() -> None:
         if a.marked:
             os.makedirs(os.path.join(a.out, "marked"), exist_ok=True)
             marked().save(os.path.join(a.out, "marked", stem + ".jpg"), quality=88)
-            if views:
+            if views_marked:
                 vd = os.path.join(a.out, "marked", stem)
                 os.makedirs(vd, exist_ok=True)
-                for k, v in views():
+                for k, v in views_marked():
                     v.save(os.path.join(vd, f"view-{k:02d}.jpg"), quality=88)
         print(f"count: {stem} {kind} {len(pts)} ({nd} detected)", file=sys.stderr)
     # counts.tsv last: its presence is the run's success
