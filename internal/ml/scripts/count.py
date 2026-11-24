@@ -115,8 +115,19 @@ DUP, DUP_SIZE = 0.15, 1.25
 MEAN = np.array([0.485, 0.456, 0.406], np.float32)
 STD = np.array([0.229, 0.224, 0.225], np.float32)
 DET_DOT, DENS_DOT = (40, 220, 90), (235, 60, 220)
-# Tracking (see the docstring), fitted on the count-track-distinct quality
-# case and checked on real festival footage.
+# Tracking (see the docstring). Where each value comes from:
+#   LOST: the count-track-distinct scene's turning-rate walkers split a crossing
+#     walker hidden 2.5 s at 2 s and not at 4; its straight-line walkers come
+#     out exact (low 10, high 12) for LOST 2 to 6, GATE_MOVE 1.5 to 3 and
+#     REID_SIM 0.6 to 0.8, so none of those three is decided by the case.
+#   GATE_MOVE, LOST, REID_SIM on 12 minutes of real festival footage (about 65
+#     boxed people a frame, no truth): every looser gate or longer LOST lowers
+#     high, from 528 (LOST 2) to 92 (LOST 6, GATE_MOVE 3), as tracks start to
+#     carry more than one person; 1.5 and 4 s sit mid-way, at 108 to 172.
+#   SIM_MIN, REID_SIM: OSNet's cosine for one person frame to frame is 0.9 or
+#     more and between two people 0.3 to 0.6 in that scene.
+#   GATE_MIN, APPEAR, MERGE_GAP, DENSITY_EVERY: set, not fitted; MERGE_GAP is
+#     the minute a returner is looked for, DENSITY_EVERY the speed budget.
 GATE_MOVE, GATE_MIN, APPEAR, SIM_MIN, LOST = 1.5, 1.0, 1.0, 0.5, 4.0
 REID_SIM, MERGE_GAP, DENSITY_EVERY = 0.7, 60.0, 2.0
 REID_H, REID_W = 256, 128
@@ -555,6 +566,8 @@ def pano_frames(tsv):
 
 
 def track(a, views, det, dens, device):
+    """--track (the module docstring): writes track.tsv a row a frame and distinct.tsv last. Its
+    constants, and what each was fitted on, are beside GATE_MOVE."""
     frames = pano_frames(a.pano)
     reid = ReID(a.reid, a.reid_revision, a.reid_file, device)
     tracker = Tracker()
