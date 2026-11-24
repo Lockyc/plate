@@ -262,24 +262,6 @@ func TestVersionIgnoresExitStatus(t *testing.T) {
 	}
 }
 
-func TestRunAllowExitReturnsStdoutOfNonZeroExit(t *testing.T) {
-	enginetest.Stub(t, "magick", `printf whole; exit 2`)
-	res, err := engine.Run(context.Background(), engine.Cmd{Engine: "magick", AllowExit: true})
-	if err != nil || string(res.Stdout) != "whole" {
-		t.Fatalf("stdout %q, err %v; want whole, nil", res.Stdout, err)
-	}
-	if _, err := engine.Run(context.Background(), engine.Cmd{Engine: "magick"}); err == nil {
-		t.Error("a non-zero exit without AllowExit must fail")
-	}
-}
-
-func TestRunAllowExitStillFailsOnTimeout(t *testing.T) {
-	enginetest.Stub(t, "magick", `sleep 30`)
-	if _, err := engine.Run(context.Background(), engine.Cmd{Engine: "magick", AllowExit: true, Timeout: 200 * time.Millisecond}); err == nil {
-		t.Error("a timeout must fail even with AllowExit")
-	}
-}
-
 func TestCapable(t *testing.T) {
 	e := pins.Engine{Name: "ffmpeg", Kind: pins.Minimum}
 	enginetest.Stub(t, "ffmpeg", "echo ' V....D libx264   libx264 H.264'")

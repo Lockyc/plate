@@ -190,7 +190,6 @@ type Cmd struct {
 	Args        []string
 	Timeout     time.Duration // 0 means DefaultTimeout
 	StderrFatal bool          // any stderr output fails the call
-	AllowExit   bool          // a non-zero exit status is not a failure; the caller judges the output (Chrome's teardown watchdog exits non-zero after writing a whole page)
 	Inputs      []string      // files the engine reads; none may also be an output
 	Outputs     []string      // files that must exist and be non-empty afterwards
 }
@@ -302,8 +301,7 @@ func run(ctx context.Context, path string, c Cmd) (Result, error) {
 	case ctx.Err() != nil:
 		return fail("cancelled")
 	}
-	var exit *exec.ExitError
-	if err != nil && !(c.AllowExit && errors.As(err, &exit)) {
+	if err != nil {
 		return fail(err.Error())
 	}
 	if c.StderrFatal && len(bytes.TrimSpace(res.Stderr)) > 0 {
