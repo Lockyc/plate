@@ -28,6 +28,7 @@ import (
 	"github.com/lockyc/plate/internal/infill"
 	"github.com/lockyc/plate/internal/inpaint"
 	"github.com/lockyc/plate/internal/marks"
+	"github.com/lockyc/plate/internal/pano"
 	"github.com/lockyc/plate/internal/pdf"
 	"github.com/lockyc/plate/internal/policy"
 	"github.com/lockyc/plate/internal/press"
@@ -66,6 +67,7 @@ var commands = []command{
 	{"clip", "check a demo-clip script; render a recording into a looping clip", clip.Main, false},
 	{"walkthrough", "check a walkthrough script; record a narrated walkthrough of a web app", walkthrough.Main, false},
 	{"animate", "capture a page's animation as a muted MP4, WebM, poster, WebP or GIF", animate.Main, false},
+	{"pano", "an Insta360 clip's two lenses to a level 360 equirect: frames or video", pano.Main, false},
 	{"fonts", "embed web fonts into a CSS file as data: URIs", fonts.Main, false},
 	{"qr", "a QR code SVG, dark on light, quiet zone included", qr.Main, false},
 	{"grade", "grade fit: fit a colour grade from a reference; apply it", grade.Main, false},

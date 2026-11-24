@@ -67,9 +67,7 @@ func Encode(ctx context.Context, format, refsDir string, fps, w, h int, out stri
 	var enc []string
 	switch format {
 	case "mp4":
-		enc = append([]string{"-vf", toYUV, "-c:v", "libx264", "-preset", "slow", "-crf", strconv.Itoa(mp4CRF),
-			"-x264-params", mp4Params, "-profile:v", "high", "-pix_fmt", "yuv420p"}, bt709...)
-		enc = append(enc, "-movflags", "+faststart", "-an", "-fps_mode", "cfr", "-r", r)
+		enc = append([]string{"-vf", toYUV}, H264(r, bt709, false)...)
 	case "webm":
 		enc = append([]string{"-vf", toYUV, "-c:v", "libsvtav1", "-preset", "4", "-crf", strconv.Itoa(webmCRF),
 			"-pix_fmt", "yuv420p"}, bt709...)
@@ -83,6 +81,22 @@ func Encode(ctx context.Context, format, refsDir string, fps, w, h int, out stri
 	args := append(append(in, enc...), out)
 	_, err := engine.Run(ctx, engine.Cmd{Engine: "ffmpeg", Args: args, Inputs: []string{first}, Outputs: []string{out}})
 	return err
+}
+
+// H264 is the encode of every mp4 plate writes, at frame rate r (ffmpeg's
+// form, "30" or "30000/1001"), with the colour tags given: H.264 high
+// 4:2:0, faststart, constant fps. It is muted unless audio is set, which
+// copies the first input's audio stream as it is.
+func H264(r string, tags []string, audio bool) []string {
+	enc := append([]string{"-c:v", "libx264", "-preset", "slow", "-crf", strconv.Itoa(mp4CRF),
+		"-x264-params", mp4Params, "-profile:v", "high", "-pix_fmt", "yuv420p"}, tags...)
+	enc = append(enc, "-movflags", "+faststart")
+	if audio {
+		enc = append(enc, "-map", "0:a:0?", "-c:a", "copy")
+	} else {
+		enc = append(enc, "-an")
+	}
+	return append(enc, "-fps_mode", "cfr", "-r", r)
 }
 
 // Poster writes the bytes of refs[i] to out. The caller picks the first

@@ -82,7 +82,7 @@ func ffmpegTool(name string, caps ...Capability) Engine {
 		Name: name, Kind: Minimum,
 		VersionArgs: []string{"-hide_banner", "-version"}, VersionRe: name + ` version n?(\d+\.\d+(?:\.\d+)?)`, Min: "7.1",
 		Install: map[string]string{"darwin": "brew install ffmpeg", "linux": "install ffmpeg 7.1 or later from https://ffmpeg.org/download.html (distribution packages are often too old)"},
-		UsedBy:  []string{"clip", "animate", "build", "walkthrough"}, Capabilities: caps,
+		UsedBy:  []string{"clip", "animate", "build", "walkthrough", "pano"}, Capabilities: caps,
 	}
 }
 
