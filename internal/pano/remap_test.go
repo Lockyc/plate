@@ -2,6 +2,9 @@ package pano
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/binary"
+	"encoding/hex"
 	"math"
 	"testing"
 
@@ -110,5 +113,51 @@ func TestPGM(t *testing.T) {
 	want := "P5\n2 2\n65535\n\x00\x01\x02\x03\xff\xff\x00\x00"
 	if b.String() != want {
 		t.Errorf("pgm = %q, want %q", b.String(), want)
+	}
+}
+
+// Where one lens has no pixel the other takes the whole blend, overlap or
+// not: a lens centred far off its frame's middle loses its far side.
+func TestMaskWhereALensHasNoPixel(t *testing.T) {
+	for k, c := range []struct {
+		lon  float64
+		want uint16
+	}{{-88, 0}, {92, math.MaxUint16}} {
+		m := idealX3()
+		m.Lenses[k].CX = 400
+		xm, _, mask, w, h, err := Maps(m, 2048)
+		if err != nil {
+			t.Fatal(err)
+		}
+		p := at(w, h, c.lon, 0)
+		if xm[k*w*h+p] != outside {
+			t.Fatalf("lens %d has a pixel at lon %v", k, c.lon)
+		}
+		if mask[p] != c.want {
+			t.Errorf("lens %d off its frame: mask at lon %v = %d, want %d", k, c.lon, mask[p], c.want)
+		}
+	}
+}
+
+// mapsSum pins Maps' output for a small ideal X3. A change to Maps' output
+// changes it; when it does, bump mapsFormat (the map cache would otherwise
+// serve maps the old code built) and set mapsSum to the new sum.
+const mapsSum = "021a54d8608600b414616d18f94e45136b857c50b5b88b179b9b22b35727807e"
+
+func TestMapsFormatPinned(t *testing.T) {
+	// An off-centre lens and small residual turns, so every part of Maps counts.
+	m := idealX3()
+	m.Lenses[0].CX, m.Lenses[0].Yaw = 1000, 0.01
+	m.Lenses[1].Pitch, m.Lenses[1].Roll = -0.01, m.Lenses[1].Roll+0.02
+	xm, ym, mask, _, _, err := Maps(m, 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := sha256.New()
+	for _, v := range [][]uint16{xm, ym, mask} {
+		binary.Write(h, binary.LittleEndian, v)
+	}
+	if got := hex.EncodeToString(h.Sum(nil)); got != mapsSum {
+		t.Errorf("Maps' output changed (sum %s, pinned %s, mapsFormat %d): bump mapsFormat so cached maps are rebuilt, and set mapsSum to the new sum", got, mapsSum, mapsFormat)
 	}
 }

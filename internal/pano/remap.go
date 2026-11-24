@@ -91,7 +91,8 @@ const outside = math.MaxUint16
 // blend. xmap and ymap hold lens 0's w×h map then lens 1's; a pixel the lens
 // cannot see is outside. mask is lens 0's weight, 0 to MaxUint16: whole up
 // to the overlap the two lenses share (FOV − 180°), half at 90° off its
-// axis, nothing beyond, linear across the overlap.
+// axis, nothing beyond, linear across the overlap; nothing where lens 0 has
+// no pixel and whole where lens 1 has none.
 func Maps(m insv.Meta, width int) (xmap, ymap, mask []uint16, w, h int, err error) {
 	fov, ok := lensFOV[m.Model]
 	if !ok {
@@ -121,6 +122,12 @@ func Maps(m insv.Meta, width int) (xmap, ymap, mask []uint16, w, h int, err erro
 			}
 			alpha := math.Acos(clamp(d[0]))
 			wt := 0.5 + (math.Pi/2-alpha)/overlap
+			switch {
+			case xmap[p] == outside:
+				wt = 0
+			case xmap[w*h+p] == outside:
+				wt = 1
+			}
 			mask[p] = uint16(math.Round(math.Max(0, math.Min(1, wt)) * math.MaxUint16))
 		}
 	}
@@ -148,10 +155,15 @@ func writePGM(out io.Writer, v []uint16, w, h int) error {
 // and lens 0's blend weight.
 var mapFiles = [5]string{"x0.pgm", "y0.pgm", "x1.pgm", "y1.pgm", "mask.pgm"}
 
+// mapsFormat names the version of Maps' output in the map cache's key, so a
+// plate whose Maps changed never reads maps an older one built.
+// TestMapsFormatPinned fails when Maps' output changes and says to bump it.
+const mapsFormat = 2
+
 // cachedMaps returns the directory holding mapFiles for m's lenses at
-// width, built once per camera calibration and width.
+// width, built once per camera calibration, width and mapsFormat.
 func cachedMaps(m insv.Meta, width int) (string, error) {
-	key := fmt.Sprintf("model %q fov %v frame %dx%d width %d lenses %+v", m.Model, lensFOV[m.Model], m.Width, m.Height, width, m.Lenses)
+	key := fmt.Sprintf("format %d model %q fov %v frame %dx%d width %d lenses %+v", mapsFormat, m.Model, lensFOV[m.Model], m.Width, m.Height, width, m.Lenses)
 	return engine.Cached("pano-maps", map[string][]byte{"key": []byte(key)}, func(dir string) error {
 		xm, ym, mask, w, h, err := Maps(m, width)
 		if err != nil {
