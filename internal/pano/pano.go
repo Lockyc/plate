@@ -29,12 +29,17 @@ const usage = "pano [--every 30s | --video] [--width 5760] [--mode level|lock] [
 // stretch shorter than twice it gives one frame at its middle.
 const firstFrame = 5.0
 
+// minEvery is the shortest --every: frames snap to the clip's frame grid,
+// so two a second apart can fall in one second of the clock and take one
+// name.
+const minEvery = 2 * time.Second
+
 // Main is `plate pano`: an Insta360 clip's two lens files stitched into a
 // level equirect, as a JPEG every --every or as one video, with each
 // frame's rotation in pano.tsv.
 func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := cli.Flags("pano", usage, stderr)
-	every := fs.Duration("every", 30*time.Second, "write a frame this often, named by its wall-clock time (at least 1s)")
+	every := fs.Duration("every", 30*time.Second, "write a frame this often, named by its wall-clock time (at least 2s)")
 	asVideo := fs.Bool("video", false, "write the stretch as pano.mp4, with the front file's sound, instead of frames")
 	width := cli.Int(fs, "width", 5760, "equirect width in pixels (even); the height is half")
 	mode := fs.String("mode", "level", "level: undo tilt and the heading's shake; lock: undo all rotation")
@@ -52,8 +57,8 @@ func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return cli.Usage(stderr, "pano", "--out is required")
 	case *asVideo && everySet:
 		return cli.Usage(stderr, "pano", "--every and --video are each a whole output: pass one")
-	case *every < time.Second:
-		return cli.Usage(stderr, "pano", "--every %v: frames are named by the second, so at least 1s", *every)
+	case *every < minEvery:
+		return cli.Usage(stderr, "pano", "--every %v: frames are named by the second, so at least %v", *every, minEvery)
 	case *width < 2 || *width%2 != 0:
 		return cli.Usage(stderr, "pano", "--width %d: want an even number of pixels", *width)
 	case *from < 0 || *to < 0 || (*to != 0 && *to <= *from):

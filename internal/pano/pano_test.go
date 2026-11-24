@@ -156,7 +156,7 @@ func TestUsage(t *testing.T) {
 		{"--every", "30s", "--video", "--out", "o", front},
 		{"--width", "1001", "--out", "o", front},
 		{"--mode", "spin", "--out", "o", front},
-		{"--every", "0.5s", "--out", "o", front},
+		{"--every", "1.5s", "--out", "o", front},
 		{front},
 	} {
 		var stdout, stderr bytes.Buffer
