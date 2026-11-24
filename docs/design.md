@@ -45,6 +45,7 @@ internal/icc/        the embedded sRGB profile
 internal/imgsize/    image dimensions without decoding pixels
 internal/insv/       an Insta360 clip's trailer: lens calibration and IMU; insvtest
                      writes one onto any video for tests and fixtures
+internal/pano/       a 360 clip levelled or locked: per-frame rotations from the IMU
 internal/enginetest/ sh stubs that stand in for engines in tests
 internal/pins/       the one table of engine versions and hosted image models
 internal/pdf/        PDF page count, page boxes and text through poppler; the
