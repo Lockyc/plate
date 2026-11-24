@@ -221,6 +221,12 @@ colours, or renders what it is given.
   the people it can box; the density map adds only peaks outside every box
   and among other peaks, the crowd too small or packed to box. The models
   and constants are the bake-off's winner on the `count-*` quality cases.
+  `--track` matches each frame's boxed people to tracks on the sphere, by
+  arc and re-ID appearance, and joins a track that ends to one that starts
+  within a minute when their appearance matches: the joined count is `low`,
+  the unjoined `high`. People seen only in the density map have no box to
+  follow, so they are reported as a share beside the range, not scaled into
+  it.
 - **clip** — ffmpeg only decodes and encodes (`clip.ExtractActivity`,
   `clip.ExtractFrames`, `video.Encode`); everything between is Go: the trim
   (`clip.TrimWindow`) and its idle cuts (`clip.IdleCuts`, applied to the
