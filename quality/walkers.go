@@ -11,7 +11,8 @@ import (
 	"math"
 	"os"
 	"path/filepath"
-	"strings"
+
+	"github.com/lockyc/plate/internal/pano"
 )
 
 // walkerCells is how many people the walkers sheet holds, one to a cell of
@@ -115,8 +116,7 @@ func trackWalkers(args []string) error {
 			return fmt.Errorf("track-walkers: cell %d of %s is empty", i, fs.Arg(1))
 		}
 	}
-	var tsv strings.Builder
-	tsv.WriteString("file\tt\tclock\tyaw\tpitch\troll\n")
+	var rows []pano.Row
 	for n := 0; float64(n)**every < *seconds-1e-9; n++ {
 		t := float64(n) * *every
 		frame := image.NewRGBA(ground.Bounds())
@@ -157,9 +157,9 @@ func trackWalkers(args []string) error {
 		if err != nil {
 			return err
 		}
-		fmt.Fprintf(&tsv, "%s\t%.3f\t00:00:%06.3f\t0\t0\t0\n", name, t, t)
+		rows = append(rows, pano.Row{File: name, T: t, Clock: fmt.Sprintf("00:00:%06.3f", t)})
 	}
-	return os.WriteFile(filepath.Join(dir, "pano.tsv"), []byte(tsv.String()), 0o644)
+	return pano.WriteTSV(filepath.Join(dir, "pano.tsv"), rows)
 }
 
 func decode(path string) (image.Image, error) {

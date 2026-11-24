@@ -127,22 +127,18 @@ func (j job) run(ctx context.Context, path, out string, stdout io.Writer) error 
 	if !j.video && j.every < 1/fps-1e-9 {
 		return fmt.Errorf("--every %gs is under one frame interval (%.4f s at %s fps)", j.every, 1/fps, rate)
 	}
-	dir, made, err := outdir.Make(out, "pano-")
+	dir, _, err := outdir.Make(out, "")
 	if err != nil {
 		return err
 	}
 	maps, err := cachedMaps(meta, j.width)
-	if err == nil {
-		if j.video {
-			err = j.writeVideo(ctx, front, back, maps, meta, fps, rate, end, dir, stdout)
-		} else {
-			err = j.writeFrames(ctx, front, back, maps, meta, fps, end, dir, stdout)
-		}
+	if err != nil {
+		return err
 	}
-	if err != nil && made {
-		os.RemoveAll(dir)
+	if j.video {
+		return j.writeVideo(ctx, front, back, maps, meta, fps, rate, end, dir, stdout)
 	}
-	return err
+	return j.writeFrames(ctx, front, back, maps, meta, fps, end, dir, stdout)
 }
 
 // everyTimes are --every's frame times in [from, end) of a clip at fps: the
@@ -169,12 +165,12 @@ func (j job) writeFrames(ctx context.Context, front, back, maps string, meta ins
 		return err
 	}
 	names := make([]string, len(times))
-	rows := make([]string, len(times))
+	rows := make([]Row, len(times))
 	for k, t := range times {
 		rots[k] = j.applied(rots[k])
 		clock, _ := clockName(front, t)
 		names[k] = strings.NewReplacer(":", "", ".", "_").Replace(clock) + ".jpg"
-		rows[k] = row(names[k], t, clock, rots[k])
+		rows[k] = Row{names[k], t, clock, rots[k]}
 	}
 	if err := outdir.RefuseExisting(dir, append([]string{"pano.tsv"}, names...)); err != nil {
 		return err
@@ -188,7 +184,7 @@ func (j job) writeFrames(ctx context.Context, front, back, maps string, meta ins
 		}
 		fmt.Fprintln(stdout, dst)
 	}
-	return writeTSV(filepath.Join(dir, "pano.tsv"), rows)
+	return WriteTSV(filepath.Join(dir, "pano.tsv"), rows)
 }
 
 func (j job) writeVideo(ctx context.Context, front, back, maps string, meta insv.Meta, fps float64, rate string, end float64, dir string, stdout io.Writer) error {
@@ -206,7 +202,7 @@ func (j job) writeVideo(ctx context.Context, front, back, maps string, meta insv
 	}
 	send := resent(rots, resendAngle)
 	var cmds []video.Command
-	rows := make([]string, len(times))
+	rows := make([]Row, len(times))
 	shown := 0
 	for k, t := range times {
 		if send[k] {
@@ -218,7 +214,7 @@ func (j job) writeVideo(ctx context.Context, front, back, maps string, meta insv
 				Args: fmt.Sprintf("v360@level yaw %.4f, v360@level pitch %.4f, v360@level roll %.4f", r[0], r[1], r[2])})
 		}
 		clock, _ := clockName(front, t)
-		rows[k] = row("pano.mp4", t, clock, rots[shown])
+		rows[k] = Row{"pano.mp4", t, clock, rots[shown]}
 	}
 	cmdFile, err := video.WriteCommands(cmds, fps)
 	if err != nil {
@@ -237,7 +233,7 @@ func (j job) writeVideo(ctx context.Context, front, back, maps string, meta insv
 		return err
 	}
 	fmt.Fprintln(stdout, dst)
-	return writeTSV(filepath.Join(dir, "pano.tsv"), rows)
+	return WriteTSV(filepath.Join(dir, "pano.tsv"), rows)
 }
 
 // lensInputs are ffmpeg's inputs 0 (front) and 1 (back), each from ss, for
@@ -280,14 +276,32 @@ func degrees(r Rot) [3]float64 {
 	return [3]float64{r.Yaw * 180 / math.Pi, r.Pitch * 180 / math.Pi, r.Roll * 180 / math.Pi}
 }
 
-func row(file string, t float64, clock string, r Rot) string {
-	d := degrees(r)
-	return fmt.Sprintf("%s\t%.3f\t%s\t%.2f\t%.2f\t%.2f", file, t, clock, d[0], d[1], d[2])
+// Columns are pano.tsv's columns, in order: a frame's file, its time in
+// seconds into the clip, its wall-clock time, and the rotation v360
+// applied to it in degrees.
+var Columns = []string{ColFile, ColT, "clock", "yaw", "pitch", "roll"}
+
+// ColFile and ColT name the columns a reader of pano.tsv finds a frame by.
+const ColFile, ColT = "file", "t"
+
+// Row is one frame of pano.tsv: File in its directory, T seconds into the
+// clip, Clock its wall-clock time, Rot the rotation v360 applied to it.
+type Row struct {
+	File  string
+	T     float64
+	Clock string
+	Rot   Rot
 }
 
-func writeTSV(path string, rows []string) error {
-	body := "file\tt\tclock\tyaw\tpitch\troll\n" + strings.Join(rows, "\n") + "\n"
-	return atomicfile.WriteFile(path, []byte(body), 0o644)
+// WriteTSV writes rows as the pano.tsv at path, whole or not at all.
+func WriteTSV(path string, rows []Row) error {
+	var b strings.Builder
+	b.WriteString(strings.Join(Columns, "\t") + "\n")
+	for _, r := range rows {
+		d := degrees(r.Rot)
+		fmt.Fprintf(&b, "%s\t%.3f\t%s\t%.2f\t%.2f\t%.2f\n", r.File, r.T, r.Clock, d[0], d[1], d[2])
+	}
+	return atomicfile.WriteFile(path, []byte(b.String()), 0o644)
 }
 
 var startName = regexp.MustCompile(`^VID_(\d{8}_\d{6})_`)
