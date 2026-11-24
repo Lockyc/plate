@@ -22,6 +22,7 @@ import (
 	"github.com/lockyc/plate/internal/ml"
 	"github.com/lockyc/plate/internal/outdir"
 	"github.com/lockyc/plate/internal/pins"
+	"github.com/lockyc/plate/internal/tsv"
 )
 
 const usage = `count [--equirect auto|yes|no] [--nadir-deg 35] [--zenith-deg 30] [--marked] --out <dir> <image|dir>...
@@ -212,34 +213,24 @@ func (j job) run(ctx context.Context, frames []string, out string, stdout io.Wri
 // peakOf reads a per-frame table (counts.tsv or track.tsv): how many frames,
 // and the highest value in column val and its frame's key (the first, on a
 // tie).
-func peakOf(tsv, key, val string) (n int, peak, at string, err error) {
-	b, err := os.ReadFile(tsv)
+func peakOf(path, key, val string) (n int, peak, at string, err error) {
+	t, err := tsv.Read(path, key, val)
 	if err != nil {
 		return 0, "", "", err
 	}
-	lines := strings.Split(strings.TrimSpace(string(b)), "\n")
-	head := strings.Split(lines[0], "\t")
-	fc, ec := slices.Index(head, key), slices.Index(head, val)
-	if fc < 0 || ec < 0 {
-		return 0, "", "", fmt.Errorf("%s: want %s and %s columns, header is %q", tsv, key, val, lines[0])
-	}
 	best := -1.0
-	for _, l := range lines[1:] {
-		r := strings.Split(l, "\t")
-		if len(r) <= max(fc, ec) {
-			return 0, "", "", fmt.Errorf("%s: short row %q", tsv, l)
-		}
-		v, ok := cli.Finite(r[ec])
+	for i := range t.Rows {
+		k, s := t.Get(i, key), t.Get(i, val)
+		v, ok := cli.Finite(s)
 		if !ok {
-			return 0, "", "", fmt.Errorf("%s: %s %s: %s %q is not a number", tsv, key, r[fc], val, r[ec])
+			return 0, "", "", fmt.Errorf("%s: %s %s: %s %q is not a number", path, key, k, val, s)
 		}
-		n++
 		if v > best {
-			best, peak, at = v, r[ec], r[fc]
+			best, peak, at = v, s, k
 		}
 	}
-	if n == 0 {
-		return 0, "", "", fmt.Errorf("%s has no frames", tsv)
+	if len(t.Rows) == 0 {
+		return 0, "", "", fmt.Errorf("%s has no frames", path)
 	}
-	return n, peak, at, nil
+	return len(t.Rows), peak, at, nil
 }

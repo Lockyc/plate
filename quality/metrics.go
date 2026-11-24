@@ -22,6 +22,7 @@ import (
 	"github.com/lockyc/plate/internal/engine"
 	"github.com/lockyc/plate/internal/imgsize"
 	"github.com/lockyc/plate/internal/raster"
+	table "github.com/lockyc/plate/internal/tsv"
 )
 
 // Params are a case's metric parameters, placeholders already expanded.
@@ -860,21 +861,17 @@ func rangeSpread(p Params) (float64, error) {
 	if err != nil || math.IsNaN(truth) {
 		return 0, fmt.Errorf("range: want a truth, the number of distinct people")
 	}
-	rows, err := readTSV(tsv)
+	t, err := table.Read(tsv, "low", "high")
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("range: %w", err)
 	}
-	if len(rows) != 2 {
+	if len(t.Rows) != 1 {
 		return 0, fmt.Errorf("range: %s: want a header and one row", tsv)
 	}
-	lc, hc := slices.Index(rows[0], "low"), slices.Index(rows[0], "high")
-	if lc < 0 || hc < 0 || len(rows[1]) <= max(lc, hc) {
-		return 0, fmt.Errorf("range: %s: want low and high columns, header is %q", tsv, strings.Join(rows[0], "\t"))
-	}
-	low, ok1 := finite(rows[1][lc])
-	high, ok2 := finite(rows[1][hc])
+	low, ok1 := finite(t.Get(0, "low"))
+	high, ok2 := finite(t.Get(0, "high"))
 	if !ok1 || !ok2 || low > high {
-		return 0, fmt.Errorf("range: %s: low %q and high %q are not a range", tsv, rows[1][lc], rows[1][hc])
+		return 0, fmt.Errorf("range: %s: low %q and high %q are not a range", tsv, t.Get(0, "low"), t.Get(0, "high"))
 	}
 	if truth < low || truth > high {
 		return 0, fmt.Errorf("range: %s: the truth %g lies outside low %g to high %g", tsv, truth, low, high)
@@ -971,18 +968,15 @@ type pointsFile struct {
 
 // readPoints reads a points file's first two columns, under a header.
 func readPoints(path string) (pointsFile, error) {
-	rows, err := readTSV(path)
+	t, err := table.Read(path)
 	if err != nil {
-		return pointsFile{}, err
+		return pointsFile{}, fmt.Errorf("points: %w", err)
 	}
-	if len(rows) == 0 || len(rows[0]) < 2 {
+	if len(t.Head) < 2 {
 		return pointsFile{}, fmt.Errorf("points: %s: want a header of at least two columns", path)
 	}
-	f := pointsFile{cols: rows[0][:2]}
-	for _, r := range rows[1:] {
-		if len(r) < 2 {
-			return pointsFile{}, fmt.Errorf("points: %s: short row %q", path, strings.Join(r, "\t"))
-		}
+	f := pointsFile{cols: t.Head[:2]}
+	for _, r := range t.Rows {
 		a, ok1 := finite(r[0])
 		b, ok2 := finite(r[1])
 		if !ok1 || !ok2 {
@@ -1014,24 +1008,18 @@ func count(p Params) (float64, error) {
 	if frame == "" {
 		return 0, fmt.Errorf("count: want a frame")
 	}
-	rows, err := readTSV(tsv)
+	t, err := table.Read(tsv, "frame", "estimate")
 	if err != nil {
-		return 0, err
-	}
-	if len(rows) == 0 {
-		return 0, fmt.Errorf("count: %s is empty", tsv)
-	}
-	fc, ec := slices.Index(rows[0], "frame"), slices.Index(rows[0], "estimate")
-	if fc < 0 || ec < 0 {
-		return 0, fmt.Errorf("count: %s: want frame and estimate columns, header is %q", tsv, strings.Join(rows[0], "\t"))
+		return 0, fmt.Errorf("count: %w", err)
 	}
 	var estimate float64
 	found := false
-	for _, r := range rows[1:] {
-		if fc < len(r) && r[fc] == frame && ec < len(r) {
-			estimate, err = strconv.ParseFloat(r[ec], 64)
+	for i := range t.Rows {
+		if t.Get(i, "frame") == frame {
+			s := t.Get(i, "estimate")
+			estimate, err = strconv.ParseFloat(s, 64)
 			if err != nil || math.IsNaN(estimate) || math.IsInf(estimate, 0) || estimate < 0 {
-				return 0, fmt.Errorf("count: %s: frame %q: estimate %q is not a count", tsv, frame, r[ec])
+				return 0, fmt.Errorf("count: %s: frame %q: estimate %q is not a count", tsv, frame, s)
 			}
 			found = true
 			break
@@ -1040,30 +1028,15 @@ func count(p Params) (float64, error) {
 	if !found {
 		return 0, fmt.Errorf("count: %s has no frame %q", tsv, frame)
 	}
-	points, err := readTSV(truthPath)
+	points, err := table.Read(truthPath)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("count: %s: want an x, y header: %w", truthPath, err)
 	}
-	if len(points) == 0 || !slices.Equal(points[0], []string{"x", "y"}) {
+	if !slices.Equal(points.Head, []string{"x", "y"}) {
 		return 0, fmt.Errorf("count: %s: want an x, y header", truthPath)
 	}
-	truth := float64(len(points) - 1)
+	truth := float64(len(points.Rows))
 	return math.Abs(estimate-truth) / math.Max(truth, 1), nil
-}
-
-// readTSV splits a tab-separated file into rows, skipping blank lines.
-func readTSV(path string) ([][]string, error) {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	var rows [][]string
-	for _, line := range strings.Split(strings.ReplaceAll(string(b), "\r\n", "\n"), "\n") {
-		if strings.TrimSpace(line) != "" {
-			rows = append(rows, strings.Split(line, "\t"))
-		}
-	}
-	return rows, nil
 }
 
 func init() {
