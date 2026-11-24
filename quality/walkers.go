@@ -22,29 +22,56 @@ const walkerCells = 10
 // on its stick and a person's height.
 const camHeight, personHeight = 1.6, 1.7
 
-// segment is a stretch of time a walker is in view: from start to end
-// seconds, at lon0 degrees and dist0 metres from the camera at start,
-// turning at omega degrees a second and moving away at delta metres a second.
+// segment is a stretch of time a walker is in view, walking a straight line
+// on the ground: from start to end seconds, starting at lon0 degrees and
+// dist0 metres from the camera, at vx metres a second towards lon 90 and vz
+// towards lon 0.
 type segment struct {
-	start, end, lon0, omega, dist0, delta float64
+	start, end, lon0, dist0, vx, vz float64
+}
+
+// across is a segment walked at speed metres a second square to the line
+// from the camera, so that lon grows; a negative speed turns it the other
+// way.
+func across(start, end, lon0, dist0, speed float64) segment {
+	r := lon0 * math.Pi / 180
+	return segment{start, end, lon0, dist0, speed * math.Cos(r), -speed * math.Sin(r)}
+}
+
+// away is a segment walked at speed metres a second straight away from the
+// camera; a negative speed comes towards it.
+func away(start, end, lon0, dist0, speed float64) segment {
+	r := lon0 * math.Pi / 180
+	return segment{start, end, lon0, dist0, speed * math.Sin(r), speed * math.Cos(r)}
+}
+
+// at is where the walker is at t: lon degrees, dist metres.
+func (s segment) at(t float64) (lon, dist float64) {
+	r := s.lon0 * math.Pi / 180
+	x := s.dist0*math.Sin(r) + s.vx*(t-s.start)
+	z := s.dist0*math.Cos(r) + s.vz*(t-s.start)
+	return math.Atan2(x, z) * 180 / math.Pi, math.Hypot(x, z)
 }
 
 // walkerPaths is the track-walkers scene: one entry per walker, in the
-// walkers sheet's cell order. Ten people; walkers 4 and 5 cross, the nearer
-// in front; walker 2 leaves at 12 s and comes back 10 s later 140 degrees
-// away, and walker 6 leaves at 15 s and comes back 15 s later 135 degrees
-// away; walkers 3 and 8 stand still. Ten distinct people, twelve tracks.
+// walkers sheet's cell order. Ten people and twelve tracks: walkers 0 and 7
+// pass close and fast (up to 11 and 15 degrees a second) through the same
+// stretch 4 s apart, then leave; walker 1 walks away and leaves at 12 s and
+// comes back towards the camera 10 s later, 145 degrees round; walker 5
+// leaves at 15 s and comes back 15 s later 114 degrees round; walkers 3 and
+// 4 cross at about 7.5 s, the nearer in front; walker 6 drifts closer and
+// walkers 2, 8 and 9 stand. No two walkers overlap but the crossing pair.
 var walkerPaths = [walkerCells][]segment{
-	{{0, 40, -160, 1.0, 5.0, 0}},
-	{{0, 12, -120, 0.8, 6.0, 0}, {22, 40, 20, 0.8, 5.5, 0}},
-	{{0, 40, -70, 0, 4.5, 0}},
-	{{0, 40, -40, 1.0, 7.0, 0}},
-	{{0, 40, 0, -1.0, 4.0, 0}},
-	{{0, 15, 40, 0.6, 5.0, 0}, {30, 40, -95, 0.6, 6.0, 0}},
-	{{0, 40, 70, 0.5, 8.0, -0.05}},
-	{{0, 40, 110, 0, 6.0, 0}},
-	{{0, 40, 170, -0.3, 5.0, 0}},
-	{{0, 40, 135, 0.3, 4.5, 0}},
+	{across(0, 10, -170, 4, 0.8)},
+	{away(0, 12, 30, 5, 0.5), away(22, 40, 175, 10, -0.35)},
+	{away(0, 40, 140, 4.5, 0)},
+	{across(0, 40, -45, 7, 0.25)},
+	{across(0, 40, -5, 4, -0.25)},
+	{across(0, 15, 70, 6, 0.3), away(30, 40, -140, 9, -0.4)},
+	{away(0, 40, 112, 8, -0.08)},
+	{across(14, 22, -178, 3.5, 0.9)},
+	{away(0, 40, 50, 6, 0)},
+	{away(0, 40, -90, 5, 0)},
 }
 
 // trackWalkers writes a run of equirect frames as `plate pano --every`
@@ -102,7 +129,8 @@ func trackWalkers(args []string) error {
 		for i, segs := range walkerPaths {
 			for _, s := range segs {
 				if t >= s.start-1e-9 && t < s.end-1e-9 {
-					in = append(in, placed{i, s.lon0 + s.omega*(t-s.start), s.dist0 + s.delta*(t-s.start)})
+					lon, dist := s.at(t)
+					in = append(in, placed{i, lon, dist})
 				}
 			}
 		}
