@@ -43,6 +43,8 @@ internal/frame/      the source pre-pass the ML ops read: oriented, sRGB, 8-bit
                      one read of a source's opacity, size and colourspace
 internal/icc/        the embedded sRGB profile
 internal/imgsize/    image dimensions without decoding pixels
+internal/insv/       an Insta360 clip's trailer: lens calibration and IMU; insvtest
+                     writes one onto any video for tests and fixtures
 internal/enginetest/ sh stubs that stand in for engines in tests
 internal/pins/       the one table of engine versions and hosted image models
 internal/pdf/        PDF page count, page boxes and text through poppler; the
