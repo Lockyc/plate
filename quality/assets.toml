@@ -156,10 +156,10 @@ sha256  = "a52cdb2789863e0c36c933ef91ac6df7bf88a6f48dba09ae9858ca9d8de95963"
 [[asset]]
 file    = "crowd-sparse.points.tsv"
 source  = "synthetic"
-recipe  = "marked for plate: one x, y pixel row per visible person's head in crowd-sparse.jpg (where a head is hidden and the body shows, where the head is), marked on 1000 px tiles with a 150 px overlap and merged, duplicates within 70 px dropped"
+recipe  = "marked for plate: one x, y pixel row per visible person's head in crowd-sparse.jpg (where a head is hidden and the body shows, where the head is), marked on 1000 px tiles with a 150 px overlap and merged, duplicates within 70 px dropped; reconciled point by point on 3x crops with a second, independent count"
 author  = "plate"
 licence = "CC0"
-sha256  = "6e98eb7900d203ebaf11875cc94b0928a1b20c06bc33ce0faf3aff8836481c1f"
+sha256  = "df5c5315fe17def8aa4cdad299ec9b18356edb72c60adf93a55e9944c9295064"
 
 [[asset]]
 file    = "crowd-dense.jpg"
@@ -172,10 +172,10 @@ sha256  = "3e31ccaa3257eefa5242c3794969b567f250e8f40930e3956b74a553cdabd207"
 [[asset]]
 file    = "crowd-dense.points.tsv"
 source  = "synthetic"
-recipe  = "marked for plate: one x, y pixel row per visible person's head in crowd-dense.jpg (where a head is hidden and the body shows, where the head is), the far crowd on 3x zooms of 400 x 200 px windows and the near crowd on 2x 600 px tiles with a 100 px overlap, merged with duplicates within 30 px dropped; heads outside the frame are not marked"
+recipe  = "marked for plate: one x, y pixel row per visible person's head in crowd-dense.jpg (where a head is hidden and the body shows, where the head is), the far crowd on 3x zooms of 400 x 200 px windows and the near crowd on 2x 600 px tiles with a 100 px overlap, merged with duplicates within 30 px dropped; heads outside the frame are not marked; reconciled point by point on 3x crops with a second, independent count"
 author  = "plate"
 licence = "CC0"
-sha256  = "cc536102aabca6e047b1d38a1fa5c5f687d23f1f41cd8642cb00eaa89a0e690e"
+sha256  = "42f4fcf90e819e8cb4be2365e5cb52b17fbe35f350bced17353bc8277b8e18ce"
 
 [[asset]]
 file    = "crowd-equirect.jpg"
@@ -188,10 +188,10 @@ sha256  = "5b1415e6924a56ce5429ebe25ea83f3dffe4aab91ade29117304cd682cd6378a"
 [[asset]]
 file    = "crowd-equirect.points.tsv"
 source  = "synthetic"
-recipe  = "marked for plate: one x, y equirect pixel row per visible person's head in crowd-equirect.jpg, on 3x to 5x zooms along the horizon band; no one stands within 35 degrees of the nadir or 30 degrees of the zenith"
-author  = "plate"
-licence = "CC0"
-sha256  = "de28fa6f8a959035130e72a42728965fb36a85b3c679b27378a1b34994a5e2d1"
+recipe  = "marked for plate: one x, y equirect pixel row per visible person's head in crowd-equirect.jpg, on 3x to 5x zooms along the horizon band; no one stands within 35 degrees of the nadir or 30 degrees of the zenith; reconciled point by point on 3x crops with a second, independent count"
+author  = "plate, from crowd-equirect.jpg (Francescosartori)"
+licence = "CC BY-SA 4.0"
+sha256  = "cba3ede5f0a29c640ad2acbf472fc59e8f2bf8ee59592fb5d31e22e0de0db3d6"
 
 [[asset]]
 file    = "crowd-equirect-holder.jpg"
