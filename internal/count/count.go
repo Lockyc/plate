@@ -3,7 +3,9 @@
 // person's position, and on request marked frames to check the count by eye.
 // An equirect frame is cut into perspective views first, so a person keeps
 // the shape a detector was trained on; the frame's top and bottom caps, where
-// the camera's holder stands, are left out.
+// the camera's holder stands, are left out. With --track it follows the
+// people through a run of `plate pano --every` frames and counts how many
+// different people passed, as a range.
 package count
 
 import (
@@ -23,13 +25,25 @@ import (
 )
 
 const usage = `count [--equirect auto|yes|no] [--nadir-deg 35] [--zenith-deg 30] [--marked] --out <dir> <image|dir>...
+count --track <pano-dir> [--min-seconds 3] [--nadir-deg 35] [--zenith-deg 30] --out <dir>
 
 Writes <dir>/counts.tsv: per frame the people a detector boxed (detected),
 the people counted from the crowd density map, too small or packed to box
 (density), and their sum (estimate); the counted people's positions in <dir>/points/<frame>.tsv (lon and lat in degrees for an
 equirect frame, else x and y in pixels), and with --marked each frame with
 every counted person dotted and the density overlaid in <dir>/marked/, an
-equirect frame's views beside it in <dir>/marked/<frame>/.`
+equirect frame's views beside it in <dir>/marked/<frame>/.
+
+--track reads a directory of plate pano --every frames (lock mode, so a
+person standing still stays still) in the order of its pano.tsv, refusing a
+gap of over 5 steps. It writes <dir>/track.tsv, per frame its time t and the
+people on screen (the estimate, its density part re-read every 2 s), and
+<dir>/distinct.tsv: high, the tracks of boxed people lasting --min-seconds or
+longer; low, those tracks after joining the ones whose appearance matches
+across a gap of up to 60 s (one person leaving and coming back); tracks,
+every track however short; and untracked_share, the share of the people on
+screen counted only from the density map, who cannot be tracked and are in
+neither low nor high.`
 
 // images are the extensions a directory argument is expanded to.
 var images = []string{".jpg", ".jpeg", ".png"}
@@ -42,6 +56,8 @@ func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	nadir := cli.Float(fs, "nadir-deg", 35, "leave out this many degrees around straight down, where the camera's holder is")
 	zenith := cli.Float(fs, "zenith-deg", 30, "leave out this many degrees around straight up")
 	marked := fs.Bool("marked", false, "also write marked frames to check the count by eye")
+	trackDir := fs.String("track", "", "a directory of plate pano --every frames to follow the people through")
+	minSeconds := cli.Float(fs, "min-seconds", 3, "with --track, the shortest track counted as a person")
 	rest, code, ok := cli.Parse(fs, args, -1)
 	if !ok {
 		return code
@@ -49,7 +65,15 @@ func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	switch {
 	case *out == "":
 		return cli.Usage(stderr, "count", "--out is required")
-	case len(rest) == 0:
+	case *trackDir != "" && len(rest) > 0:
+		return cli.Usage(stderr, "count", "--track reads its frames from the directory it names; give no other images")
+	case *trackDir != "" && *marked:
+		return cli.Usage(stderr, "count", "--marked is not available with --track")
+	case *trackDir != "" && *eq == "no":
+		return cli.Usage(stderr, "count", "--equirect no: --track frames are pano's equirects")
+	case *minSeconds < 0:
+		return cli.Usage(stderr, "count", "--min-seconds %v: want 0 or more", *minSeconds)
+	case *trackDir == "" && len(rest) == 0:
 		return cli.Usage(stderr, "count", "want at least one image or directory")
 	case *eq != "auto" && *eq != "yes" && *eq != "no":
 		return cli.Usage(stderr, "count", "--equirect %q: want auto, yes or no", *eq)
@@ -58,6 +82,13 @@ func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	case *zenith < 0 || *zenith >= 90:
 		return cli.Usage(stderr, "count", "--zenith-deg %v: want 0 to under 90", *zenith)
 	}
+	j := job{equirect: *eq, nadir: *nadir, zenith: *zenith, marked: *marked, minSeconds: *minSeconds}
+	if *trackDir != "" {
+		if err := j.track(ctx, *trackDir, *out, stdout); err != nil {
+			return cli.Fail(stderr, "count", err)
+		}
+		return 0
+	}
 	frames, err := expand(rest)
 	if err != nil {
 		return cli.Fail(stderr, "count", err)
@@ -65,7 +96,6 @@ func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	if err := sameStem(frames); err != nil {
 		return cli.Usage(stderr, "count", "%v", err)
 	}
-	j := job{equirect: *eq, nadir: *nadir, zenith: *zenith, marked: *marked}
 	if err := j.run(ctx, frames, *out, stdout); err != nil {
 		return cli.Fail(stderr, "count", err)
 	}
@@ -76,6 +106,18 @@ type job struct {
 	equirect      string
 	nadir, zenith float64
 	marked        bool
+	minSeconds    float64
+}
+
+// models are count.py's arguments every run takes: where it writes, the
+// pinned models and the cuts.
+func (j job) models(dir string) []string {
+	return []string{
+		"--out", dir,
+		"--detector", pins.CountDetector.Repo, "--detector-revision", pins.CountDetector.Revision,
+		"--density", pins.CountDensity.Repo, "--density-revision", pins.CountDensity.Revision, "--density-file", pins.CountDensity.File,
+		"--nadir-deg", fmt.Sprint(j.nadir), "--zenith-deg", fmt.Sprint(j.zenith),
+	}
 }
 
 // expand replaces each directory with its images, in name order.
@@ -140,12 +182,7 @@ func (j job) run(ctx context.Context, frames []string, out string, stdout io.Wri
 	if err := outdir.RefuseExisting(dir, []string{"counts.tsv", "points", "marked"}); err != nil {
 		return err
 	}
-	args := []string{
-		"--out", dir,
-		"--detector", pins.CountDetector.Repo, "--detector-revision", pins.CountDetector.Revision,
-		"--density", pins.CountDensity.Repo, "--density-revision", pins.CountDensity.Revision, "--density-file", pins.CountDensity.File,
-		"--nadir-deg", fmt.Sprint(j.nadir), "--zenith-deg", fmt.Sprint(j.zenith),
-	}
+	args := j.models(dir)
 	if j.marked {
 		args = append(args, "--marked")
 	}
@@ -166,7 +203,7 @@ func (j job) run(ctx context.Context, frames []string, out string, stdout io.Wri
 	if _, err := ml.RunScript(ctx, "count.py", args, frames, []string{tsv}); err != nil {
 		return err
 	}
-	n, peak, at, err := summary(tsv)
+	n, peak, at, err := peakOf(tsv, "frame", "estimate")
 	if err != nil {
 		return err
 	}
@@ -174,18 +211,19 @@ func (j job) run(ctx context.Context, frames []string, out string, stdout io.Wri
 	return nil
 }
 
-// summary reads counts.tsv: how many frames, and the highest estimate and
-// its frame (the first, on a tie).
-func summary(tsv string) (n int, peak, at string, err error) {
+// peakOf reads a per-frame table (counts.tsv or track.tsv): how many frames,
+// and the highest value in column val and its frame's key (the first, on a
+// tie).
+func peakOf(tsv, key, val string) (n int, peak, at string, err error) {
 	b, err := os.ReadFile(tsv)
 	if err != nil {
 		return 0, "", "", err
 	}
 	lines := strings.Split(strings.TrimSpace(string(b)), "\n")
 	head := strings.Split(lines[0], "\t")
-	fc, ec := slices.Index(head, "frame"), slices.Index(head, "estimate")
+	fc, ec := slices.Index(head, key), slices.Index(head, val)
 	if fc < 0 || ec < 0 {
-		return 0, "", "", fmt.Errorf("%s: want frame and estimate columns, header is %q", tsv, lines[0])
+		return 0, "", "", fmt.Errorf("%s: want %s and %s columns, header is %q", tsv, key, val, lines[0])
 	}
 	best := -1.0
 	for _, l := range lines[1:] {
@@ -195,7 +233,7 @@ func summary(tsv string) (n int, peak, at string, err error) {
 		}
 		v, ok := cli.Finite(r[ec])
 		if !ok {
-			return 0, "", "", fmt.Errorf("%s: frame %s: estimate %q is not a number", tsv, r[fc], r[ec])
+			return 0, "", "", fmt.Errorf("%s: %s %s: %s %q is not a number", tsv, key, r[fc], val, r[ec])
 		}
 		n++
 		if v > best {

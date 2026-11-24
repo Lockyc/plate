@@ -260,6 +260,11 @@ var CountDetector = Model{Repo: "PekingU/rtdetr_v2_r50vd", Revision: "2824940756
 // from.
 var CountDensity = Model{Repo: "mlboydaisuke/DM-Count-Crowd-OpenVINO", Revision: "9a1d62c34612539efea53085f65144205908656d", File: "dmcount.onnx"}
 
+// CountReID is OSNet-AIN x1.0 trained on MSMT17 (Torchreid's weights, MIT)
+// as ONNX: the appearance `plate count --track` matches a person's tracks
+// by across a gap.
+var CountReID = Model{Repo: "mprib/osnet-ain-x1-0-msmt17-onnx", Revision: "306c3dca7875c91a7cbffe48dadc673de73fbb1b", File: "osnet_ain_x1_0_msmt17.onnx"}
+
 // PyTool is an upstream Python CLI run with `uv tool run`, resolved as of
 // ExcludeNewer so its transitive dependencies cannot drift.
 type PyTool struct{ Package, Version, ExcludeNewer string }
