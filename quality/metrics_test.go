@@ -508,3 +508,35 @@ func TestFogra39RefusesUnknownParams(t *testing.T) {
 		}
 	}
 }
+
+func TestCountMetric(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, body string) string {
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	counts := write("counts.tsv", "frame\tdetected\tdensity\testimate\ncrowd\t90\t97.2\t95\nempty\t0\t0.4\t1\n")
+	var hundred strings.Builder
+	hundred.WriteString("x\ty\n")
+	for i := range 100 {
+		fmt.Fprintf(&hundred, "%d\t%d\n", i, i*2)
+	}
+	truth := write("crowd.points.tsv", hundred.String())
+	none := write("empty.points.tsv", "x\ty\n")
+	if v, err := Metrics["count"](Params{"tsv": counts, "truth": truth, "frame": "crowd"}); err != nil || math.Abs(v-0.05) > 1e-9 {
+		t.Errorf("95 against 100 = %v, %v; want 0.05", v, err)
+	}
+	if v, err := Metrics["count"](Params{"tsv": counts, "truth": none, "frame": "empty"}); err != nil || v != 1 {
+		t.Errorf("1 against 0 = %v, %v; want 1", v, err)
+	}
+	if _, err := Metrics["count"](Params{"tsv": counts, "truth": truth, "frame": "nobody"}); err == nil || !strings.Contains(err.Error(), "nobody") {
+		t.Errorf("unknown frame: err = %v, want one naming it", err)
+	}
+	noEstimate := write("old.tsv", "frame\tdetected\ncrowd\t90\n")
+	if _, err := Metrics["count"](Params{"tsv": noEstimate, "truth": truth, "frame": "crowd"}); err == nil || !strings.Contains(err.Error(), "estimate") {
+		t.Errorf("no estimate column: err = %v, want one naming it", err)
+	}
+}

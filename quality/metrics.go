@@ -838,3 +838,72 @@ func fogra39DE00(p Params) (float64, error) {
 	}
 	return de[len(de)-1], nil
 }
+
+func init() {
+	Metrics["count"] = count
+}
+
+// count is how far the estimate for frame in tsv (count's counts.tsv)
+// misses the number of points in truth (a hand-marked x/y points file),
+// as a fraction of the truth: |estimate − truth| / max(truth, 1).
+func count(p Params) (float64, error) {
+	tsv, err := p.Path("tsv")
+	if err != nil {
+		return 0, err
+	}
+	truthPath, err := p.Path("truth")
+	if err != nil {
+		return 0, err
+	}
+	frame := p.String("frame", "")
+	if frame == "" {
+		return 0, fmt.Errorf("count: want a frame")
+	}
+	rows, err := readTSV(tsv)
+	if err != nil {
+		return 0, err
+	}
+	if len(rows) == 0 {
+		return 0, fmt.Errorf("count: %s is empty", tsv)
+	}
+	fc, ec := slices.Index(rows[0], "frame"), slices.Index(rows[0], "estimate")
+	if fc < 0 || ec < 0 {
+		return 0, fmt.Errorf("count: %s: want frame and estimate columns, header is %q", tsv, strings.Join(rows[0], "\t"))
+	}
+	estimate := math.NaN()
+	for _, r := range rows[1:] {
+		if fc < len(r) && r[fc] == frame && ec < len(r) {
+			if estimate, err = strconv.ParseFloat(r[ec], 64); err != nil {
+				return 0, fmt.Errorf("count: %s: frame %q: estimate %q is not a number", tsv, frame, r[ec])
+			}
+			break
+		}
+	}
+	if math.IsNaN(estimate) {
+		return 0, fmt.Errorf("count: %s has no frame %q", tsv, frame)
+	}
+	points, err := readTSV(truthPath)
+	if err != nil {
+		return 0, err
+	}
+	if len(points) == 0 || !slices.Equal(points[0], []string{"x", "y"}) {
+		return 0, fmt.Errorf("count: %s: want an x, y header", truthPath)
+	}
+	truth := float64(len(points) - 1)
+	return math.Abs(estimate-truth) / math.Max(truth, 1), nil
+}
+
+// readTSV splits a tab-separated file into rows, skipping blank lines.
+func readTSV(path string) ([][]string, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var rows [][]string
+	for _, line := range strings.Split(strings.ReplaceAll(string(b), "\r\n", "\n"), "\n") {
+		if strings.TrimSpace(line) != "" {
+			rows = append(rows, strings.Split(line, "\t"))
+		}
+	}
+	return rows, nil
+}
