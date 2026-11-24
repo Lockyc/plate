@@ -47,6 +47,8 @@ internal/insv/       an Insta360 clip's trailer: lens calibration and IMU; insvt
                      writes one onto any video for tests and fixtures
 internal/pano/       `pano`: the two lenses stitched by remap maps from their
                      calibration, levelled or locked by per-frame IMU rotations
+internal/count/      `count`: people per photo or equirect frame, through
+                     internal/ml/scripts/count.py
 internal/enginetest/ sh stubs that stand in for engines in tests
 internal/pins/       the one table of engine versions and hosted image models
 internal/pdf/        PDF page count, page boxes and text through poppler; the
@@ -211,6 +213,13 @@ colours, or renders what it is given.
 - **upscale** — DAT ×4 over the normalised frame in overlapping tiles
   (internal/ml/scripts/upscale.py); alpha, which the model does not take, is
   enlarged separately.
+- **count** — a person detector and a crowd density map over the same views
+  (internal/ml/scripts/count.py): a photo is read whole and in tiles; an
+  equirect frame is two rings of perspective views, each direction owned by
+  the nearest view centre so overlaps never count twice. The detector counts
+  the people it can box; the density map adds only peaks outside every box
+  and among other peaks, the crowd too small or packed to box. The models
+  and constants are the bake-off's winner on the `count-*` quality cases.
 - **clip** — ffmpeg only decodes and encodes (`clip.ExtractActivity`,
   `clip.ExtractFrames`, `video.Encode`); everything between is Go: the trim
   (`clip.TrimWindow`) and its idle cuts (`clip.IdleCuts`, applied to the

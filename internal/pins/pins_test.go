@@ -101,7 +101,7 @@ func TestHint(t *testing.T) {
 }
 
 func TestMLPins(t *testing.T) {
-	for name, m := range map[string]Model{"ViTMatte": ViTMatte, "DAT": DAT} {
+	for name, m := range map[string]Model{"ViTMatte": ViTMatte, "DAT": DAT, "CountDetector": CountDetector, "CountDensity": CountDensity} {
 		if !regexp.MustCompile(`^[0-9a-f]{40}$`).MatchString(m.Revision) {
 			t.Errorf("%s revision %q is not a commit sha", name, m.Revision)
 		}

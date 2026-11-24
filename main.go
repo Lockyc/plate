@@ -16,6 +16,7 @@ import (
 	"github.com/lockyc/plate/internal/build"
 	"github.com/lockyc/plate/internal/cli"
 	"github.com/lockyc/plate/internal/clip"
+	"github.com/lockyc/plate/internal/count"
 	"github.com/lockyc/plate/internal/cutout"
 	"github.com/lockyc/plate/internal/diff"
 	"github.com/lockyc/plate/internal/doc"
@@ -72,6 +73,7 @@ var commands = []command{
 	{"qr", "a QR code SVG, dark on light, quiet zone included", qr.Main, false},
 	{"grade", "grade fit: fit a colour grade from a reference; apply it", grade.Main, false},
 	{"cutout", "lift the subject out of an image as RGBA, down to hair and fur", cutout.Main, false},
+	{"count", "people in photos or 360 frames: a count per frame, marked frames to check it", count.Main, false},
 	{"inpaint", "fill a masked region with LaMa", inpaint.Main, true},
 	{"infill", "fill a hole in a flat ground from its surroundings", infill.Main, true},
 	{"upscale", "enlarge 4x with DAT", upscale.Main, true},

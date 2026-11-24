@@ -251,6 +251,15 @@ var ViTMatte = Model{Repo: "hustvl/vitmatte-base-composition-1k", Revision: "bf4
 // original (PSNR) rather than for invented texture.
 var DAT = Model{Repo: "OzzyGT/DAT_X4", Revision: "549c8c9c3611084e1dc0ce235eba8c5fa8bca9ae", File: "DAT_x4.safetensors"}
 
+// CountDetector is RT-DETRv2 (ResNet-50), the person detector `plate count`
+// runs on each view (Apache-2.0).
+var CountDetector = Model{Repo: "PekingU/rtdetr_v2_r50vd", Revision: "282494075698cab9faa1096ae26856890030c817"}
+
+// CountDensity is DM-Count (UCF-QNRF weights, MIT) as ONNX: the crowd
+// density map `plate count` takes the people too small or packed to detect
+// from.
+var CountDensity = Model{Repo: "mlboydaisuke/DM-Count-Crowd-OpenVINO", Revision: "9a1d62c34612539efea53085f65144205908656d", File: "dmcount.onnx"}
+
 // PyTool is an upstream Python CLI run with `uv tool run`, resolved as of
 // ExcludeNewer so its transitive dependencies cannot drift.
 type PyTool struct{ Package, Version, ExcludeNewer string }

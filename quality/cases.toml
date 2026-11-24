@@ -2143,3 +2143,43 @@ run    = ["pano", "--every", "30s", "--width", "2048", "--out", "{tmp:out}", "{t
 metric = "rmse"
 params = { a = "{tmp:out/120001_500.jpg}", b = "{tmp:turned.png}" }
 max    = 0.045
+
+[[case]]
+name   = "count-sparse"
+why    = "a street of people standing large in a photo, partly hidden behind each other, must be counted person by person: a patterned shirt is not a crowd (DM-Count alone finds 83 here, the bake-off's count-only winner 28 with 18 of them on one floral jacket)"
+run    = ["count", "--out", "{tmp:out}", "{asset:crowd-sparse.jpg}"]
+metric = "count"
+params = { tsv = "{tmp:out/counts.tsv}", truth = "{asset:crowd-sparse.points.tsv}", frame = "crowd-sparse" }
+max    = 0.15
+
+[[case]]
+name   = "count-dense"
+why    = "a packed street whose far crowd is heads a few pixels across must be counted, not just the near people a detector can box (detectors alone reach 86 of 147)"
+run    = ["count", "--out", "{tmp:out}", "{asset:crowd-dense.jpg}"]
+metric = "count"
+params = { tsv = "{tmp:out/counts.tsv}", truth = "{asset:crowd-dense.points.tsv}", frame = "crowd-dense" }
+max    = 0.18
+
+[[case]]
+name   = "count-equirect"
+why    = "a 360 frame of a festival must count each person once, though the views it is read through overlap"
+run    = ["count", "--out", "{tmp:out}", "{asset:crowd-equirect.jpg}"]
+metric = "count"
+params = { tsv = "{tmp:out/counts.tsv}", truth = "{asset:crowd-equirect.points.tsv}", frame = "crowd-equirect" }
+max    = 0.03
+
+[[case]]
+name   = "count-empty-scene"
+why    = "a park with no one in it counts no one: no density from foliage or benches"
+run    = ["count", "--out", "{tmp:out}", "{asset:crowd-empty.jpg}"]
+metric = "count"
+params = { tsv = "{tmp:out/counts.tsv}", truth = "{asset:crowd-empty.points.tsv}", frame = "crowd-empty" }
+max    = 0.5
+
+[[case]]
+name   = "count-ignores-holder"
+why    = "the person holding a 360 camera stands under it and is not in the crowd: a frame with only the holder, below the nadir cut, counts no one (nor the billboard DM-Count peaks on)"
+run    = ["count", "--out", "{tmp:out}", "{asset:crowd-equirect-holder.jpg}"]
+metric = "count"
+params = { tsv = "{tmp:out/counts.tsv}", truth = "{asset:crowd-equirect-holder.points.tsv}", frame = "crowd-equirect-holder" }
+max    = 0.5
