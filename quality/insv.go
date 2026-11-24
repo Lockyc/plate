@@ -18,7 +18,8 @@ import (
 // helpers are steps a case runs in this process rather than as an engine:
 // argv[0] names one, and it gets the rest of the expanded argv.
 var helpers = map[string]func(args []string) error{
-	"insv-pair": insvPair,
+	"insv-pair":     insvPair,
+	"track-walkers": trackWalkers,
 }
 
 // insvPair makes an X3 clip for a quality case from an equirect: the front

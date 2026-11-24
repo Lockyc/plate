@@ -844,6 +844,41 @@ func fogra39DE00(p Params) (float64, error) {
 func init() {
 	Metrics["count"] = count
 	Metrics["points"] = points
+	Metrics["range"] = rangeSpread
+}
+
+// rangeSpread is how wide the range of distinct people in tsv (count
+// --track's distinct.tsv) is, high − low, when it holds truth; a range that
+// misses truth is an error naming both.
+func rangeSpread(p Params) (float64, error) {
+	tsv, err := p.Path("tsv")
+	if err != nil {
+		return 0, err
+	}
+	truth, err := p.Float("truth", math.NaN())
+	if err != nil || math.IsNaN(truth) {
+		return 0, fmt.Errorf("range: want a truth, the number of distinct people")
+	}
+	rows, err := readTSV(tsv)
+	if err != nil {
+		return 0, err
+	}
+	if len(rows) != 2 {
+		return 0, fmt.Errorf("range: %s: want a header and one row", tsv)
+	}
+	lc, hc := slices.Index(rows[0], "low"), slices.Index(rows[0], "high")
+	if lc < 0 || hc < 0 || len(rows[1]) <= max(lc, hc) {
+		return 0, fmt.Errorf("range: %s: want low and high columns, header is %q", tsv, strings.Join(rows[0], "\t"))
+	}
+	low, ok1 := finite(rows[1][lc])
+	high, ok2 := finite(rows[1][hc])
+	if !ok1 || !ok2 || low > high {
+		return 0, fmt.Errorf("range: %s: low %q and high %q are not a range", tsv, rows[1][lc], rows[1][hc])
+	}
+	if truth < low || truth > high {
+		return 0, fmt.Errorf("range: %s: the truth %g lies outside low %g to high %g", tsv, truth, low, high)
+	}
+	return high - low, nil
 }
 
 // points is how far count's people (points, a points/<frame>.tsv) are from

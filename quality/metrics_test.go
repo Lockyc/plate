@@ -592,3 +592,44 @@ func TestPointsMetric(t *testing.T) {
 		t.Errorf("1 against no one = %v, %v; want 1", v, err)
 	}
 }
+
+func TestRangeMetric(t *testing.T) {
+	dir := t.TempDir()
+	write := func(body string) string {
+		p := filepath.Join(dir, "distinct.tsv")
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	head := "low\thigh\ttracks\tmin_seconds\tuntracked_share\n"
+	for _, c := range []struct {
+		low, high string
+		want      float64
+	}{{"8", "12", 4}, {"10", "10", 0}, {"10", "13", 3}, {"7", "10", 3}} {
+		p := write(head + c.low + "\t" + c.high + "\t15\t3\t0.1\n")
+		if v, err := Metrics["range"](Params{"tsv": p, "truth": int64(10)}); err != nil || v != c.want {
+			t.Errorf("%s to %s around 10 = %v, %v; want %v", c.low, c.high, v, err, c.want)
+		}
+	}
+	for _, r := range [][2]string{{"11", "14"}, {"5", "9"}} {
+		p := write(head + r[0] + "\t" + r[1] + "\t15\t3\t0.1\n")
+		if _, err := Metrics["range"](Params{"tsv": p, "truth": 10.0}); err == nil || !strings.Contains(err.Error(), "outside") {
+			t.Errorf("%s to %s misses 10: err %v", r[0], r[1], err)
+		}
+	}
+	for name, body := range map[string]string{
+		"no row":       head,
+		"no high":      "low\ttracks\n1\t2\n",
+		"not a number": head + "x\t12\t15\t3\t0.1\n",
+		"low > high":   head + "12\t8\t15\t3\t0.1\n",
+		"two rows":     head + "8\t12\t15\t3\t0.1\n8\t12\t15\t3\t0.1\n",
+	} {
+		if _, err := Metrics["range"](Params{"tsv": write(body), "truth": 10.0}); err == nil {
+			t.Errorf("%s: no error", name)
+		}
+	}
+	if _, err := Metrics["range"](Params{"tsv": write(head + "8\t12\t15\t3\t0.1\n")}); err == nil || !strings.Contains(err.Error(), "truth") {
+		t.Errorf("no truth: err %v", err)
+	}
+}

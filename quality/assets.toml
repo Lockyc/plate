@@ -224,3 +224,11 @@ recipe  = "marked for plate: no rows; crowd-empty.jpg has no people"
 author  = "plate"
 licence = "CC0"
 sha256  = "2c2d61aa4b1b2e46cebc5507010bd5ca482763e103de850c8930b91ab4725788"
+
+[[asset]]
+file    = "track-walkers.png"
+source  = "synthetic"
+author  = "plate; the people are from crowd-sparse.jpg and portrait-foliage.jpg (both CC0)"
+licence = "CC0"
+recipe  = "ten people cut out for the track-walkers helper, each trimmed, fitted into 540x460 and set bottom-centre in its own 560x480 transparent cell, cells left to right in this order: from crowd-sparse.jpg, plate cutout (vision) of crops 440x1128+1640+880, 470x1170+2400+820, 240x800+2715+490, then plate cutout --coarse birefnet of 310x830+1375+455, then birefnet cutouts of 380x1060+540+830, 360x1080+2040+830 and 270x790+1115+490 with magick -channel A -level 0,35% (their hair had faded into the wall), then a vision cutout of 160x440+1885+395 with its left 15 px cut (a neighbour's sleeve), a vision cutout of 220x440+2105+490 with its left 48 px and bottom 95 px made transparent (a neighbour's jacket and head), and a vision cutout of portrait-foliage.jpg; magick CELLS +append -strip track-walkers.png"
+sha256  = "837d0b5033840910aac50be9d71354724bcb0b638f5ddfe4743179ea42ae57d8"
