@@ -24,8 +24,9 @@ import (
 
 const usage = `count [--equirect auto|yes|no] [--nadir-deg 35] [--zenith-deg 30] [--marked] --out <dir> <image|dir>...
 
-Writes <dir>/counts.tsv (frame, detected, density, estimate), the counted
-people's positions in <dir>/points/<frame>.tsv (lon and lat in degrees for an
+Writes <dir>/counts.tsv: per frame the people a detector boxed (detected),
+the people counted from the crowd density map, too small or packed to box
+(density), and their sum (estimate); the counted people's positions in <dir>/points/<frame>.tsv (lon and lat in degrees for an
 equirect frame, else x and y in pixels), and with --marked each frame with
 every counted person dotted and the density overlaid in <dir>/marked/, an
 equirect frame's views beside it in <dir>/marked/<frame>/.`

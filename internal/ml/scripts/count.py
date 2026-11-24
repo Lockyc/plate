@@ -63,11 +63,22 @@ from transformers import AutoImageProcessor, AutoModelForObjectDetection
 Image.MAX_IMAGE_PIXELS = None
 
 HFOV, VIEW = 75.0, 1280
-# (yaw, pitch) of each equirect view: a ring at the horizon, and a ring below
-# it for the people standing close, whom the first ring cuts off at the chest.
-RINGS = [(i * 30.0, -10.0) for i in range(12)] + [(15.0 + i * 60.0, -40.0) for i in range(6)]
-CONF, TILE = 0.5, 1280
+# (yaw, pitch) of each equirect view: a ring at the horizon; a ring below it
+# for the people standing close, whom the first ring cuts off at the chest; a
+# ring above it; and straight down and up. Every direction then lies inside
+# the view that owns it (geometry_gaps, checked before a run), and a view
+# that owns nothing between the cuts is not read.
+RINGS = (
+    [(i * 30.0, -10.0) for i in range(12)]
+    + [(15.0 + i * 60.0, -40.0) for i in range(6)]
+    + [(15.0 + i * 60.0, 40.0) for i in range(6)]
+    + [(0.0, -90.0), (0.0, 90.0)]
+)
 WIN, STRIDE = 512, 384  # density windows, px
+# Fitted on plate's five quality crowd assets (the bake-off): the detector's
+# confidence, the photo tile, and the density peak, its window, and the crowd
+# a peak needs around it.
+CONF, TILE = 0.5, 1280
 PEAK, PEAK_WIN, CROWD, CROWD_R = 0.1, 5, 2, 16
 MEAN = np.array([0.485, 0.456, 0.406], np.float32)
 STD = np.array([0.229, 0.224, 0.225], np.float32)
@@ -100,12 +111,41 @@ def lonlat(d):
     return np.degrees(np.arctan2(d[..., 0], d[..., 2])), np.degrees(np.arcsin(np.clip(d[..., 1], -1, 1)))
 
 
+CENTRES = np.stack([rot(y, p) @ np.array([0, 0, 1.0]) for y, p in RINGS])
+
+
+def owner(d, nadir, zenith):
+    """The view that owns each direction (its nearest view centre), or -1 inside a cut."""
+    _, lat = lonlat(d)
+    return np.where((lat > -90 + nadir) & (lat < 90 - zenith), np.argmax(d @ CENTRES.T, -1), -1)
+
+
+def sphere(n=200_000):
+    """n directions spread evenly over the sphere (a Fibonacci lattice)."""
+    i = np.arange(n) + 0.5
+    phi, th = np.arccos(1 - 2 * i / n), math.pi * (1 + 5**0.5) * i
+    return np.stack([np.cos(th) * np.sin(phi), np.cos(phi), np.sin(th) * np.sin(phi)], -1)
+
+
+def geometry_gaps(nadir, zenith):
+    """How many of sphere()'s directions between the cuts lie outside the field of view of the
+    view that owns them (0: every person is read by the view that counts them), and the views
+    that own any direction."""
+    d = sphere()
+    own = owner(d, nadir, zenith)
+    t = math.tan(math.radians(HFOV) / 2)
+    gaps = 0
+    for k, (y, p) in enumerate(RINGS):
+        c = d[own == k] @ rot(y, p)
+        gaps += int(((c[:, 2] <= 0) | (np.abs(c[:, 0]) > t * c[:, 2]) | (np.abs(c[:, 1]) > t * c[:, 2])).sum())
+    return gaps, sorted(set(own[own >= 0].tolist()))
+
+
 class Sphere:
     """The equirect's views and who owns each direction."""
 
     def __init__(self, img, nadir, zenith):
         self.eq = torch.from_numpy(np.asarray(img, dtype=np.float32)).permute(2, 0, 1)[None]
-        self.centres = np.stack([rot(y, p) @ np.array([0, 0, 1.0]) for y, p in RINGS])
         self.nadir, self.zenith = nadir, zenith
 
     def view(self, k):
@@ -116,8 +156,7 @@ class Sphere:
         return rgb[0].permute(1, 2, 0).clamp(0, 255).byte().numpy(), d
 
     def owned(self, k, d):
-        _, lat = lonlat(d)
-        return (np.argmax(d @ self.centres.T, -1) == k) & (lat > -90 + self.nadir) & (lat < 90 - self.zenith)
+        return owner(d, self.nadir, self.zenith) == k
 
 
 class Detector:
@@ -242,11 +281,11 @@ def photo(img, det, dens):
     return people, people, lambda: dots(heat(img, m), people), None
 
 
-def equirect(img, det, dens, nadir, zenith):
+def equirect(img, det, dens, nadir, zenith, live):
     W, H = img.size
     sp = Sphere(img, nadir, zenith)
     pts, marked_views, splat = [], [], np.zeros((math.ceil(H / dens.red), math.ceil(W / dens.red)), np.float32)
-    for k in range(len(RINGS)):
+    for k in live:
         rgb, d = sp.view(k)
 
         def owned_px(x, y, k=k, d=d):
@@ -269,16 +308,16 @@ def equirect(img, det, dens, nadir, zenith):
             ex = np.clip(((lon / 360 + 0.5) * W / r).astype(int), 0, splat.shape[1] - 1)
             ey = np.clip(((0.5 - lat / 180) * H / r).astype(int), 0, splat.shape[0] - 1)
             np.add.at(splat, (ey, ex), m[ys, xs])
-        marked_views.append((rgb, m, people, cells))
+        marked_views.append((k, rgb, m, people, cells))
     eq_pts = [((lon / 360 + 0.5) * W, (0.5 - lat / 180) * H, s) for lon, lat, s in pts]
 
     def views():
-        for rgb, m, people, cells in marked_views:
+        for k, rgb, m, people, cells in marked_views:
             v = heat(Image.fromarray(rgb), m)
             own = cells((VIEW // 8, VIEW // 8), 8)
             shade = Image.fromarray(np.where(own, 0, 110).astype(np.uint8)).resize(v.size, Image.NEAREST)
             v.paste(Image.new("RGB", v.size, (0, 0, 0)), (0, 0), shade)
-            yield dots(v, people)
+            yield k, dots(v, people)
 
     return pts, eq_pts, lambda: dots(heat(img, uniform_filter(splat, 3)), eq_pts), views
 
@@ -296,6 +335,9 @@ def main() -> None:
     a = ap.parse_args()
     if not a.frames:
         sys.exit("count.py: no frames")
+    gaps, live = geometry_gaps(a.nadir_deg, a.zenith_deg)
+    if gaps:
+        sys.exit(f"count.py: {gaps} directions between the cuts lie outside the view that owns them")
     t0 = time.time()
     device = pick()
     det = Detector(a.detector, a.detector_revision, device)
@@ -306,22 +348,22 @@ def main() -> None:
         stem = os.path.splitext(os.path.basename(path))[0]
         img = ImageOps.exif_transpose(Image.open(path)).convert("RGB")
         if kind == "equirect":
-            pts, _, marked, views = equirect(img, det, dens, a.nadir_deg, a.zenith_deg)
-            head = "lon\tlat\tfrom"
+            pts, _, marked, views = equirect(img, det, dens, a.nadir_deg, a.zenith_deg, live)
+            cols = "lon\tlat\tfrom"
         else:
             pts, _, marked, views = photo(img, det, dens)
-            head = "x\ty\tfrom"
+            cols = "x\ty\tfrom"
         nd = sum(1 for p in pts if p[2] == "detector")
         rows.append(f"{stem}\t{nd}\t{len(pts) - nd}\t{len(pts)}")
         with open(os.path.join(a.out, "points", stem + ".tsv"), "w") as f:
-            f.write(head + "\n" + "".join(f"{x:.2f}\t{y:.2f}\t{s}\n" for x, y, s in pts))
+            f.write(cols + "\n" + "".join(f"{x:.2f}\t{y:.2f}\t{s}\n" for x, y, s in pts))
         if a.marked:
             os.makedirs(os.path.join(a.out, "marked"), exist_ok=True)
             marked().save(os.path.join(a.out, "marked", stem + ".jpg"), quality=88)
             if views:
                 vd = os.path.join(a.out, "marked", stem)
                 os.makedirs(vd, exist_ok=True)
-                for k, v in enumerate(views()):
+                for k, v in views():
                     v.save(os.path.join(vd, f"view-{k:02d}.jpg"), quality=88)
         print(f"count: {stem} {kind} {len(pts)} ({nd} detected)", file=sys.stderr)
     # counts.tsv last: its presence is the run's success

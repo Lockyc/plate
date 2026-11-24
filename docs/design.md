@@ -215,8 +215,9 @@ colours, or renders what it is given.
   enlarged separately.
 - **count** — a person detector and a crowd density map over the same views
   (internal/ml/scripts/count.py): a photo is read whole and in tiles; an
-  equirect frame is two rings of perspective views, each direction owned by
-  the nearest view centre so overlaps never count twice. The detector counts
+  equirect frame is perspective views covering the whole sphere, each
+  direction owned by the nearest view centre so overlaps never count twice
+  and lying inside that view. The detector counts
   the people it can box; the density map adds only peaks outside every box
   and among other peaks, the crowd too small or packed to box. The models
   and constants are the bake-off's winner on the `count-*` quality cases.
