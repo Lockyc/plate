@@ -49,9 +49,9 @@ func patch(t *testing.T, path string, fn func(b []byte)) {
 
 func TestAxes(t *testing.T) {
 	x3 := insv.Axes["Insta360 X3"]
-	// YZX: camera x = sensor y, camera y = sensor z, camera z = sensor x.
-	if got := x3.ToCamera([3]float64{1, 2, 3}); got != [3]float64{2, 3, 1} {
-		t.Errorf("ToCamera(1,2,3) = %v, want [2 3 1]", got)
+	// yzX: camera x = −sensor y, camera y = −sensor z, camera z = sensor x.
+	if got := x3.ToCamera([3]float64{1, 2, 3}); got != [3]float64{-2, -3, 1} {
+		t.Errorf("ToCamera(1,2,3) = %v, want [-2 -3 1]", got)
 	}
 	if got := x3.ToSensor(x3.ToCamera([3]float64{1, 2, 3})); got != [3]float64{1, 2, 3} {
 		t.Errorf("ToSensor(ToCamera(1,2,3)) = %v", got)
@@ -65,7 +65,7 @@ func TestReadRawIMU(t *testing.T) {
 	if !near(acc, insv.StandardGravity/1024) || !near(gyro, 2000.0/32768*math.Pi/180) {
 		t.Fatalf("RawScales(32, 2000) = %v, %v", acc, gyro)
 	}
-	// Upright and turning about the front lens's axis: sensor gyro y alone,
+	// Upright and turning about the front lens's axis: sensor gyro -y alone,
 	// 1000 counts; gravity's reaction on sensor -x, 1024 counts (1 g at 32 g).
 	sample := insv.IMU{T: 0.002, Gyro: [3]float64{1000 * gyro, 0, 0}, Accel: [3]float64{0, 0, -insv.StandardGravity}}
 	m := insv.Meta{Model: "Insta360 X3", Width: 2880, Height: 2880, FPS: 30, IMU: []insv.IMU{sample}}
@@ -80,7 +80,7 @@ func TestReadRawIMU(t *testing.T) {
 	if ts := binary.LittleEndian.Uint64(rec); ts != 2000 {
 		t.Errorf("timestamp = %d µs, want 2000", ts)
 	}
-	wantCounts := []int{-1024, 0, 0, 0, 1000, 0} // accel xyz, gyro xyz
+	wantCounts := []int{-1024, 0, 0, 0, -1000, 0} // accel xyz, gyro xyz
 	for k, want := range wantCounts {
 		if c := int(binary.LittleEndian.Uint16(rec[8+2*k:])) - insv.RawZero; c != want {
 			t.Errorf("count %d = %d, want %d", k, c, want)
