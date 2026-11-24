@@ -539,4 +539,16 @@ func TestCountMetric(t *testing.T) {
 	if _, err := Metrics["count"](Params{"tsv": noEstimate, "truth": truth, "frame": "crowd"}); err == nil || !strings.Contains(err.Error(), "estimate") {
 		t.Errorf("no estimate column: err = %v, want one naming it", err)
 	}
+	for _, est := range []string{"NaN", "Inf", "-Inf", "-1"} {
+		bad := write("bad.tsv", "frame\tdetected\tdensity\testimate\ncrowd\t1\t1\t"+est+"\n")
+		if _, err := Metrics["count"](Params{"tsv": bad, "truth": truth, "frame": "crowd"}); err == nil || !strings.Contains(err.Error(), "crowd") {
+			t.Errorf("estimate %s: err = %v, want one naming the frame", est, err)
+		}
+	}
+	for _, header := range []string{"", "y\tx\n", "x\n", "x\ty\tz\n"} {
+		p := write("h.points.tsv", header+"1\t2\n")
+		if _, err := Metrics["count"](Params{"tsv": counts, "truth": p, "frame": "crowd"}); err == nil || !strings.Contains(err.Error(), "header") {
+			t.Errorf("truth header %q: err = %v, want a header error", header, err)
+		}
+	}
 }

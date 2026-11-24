@@ -870,16 +870,19 @@ func count(p Params) (float64, error) {
 	if fc < 0 || ec < 0 {
 		return 0, fmt.Errorf("count: %s: want frame and estimate columns, header is %q", tsv, strings.Join(rows[0], "\t"))
 	}
-	estimate := math.NaN()
+	var estimate float64
+	found := false
 	for _, r := range rows[1:] {
 		if fc < len(r) && r[fc] == frame && ec < len(r) {
-			if estimate, err = strconv.ParseFloat(r[ec], 64); err != nil {
-				return 0, fmt.Errorf("count: %s: frame %q: estimate %q is not a number", tsv, frame, r[ec])
+			estimate, err = strconv.ParseFloat(r[ec], 64)
+			if err != nil || math.IsNaN(estimate) || math.IsInf(estimate, 0) || estimate < 0 {
+				return 0, fmt.Errorf("count: %s: frame %q: estimate %q is not a count", tsv, frame, r[ec])
 			}
+			found = true
 			break
 		}
 	}
-	if math.IsNaN(estimate) {
+	if !found {
 		return 0, fmt.Errorf("count: %s has no frame %q", tsv, frame)
 	}
 	points, err := readTSV(truthPath)
