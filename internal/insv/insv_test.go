@@ -49,9 +49,9 @@ func patch(t *testing.T, path string, fn func(b []byte)) {
 
 func TestAxes(t *testing.T) {
 	x3 := insv.Axes["Insta360 X3"]
-	// yzX: camera x = -sensor y, camera y = -sensor z, camera z = sensor x.
-	if got := x3.ToCamera([3]float64{1, 2, 3}); got != [3]float64{-2, -3, 1} {
-		t.Errorf("ToCamera(1,2,3) = %v, want [-2 -3 1]", got)
+	// YZX: camera x = sensor y, camera y = sensor z, camera z = sensor x.
+	if got := x3.ToCamera([3]float64{1, 2, 3}); got != [3]float64{2, 3, 1} {
+		t.Errorf("ToCamera(1,2,3) = %v, want [2 3 1]", got)
 	}
 	if got := x3.ToSensor(x3.ToCamera([3]float64{1, 2, 3})); got != [3]float64{1, 2, 3} {
 		t.Errorf("ToSensor(ToCamera(1,2,3)) = %v", got)
@@ -67,7 +67,7 @@ func TestReadRawIMU(t *testing.T) {
 	}
 	// Upright and turning about the front lens's axis: sensor gyro y alone,
 	// 1000 counts; gravity's reaction on sensor -x, 1024 counts (1 g at 32 g).
-	sample := insv.IMU{T: 0.002, Gyro: [3]float64{-1000 * gyro, 0, 0}, Accel: [3]float64{0, 0, -insv.StandardGravity}}
+	sample := insv.IMU{T: 0.002, Gyro: [3]float64{1000 * gyro, 0, 0}, Accel: [3]float64{0, 0, -insv.StandardGravity}}
 	m := insv.Meta{Model: "Insta360 X3", Width: 2880, Height: 2880, FPS: 30, IMU: []insv.IMU{sample}}
 	path := clipWith(t, m, insvtest.Options{Offset: testOffset, Raw: true, AccRange: 32, GyroRange: 2000})
 

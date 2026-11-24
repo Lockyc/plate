@@ -74,10 +74,14 @@ type Meta struct {
 type Orientation string
 
 // Axes is each model's turn from IMU sensor axes onto the IMU type's
-// camera axes: telemetry-parser's imu_orientation for that model (mod.rs,
-// `process_map`); on an X3 it gives +x along lens 0, +y right and +z down.
+// camera axes: +x along lens 0, +y right and +z down. The X3's is measured
+// against its footage: with it, the gravity the accelerometer reads points
+// at the sky in the clip's own picture whichever way the camera is held,
+// lens 0 up included. telemetry-parser's imu_orientation for the X3
+// (mod.rs, `process_map`, "yzX") is this turned half a turn about z, for
+// its own camera frame.
 var Axes = map[string]Orientation{
-	"Insta360 X3": "yzX",
+	"Insta360 X3": "YZX",
 }
 
 func (o Orientation) axis(i int) (int, float64) {
