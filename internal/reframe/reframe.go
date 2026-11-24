@@ -271,9 +271,11 @@ func (j job) inside(src video.Source) error {
 }
 
 // flat is the v360 filter, named name, that cuts view v out of an
-// equirect at w×h.
+// equirect at w×h. reset_rot makes each yaw or pitch command set the view
+// rather than turn it further from where it is, and keeps the angle not
+// sent where it was.
 func (j job) flat(v View, name string) string {
-	return fmt.Sprintf("v360%s=e:flat:yaw=%.4f:pitch=%.4f:h_fov=%.4f:v_fov=%.4f:w=%d:h=%d:interp=cubic",
+	return fmt.Sprintf("v360%s=e:flat:yaw=%.4f:pitch=%.4f:h_fov=%.4f:v_fov=%.4f:w=%d:h=%d:reset_rot=1:interp=cubic",
 		name, v.Yaw, v.Pitch, v.FOV, vfov(v.FOV, j.w, j.h), j.w, j.h)
 }
 
@@ -355,7 +357,8 @@ func (j job) clip(ctx context.Context, in, out string) error {
 // commands are the sendcmd entries that move v360@view along p over the
 // frames at times, each at its time into the clip: for each frame after the
 // first, the values that differ from the frame before. Every value sent
-// rebuilds v360's lookup table, so an unchanged one is never sent.
+// rebuilds v360's lookup table, so an unchanged one is never sent; flat's
+// reset_rot holds it.
 func commands(p Path, times []float64, w, h int) []video.Command {
 	var cmds []video.Command
 	last := p.At(times[0])

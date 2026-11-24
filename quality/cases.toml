@@ -2245,3 +2245,59 @@ run    = ["reframe", "--path", "{tmp:path.toml}", "--size", "360x640", "--from",
 metric = "av-length"
 params = { file = "{tmp:cut.mp4}", want = 3.0 }
 max    = 0.05
+
+[[case]]
+name   = "reframe-pan-mid"
+why    = "a clip panning yaw 0, 60, 120 at pitch 10 must look at each key's own direction when it reaches it: v360 composes each command onto the rotation before unless reset_rot is set, so a pan drifts and tilts the further it goes (real footage swung to the sky); the green disc sits at yaw 60, pitch 10"
+files  = { "path.toml" = "[[key]]\nt = 1\nyaw = 0\npitch = 10\nfov = 60\n[[key]]\nt = 2.5\nyaw = 60\npitch = 10\nfov = 60\n[[key]]\nt = 4\nyaw = 120\npitch = 10\nfov = 60\n" }
+setup  = [
+  ["magick", "-size", "2048x1024", "xc:#3a5a7a", "-fill", "#ffff00", "-draw", "rectangle 0,508 2047,515", "-fill", "#ff0000", "-draw", "circle 1024,455 1024,425", "-fill", "#00ff00", "-draw", "circle 1365,455 1365,425", "-fill", "#0000ff", "-draw", "circle 1707,455 1707,425", "{tmp:eq.png}"],
+  ["ffmpeg", "-loop", "1", "-i", "{tmp:eq.png}", "-f", "lavfi", "-i", "sine=frequency=440:duration=5", "-t", "5", "-r", "30", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", "{tmp:src.mp4}"],
+]
+run    = ["reframe", "--path", "{tmp:path.toml}", "--size", "640x360", "--out", "{tmp:cut.mp4}", "{tmp:src.mp4}"]
+post   = [["ffmpeg", "-ss", "2.5", "-i", "{tmp:cut.mp4}", "-frames:v", "1", "{tmp:at.png}"]]
+metric = "pixel"
+params = { image = "{tmp:at.png}", at = "0.5,0.5", color = "#00ff00" }
+max    = 0.05
+
+[[case]]
+name   = "reframe-pan-end"
+why    = "the pan of reframe-pan-mid must reach its last key's direction: the blue disc at yaw 120, pitch 10"
+files  = { "path.toml" = "[[key]]\nt = 1\nyaw = 0\npitch = 10\nfov = 60\n[[key]]\nt = 2.5\nyaw = 60\npitch = 10\nfov = 60\n[[key]]\nt = 4\nyaw = 120\npitch = 10\nfov = 60\n" }
+setup  = [
+  ["magick", "-size", "2048x1024", "xc:#3a5a7a", "-fill", "#ffff00", "-draw", "rectangle 0,508 2047,515", "-fill", "#ff0000", "-draw", "circle 1024,455 1024,425", "-fill", "#00ff00", "-draw", "circle 1365,455 1365,425", "-fill", "#0000ff", "-draw", "circle 1707,455 1707,425", "{tmp:eq.png}"],
+  ["ffmpeg", "-loop", "1", "-i", "{tmp:eq.png}", "-f", "lavfi", "-i", "sine=frequency=440:duration=5", "-t", "5", "-r", "30", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", "{tmp:src.mp4}"],
+]
+run    = ["reframe", "--path", "{tmp:path.toml}", "--size", "640x360", "--out", "{tmp:cut.mp4}", "{tmp:src.mp4}"]
+post   = [["ffmpeg", "-ss", "4", "-i", "{tmp:cut.mp4}", "-frames:v", "1", "{tmp:at.png}"]]
+metric = "pixel"
+params = { image = "{tmp:at.png}", at = "0.5,0.5", color = "#0000ff" }
+max    = 0.05
+
+[[case]]
+name   = "reframe-pan-level-left"
+why    = "at the end of reframe-pan-mid's pan the horizon (the yellow band) must still cross the view level, 10 degrees below its centre: its left edge"
+files  = { "path.toml" = "[[key]]\nt = 1\nyaw = 0\npitch = 10\nfov = 60\n[[key]]\nt = 2.5\nyaw = 60\npitch = 10\nfov = 60\n[[key]]\nt = 4\nyaw = 120\npitch = 10\nfov = 60\n" }
+setup  = [
+  ["magick", "-size", "2048x1024", "xc:#3a5a7a", "-fill", "#ffff00", "-draw", "rectangle 0,508 2047,515", "-fill", "#ff0000", "-draw", "circle 1024,455 1024,425", "-fill", "#00ff00", "-draw", "circle 1365,455 1365,425", "-fill", "#0000ff", "-draw", "circle 1707,455 1707,425", "{tmp:eq.png}"],
+  ["ffmpeg", "-loop", "1", "-i", "{tmp:eq.png}", "-f", "lavfi", "-i", "sine=frequency=440:duration=5", "-t", "5", "-r", "30", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", "{tmp:src.mp4}"],
+]
+run    = ["reframe", "--path", "{tmp:path.toml}", "--size", "640x360", "--out", "{tmp:cut.mp4}", "{tmp:src.mp4}"]
+post   = [["ffmpeg", "-ss", "4", "-i", "{tmp:cut.mp4}", "-frames:v", "1", "{tmp:at.png}"]]
+metric = "pixel"
+params = { image = "{tmp:at.png}", at = "0.03,0.772", color = "#ffff00" }
+max    = 0.05
+
+[[case]]
+name   = "reframe-pan-level-right"
+why    = "at the end of reframe-pan-mid's pan the horizon (the yellow band) must still cross the view level, 10 degrees below its centre: its right edge"
+files  = { "path.toml" = "[[key]]\nt = 1\nyaw = 0\npitch = 10\nfov = 60\n[[key]]\nt = 2.5\nyaw = 60\npitch = 10\nfov = 60\n[[key]]\nt = 4\nyaw = 120\npitch = 10\nfov = 60\n" }
+setup  = [
+  ["magick", "-size", "2048x1024", "xc:#3a5a7a", "-fill", "#ffff00", "-draw", "rectangle 0,508 2047,515", "-fill", "#ff0000", "-draw", "circle 1024,455 1024,425", "-fill", "#00ff00", "-draw", "circle 1365,455 1365,425", "-fill", "#0000ff", "-draw", "circle 1707,455 1707,425", "{tmp:eq.png}"],
+  ["ffmpeg", "-loop", "1", "-i", "{tmp:eq.png}", "-f", "lavfi", "-i", "sine=frequency=440:duration=5", "-t", "5", "-r", "30", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", "{tmp:src.mp4}"],
+]
+run    = ["reframe", "--path", "{tmp:path.toml}", "--size", "640x360", "--out", "{tmp:cut.mp4}", "{tmp:src.mp4}"]
+post   = [["ffmpeg", "-ss", "4", "-i", "{tmp:cut.mp4}", "-frames:v", "1", "{tmp:at.png}"]]
+metric = "pixel"
+params = { image = "{tmp:at.png}", at = "0.97,0.772", color = "#ffff00" }
+max    = 0.05

@@ -123,6 +123,22 @@ func TestCommandsSendOnlyChanges(t *testing.T) {
 	}
 }
 
+// A pan over several keys sends each frame's whole angle, never the step
+// from the frame before, and leaves the held pitch to reset_rot.
+func TestCommandsSendTheViewNotTheStep(t *testing.T) {
+	p := Path{{T: 1, Yaw: 0, Pitch: 10, FOV: 60}, {T: 2, Yaw: 60, Pitch: 10, FOV: 60}, {T: 3, Yaw: 120, Pitch: 10, FOV: 60}}
+	got := commands(p, []float64{0, 1, 1.5, 2, 2.5, 3, 3.5}, 640, 360)
+	want := []video.Command{
+		{T: 1.5, Args: "v360@view yaw 30.0000"},
+		{T: 2, Args: "v360@view yaw 60.0000"},
+		{T: 2.5, Args: "v360@view yaw 90.0000"},
+		{T: 3, Args: "v360@view yaw 120.0000"},
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("commands = %v, want %v", got, want)
+	}
+}
+
 func TestClipCutsAndKeepsSound(t *testing.T) {
 	enginetest.Stub(t, "ffprobe", `printf '{"streams":[{"width":2048,"height":1024,"r_frame_rate":"30/1","duration":"20.0"}]}'`)
 	mpeg := enginetest.Stub(t, "ffmpeg", `for a; do last=$a; done; printf x > "$last"`)
@@ -134,7 +150,7 @@ func TestClipCutsAndKeepsSound(t *testing.T) {
 		t.Fatalf("exit %d: %s", code, stderr)
 	}
 	a := strings.Join(enginetest.Calls(t, mpeg)[0], " ")
-	for _, want := range []string{"-ss 4.991667 -t 10.000000 -i " + src, "sendcmd=f=", "v360@view=e:flat:yaw=0.0000", "-map 0:a:0? -c:a copy", "-r 30/1"} {
+	for _, want := range []string{"-ss 4.991667 -t 10.000000 -i " + src, "sendcmd=f=", "v360@view=e:flat:yaw=0.0000", ":reset_rot=1:", "-map 0:a:0? -c:a copy", "-r 30/1"} {
 		if !strings.Contains(a, want) {
 			t.Errorf("argv lacks %q:\n%s", want, a)
 		}
