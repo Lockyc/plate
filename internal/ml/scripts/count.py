@@ -117,7 +117,7 @@ STD = np.array([0.229, 0.224, 0.225], np.float32)
 DET_DOT, DENS_DOT = (40, 220, 90), (235, 60, 220)
 # Tracking (see the docstring), fitted on the count-track-distinct quality
 # case and checked on real festival footage.
-GATE_MOVE, GATE_MIN, APPEAR, SIM_MIN, LOST = 1.5, 1.0, 1.0, 0.5, 2.0
+GATE_MOVE, GATE_MIN, APPEAR, SIM_MIN, LOST = 1.5, 1.0, 1.0, 0.5, 4.0
 REID_SIM, MERGE_GAP, DENSITY_EVERY = 0.7, 60.0, 2.0
 REID_H, REID_W = 256, 128
 
