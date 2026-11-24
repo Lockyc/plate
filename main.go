@@ -34,6 +34,7 @@ import (
 	"github.com/lockyc/plate/internal/policy"
 	"github.com/lockyc/plate/internal/press"
 	"github.com/lockyc/plate/internal/qr"
+	"github.com/lockyc/plate/internal/reframe"
 	"github.com/lockyc/plate/internal/render"
 	"github.com/lockyc/plate/internal/shrink"
 	"github.com/lockyc/plate/internal/slides"
@@ -69,6 +70,7 @@ var commands = []command{
 	{"walkthrough", "check a walkthrough script; record a narrated walkthrough of a web app", walkthrough.Main, false},
 	{"animate", "capture a page's animation as a muted MP4, WebM, poster, WebP or GIF", animate.Main, false},
 	{"pano", "an Insta360 clip's two lenses to a level 360 equirect: frames or video", pano.Main, false},
+	{"reframe", "a flat clip or still from a 360 equirect, along a keyframed view", reframe.Main, false},
 	{"fonts", "embed web fonts into a CSS file as data: URIs", fonts.Main, false},
 	{"qr", "a QR code SVG, dark on light, quiet zone included", qr.Main, false},
 	{"grade", "grade fit: fit a colour grade from a reference; apply it", grade.Main, false},
