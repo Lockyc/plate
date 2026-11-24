@@ -133,8 +133,9 @@ re-render never reaches the network for pixels.
 
 ## Synthesis policy
 
-`inpaint`, `infill`, `upscale` and `generate` create pixels the camera or artist never
-made. plate looks for `plate.toml` in the working directory and each parent;
+The commands marked `synthesises` in main.go's `commands` table, which
+`plate -h` lists as "(synthesises pixels)", create pixels the camera or artist
+never made. plate looks for `plate.toml` in the working directory and each parent;
 if the nearest one sets `synthesis = "forbid"`, those commands exit with an
 error naming the file. Everything else only computes an alpha channel, moves
 colours, or renders what it is given.
