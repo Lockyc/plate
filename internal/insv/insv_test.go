@@ -101,6 +101,56 @@ func TestReadRawIMU(t *testing.T) {
 	}
 }
 
+// x3UpCounts are raw IMU counts (accel xyz, gyro xyz, as the sensor wrote
+// them) from a real X3 clip, 40 ms apart, held still with lens 0 (_00_)
+// pointing up about 32° off straight up: its picture is sky with the horizon
+// near its edge.
+var x3UpCounts = [][6]uint16{
+	{32115, 31715, 32806, 32659, 32347, 32633},
+	{32180, 31515, 33093, 32738, 32390, 32739},
+	{32208, 31816, 33007, 32727, 32737, 32884},
+	{32201, 31930, 32862, 32731, 32898, 32823},
+	{32239, 32024, 32853, 32534, 32844, 32786},
+}
+
+// Spliced into a trailer by bytes, so Axes is tested only against what the
+// camera wrote: up must read along +x.
+func TestAxesRealCounts(t *testing.T) {
+	m := insv.Meta{Model: "Insta360 X3", Width: 2880, Height: 2880, FPS: 30}
+	for i := range x3UpCounts {
+		m.IMU = append(m.IMU, insv.IMU{T: float64(i) * 0.04})
+	}
+	path := clipWith(t, m, insvtest.Options{Offset: testOffset, Raw: true, AccRange: 32, GyroRange: 2000})
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	trailer := int(binary.LittleEndian.Uint32(b[len(b)-insv.FooterSize+32:]))
+	rec := b[len(b)-trailer:] // the IMU is the trailer's first record
+	for i, s := range x3UpCounts {
+		for k, c := range s {
+			binary.LittleEndian.PutUint16(rec[i*insv.RawSampleSize+8+2*k:], c)
+		}
+	}
+	if err := os.WriteFile(path, b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := insv.Read(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var a [3]float64
+	for _, s := range got.IMU {
+		for k := range a {
+			a[k] += s.Accel[k] / float64(len(got.IMU))
+		}
+	}
+	n := math.Sqrt(a[0]*a[0] + a[1]*a[1] + a[2]*a[2])
+	if math.Abs(n-insv.StandardGravity) > 0.2*insv.StandardGravity || a[0]/n < 0.8 {
+		t.Errorf("mean accel %.2f (|a| %.2f): want up, about g, along +x", a, n)
+	}
+}
+
 func TestReadFPS(t *testing.T) {
 	m := insv.Meta{Model: "Insta360 X3", Width: 2880, Height: 2880, FPS: 30000.0 / 1001}
 	got, err := insv.Read(clipWith(t, m, insvtest.Options{Offset: testOffset, Raw: true, AccRange: 32, GyroRange: 2000, Frames: 300}))
