@@ -23,10 +23,6 @@ var lensFOV = map[string]float64{
 	"Insta360 X3": 189.5,
 }
 
-// calSign is the sign each of a lens's stated yaw, pitch and roll residual
-// turns with, about the lens's own down, right and forward axes.
-var calSign = [3]float64{1, 1, 1}
-
 // lens is one lens's projection: its centre and focal length in pixels of
 // its own frame, the widest angle off its axis it sees, and its axes (out
 // of the lens, its picture's right and its picture's down) on the camera's
@@ -40,15 +36,19 @@ type lens struct {
 // along +x with its picture upright and right along +y. Lens 1 looks the
 // other way, turned half a turn about the body's down: the trailer states
 // it at yaw ≈ 0 like lens 0. Each stated angle is a residual from that
-// nominal pose, roll from the 90° an X3 states for an upright picture.
+// nominal pose, roll from the 90° an X3 states for an upright picture,
+// turned right-handed about the lens's own down, right and forward axes in
+// that order. On X3 footage the roll's sign is plain in the seam (the
+// opposite sign leaves about a quarter more disagreement); the yaw and
+// pitch residuals move it by less than the parallax between the lenses.
 func lenses(m insv.Meta, fov float64) [2]lens {
 	half := fov * math.Pi / 360
 	var out [2]lens
 	for i, c := range m.Lenses {
 		q := axisAngle([3]float64{0, 0, 1}, float64(i)*math.Pi).
-			mul(axisAngle([3]float64{0, 0, 1}, calSign[0]*c.Yaw)).
-			mul(axisAngle([3]float64{0, 1, 0}, calSign[1]*c.Pitch)).
-			mul(axisAngle([3]float64{1, 0, 0}, calSign[2]*(c.Roll-math.Pi/2)))
+			mul(axisAngle([3]float64{0, 0, 1}, c.Yaw)).
+			mul(axisAngle([3]float64{0, 1, 0}, c.Pitch)).
+			mul(axisAngle([3]float64{1, 0, 0}, c.Roll-math.Pi/2))
 		out[i] = lens{cx: c.CX, cy: c.CY, f: c.R / half, maxTheta: half}
 		for k, e := range [3][3]float64{{1, 0, 0}, {0, 1, 0}, {0, 0, 1}} {
 			out[i].axes[k] = q.rotate(e)

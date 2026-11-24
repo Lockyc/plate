@@ -136,3 +136,11 @@ author  = "Blender Foundation (Big Buck Bunny, peach.blender.org)"
 licence = "CC BY 3.0"
 recipe  = "magick SOURCE -crop 520x620+360+10 +repage crop.png; plate cutout crop.png bunny-reference.png"
 sha256  = "950988be350624c0c869535ed0406c8820c7bba28bde7c2a6ae532a36455788d"
+
+[[asset]]
+file    = "equirect-gemini-south.jpg"
+source  = "https://commons.wikimedia.org/wiki/File:Gemini_South_Telescope_Panorama_(GEMINIs_20111013_360x180_Pan_DMunizaga-CC).jpg"
+author  = "NOIRLab/AURA/NSF/D. Munizaga"
+licence = "CC BY 4.0"
+recipe  = "magick SOURCE -resize 2048x1024! -quality 90 -strip equirect-gemini-south.jpg (SOURCE sha1 b02eb19db51984e8c58e8051dfb7bdf012eae8b8)"
+sha256  = "a9368f9f0a7af0b4203acc556d5a04254551906c68021800bfd11a7f7d798397"

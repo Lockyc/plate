@@ -43,7 +43,7 @@ type Case struct {
 	OS     string            `toml:"os"`     // the one GOOS the case runs on (a renderer only it has); "" for every host
 	Files  map[string]string `toml:"files"`  // written into the case directory first
 	Serve  bool              `toml:"serve"`  // serve the case directory at {url} while setup, run and post run
-	Setup  [][]string        `toml:"setup"`  // steps before run; argv[0] "plate" or a pinned engine
+	Setup  [][]string        `toml:"setup"`  // steps before run; argv[0] "plate", a pinned engine or one of helpers
 	Run    []string          `toml:"run"`    // plate arguments under test
 	Post   [][]string        `toml:"post"`   // steps after run, before the metric
 	Exit   int               `toml:"exit"`   // expected exit status of run
@@ -142,6 +142,12 @@ func (e Env) argv(step []string) []string {
 
 func (e Env) step(ctx context.Context, step []string) error {
 	argv := e.argv(step)
+	if h, ok := helpers[argv[0]]; ok {
+		if err := h(argv[1:]); err != nil {
+			return fmt.Errorf("step %q: %w", argv, err)
+		}
+		return nil
+	}
 	path := e.Plate
 	if argv[0] != "plate" {
 		p, err := engine.Resolve(argv[0])
