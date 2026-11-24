@@ -8,8 +8,10 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/lockyc/plate/internal/enginetest"
+	"github.com/lockyc/plate/internal/ml"
 	"github.com/lockyc/plate/internal/pins"
 )
 
@@ -59,20 +61,11 @@ func TestTrackArgs(t *testing.T) {
 	if !slices.Contains(c, "--track") {
 		t.Errorf("no --track: %q", c)
 	}
-	if !after(c, "--times", "0.5,1.0,1.5") {
-		t.Errorf("frame times not passed in pano.tsv order: %q", c)
+	if !after(c, "--pano", filepath.Join(dir, "pano.tsv")) {
+		t.Errorf("pano.tsv not passed: %q", c)
 	}
-	var eq []string
-	for i := 0; i+1 < len(c); i++ {
-		if c[i] == "--equirect" {
-			eq = append(eq, filepath.Base(c[i+1]))
-		}
-		if c[i] == "--photo" {
-			t.Errorf("a pano frame went as --photo: %q", c)
-		}
-	}
-	if !slices.Equal(eq, []string{"f0_5.jpg", "f1_0.jpg", "f1_5.jpg"}) {
-		t.Errorf("frames %q", eq)
+	if slices.Contains(c, "--equirect") || slices.Contains(c, "--photo") || slices.Contains(c, "--times") {
+		t.Errorf("frames passed one by one: %q", c)
 	}
 	for _, want := range [][2]string{
 		{"--min-seconds", "4"},
@@ -93,12 +86,27 @@ func TestTrackArgs(t *testing.T) {
 	}
 }
 
-// TestTrackSortsByTime: pano.tsv rows are read in time order.
-func TestTrackSortsByTime(t *testing.T) {
-	dir := panoDir(t, "1.0", "0.5", "1.5")
-	c := track(t, "--track", dir).call(t)
-	if !after(c, "--times", "0.5,1.0,1.5") {
-		t.Errorf("%q", c)
+// TestTrackGapInTimeOrder: pano.tsv rows out of order are checked in time
+// order, so no gap is reported between rows that are neighbours only in the
+// file.
+func TestTrackGapInTimeOrder(t *testing.T) {
+	dir := panoDir(t, "3.0", "0.5", "1.0", "1.5", "2.0", "2.5")
+	if r := track(t, "--track", dir); r.code != 0 {
+		t.Errorf("code %d, %q", r.code, r.stderr)
+	}
+}
+
+// TestTrackBudget: a run is allowed trackFrame a frame on top of a first
+// run's ml.Timeout, so a long run is not cut off at the default.
+func TestTrackBudget(t *testing.T) {
+	if got := trackBudget(0); got != ml.Timeout {
+		t.Errorf("0 frames: %v", got)
+	}
+	if got, want := trackBudget(3472), ml.Timeout+3472*8*time.Second; got != want {
+		t.Errorf("3472 frames: %v, want %v", got, want)
+	}
+	if trackBudget(3472) <= time.Duration(3472)*1900*time.Millisecond+ml.Timeout {
+		t.Error("budget below the measured 1.9 s a frame")
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/lockyc/plate/internal/cli"
 	"github.com/lockyc/plate/internal/ml"
@@ -21,6 +22,16 @@ import (
 // may be: a longer gap is footage missing, across which every track would
 // break and be counted again.
 const maxGapSteps = 5
+
+// trackFrame is the time a --track run allows each frame: four times the
+// 1.9 s a 2880 frame takes on an M3 Max, for slower machines.
+const trackFrame = 8 * time.Second
+
+// trackBudget is how long a --track run of n frames may take: trackFrame a
+// frame, plus ml.Timeout for a first run's downloads.
+func trackBudget(n int) time.Duration {
+	return ml.Timeout + time.Duration(n)*trackFrame
+}
 
 // panoFrame is one row of `plate pano --every`'s pano.tsv.
 type panoFrame struct {
@@ -95,20 +106,17 @@ func (j job) track(ctx context.Context, dir, out string, stdout io.Writer) error
 	if err := outdir.RefuseExisting(d, []string{"track.tsv", "distinct.tsv"}); err != nil {
 		return err
 	}
-	times := make([]string, len(frames))
-	inputs := make([]string, len(frames))
-	for i, f := range frames {
-		times[i], inputs[i] = f.raw, f.path
+	pano := filepath.Join(dir, "pano.tsv")
+	inputs := []string{pano}
+	for _, f := range frames {
+		inputs = append(inputs, f.path)
 	}
 	args := append(j.models(d),
 		"--track", "--min-seconds", fmt.Sprint(j.minSeconds),
 		"--reid", pins.CountReID.Repo, "--reid-revision", pins.CountReID.Revision, "--reid-file", pins.CountReID.File,
-		"--times", strings.Join(times, ","))
-	for _, f := range inputs {
-		args = append(args, "--equirect", f)
-	}
+		"--pano", pano)
 	trackTSV, distinctTSV := filepath.Join(d, "track.tsv"), filepath.Join(d, "distinct.tsv")
-	if _, err := ml.RunScript(ctx, "count.py", args, inputs, []string{trackTSV, distinctTSV}); err != nil {
+	if _, err := ml.RunScript(ctx, "count.py", args, inputs, []string{trackTSV, distinctTSV}, ml.WithTimeout(trackBudget(len(frames)))); err != nil {
 		return err
 	}
 	n, peak, at, err := peakOf(trackTSV, "t", "on_screen")

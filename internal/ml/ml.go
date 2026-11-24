@@ -115,10 +115,19 @@ func intelMacBlockers(lock []byte) ([]string, error) {
 
 var intelWheel = regexp.MustCompile(`-macosx_[0-9_]+_(x86_64|universal2|intel)\.whl$`)
 
+// Option changes how RunScript runs a script.
+type Option func(*engine.Cmd)
+
+// WithTimeout gives the script d instead of Timeout: for a run whose work
+// grows with its input, such as a long run of frames.
+func WithTimeout(d time.Duration) Option {
+	return func(c *engine.Cmd) { c.Timeout = d }
+}
+
 // RunScript runs an embedded script with uv, locked to its lockfile. On an
 // Intel Mac it first refuses a script whose lockfile uv cannot install
 // there, rather than let uv fail on resolution.
-func RunScript(ctx context.Context, name string, args, inputs, outputs []string) (engine.Result, error) {
+func RunScript(ctx context.Context, name string, args, inputs, outputs []string, opts ...Option) (engine.Result, error) {
 	p, err := Script(name)
 	if err != nil {
 		return engine.Result{}, err
@@ -133,7 +142,11 @@ func RunScript(ctx context.Context, name string, args, inputs, outputs []string)
 			return engine.Result{}, fmt.Errorf("%s needs %s, which publish no Intel-Mac (macOS x86_64) build; run it on Apple Silicon or Linux", name, strings.Join(blocked, " and "))
 		}
 	}
-	return engine.Run(ctx, engine.Cmd{Engine: "uv", Args: append([]string{"run", "--locked", "--script", p}, args...), Inputs: inputs, Outputs: outputs, Timeout: Timeout})
+	c := engine.Cmd{Engine: "uv", Args: append([]string{"run", "--locked", "--script", p}, args...), Inputs: inputs, Outputs: outputs, Timeout: Timeout}
+	for _, o := range opts {
+		o(&c)
+	}
+	return engine.Run(ctx, c)
 }
 
 // RunTool runs cmd from a pinned upstream package.

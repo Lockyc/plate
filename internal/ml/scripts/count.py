@@ -12,7 +12,7 @@
              (--photo PATH | --equirect PATH)...
     count.py --out DIR --detector ... --density ... --track
              --reid REPO --reid-revision SHA --reid-file FILE
-             [--min-seconds 3] --times T1,T2,... (--equirect PATH)...
+             [--min-seconds 3] --pano PANO_TSV
 
 A person is counted one of two ways, never both:
   - a detector person box scoring CONF or better;
@@ -49,8 +49,8 @@ and with --marked DIR/marked/<frame>.jpg with each counted person dotted
 frame's views in DIR/marked/<frame>/view-NN.jpg with the region each view
 does not own shaded.
 
---track follows the boxed people through equirect frames taken at --times
-(seconds), in order. Each frame's people are matched to the tracks alive in
+--track follows the boxed people through the equirect frames a `plate pano
+--every` pano.tsv lists (--pano), in the order of its t column (seconds). Each frame's people are matched to the tracks alive in
 it by where their heads are on the sphere: one assignment minimising, per
 pair, the arc to the track's predicted place over the gate (GATE_MOVE body
 heights a second since the track was last seen, at least GATE_MIN degrees;
@@ -545,16 +545,25 @@ def size_deg(views, i, box):
     return float(np.degrees(np.arccos(np.clip(top @ bottom, -1, 1))))
 
 
+def pano_frames(tsv):
+    """The frames a `plate pano --every` pano.tsv lists: (path, t as written, t), in time order."""
+    with open(tsv) as f:
+        rows = [line.rstrip("\n").split("\t") for line in f if line.strip()]
+    fc, tc = rows[0].index("file"), rows[0].index("t")
+    frames = [(os.path.join(os.path.dirname(tsv), r[fc]), r[tc], float(r[tc])) for r in rows[1:]]
+    return sorted(frames, key=lambda f: f[2])
+
+
 def track(a, views, det, dens, device):
-    times = [float(s) for s in a.times.split(",")]
-    raw = a.times.split(",")
-    if len(times) != len(a.frames) or any(k != "equirect" for k, _ in a.frames):
-        sys.exit("count.py: --track wants one --times value per --equirect frame")
+    frames = pano_frames(a.pano)
     reid = ReID(a.reid, a.reid_revision, a.reid_file, device)
     tracker = Tracker()
-    rows, dens_part, dens_at, shown, untracked = [], 0, None, 0, 0
+    dens_part, dens_at, shown, untracked = 0, None, 0, 0
     t0 = time.time()
-    for n, ((_, path), t) in enumerate(zip(a.frames, times)):
+    # track.tsv is written a row a frame, so a run cut short keeps what it read
+    out = open(os.path.join(a.out, "track.tsv"), "w")
+    out.write("t\ton_screen\n")
+    for n, (path, raw, t) in enumerate(frames):
         img = ImageOps.exif_transpose(Image.open(path)).convert("RGB")
         read_dens = dens_at is None or t - dens_at >= DENSITY_EVERY - 1e-6
         v, per_view, pts = read_equirect(img, views, det, dens, density=read_dens)
@@ -569,19 +578,19 @@ def track(a, views, det, dens, device):
         if read_dens:
             dens_at, dens_part = t, sum(1 for p in pts if p[2] == "density")
             shown, untracked = shown + len(pts), untracked + dens_part
-        rows.append(f"{raw[n]}\t{len(boxed) + dens_part}\n")
+        out.write(f"{raw}\t{len(boxed) + dens_part}\n")
+        out.flush()
         if (n + 1) % 50 == 0:
-            print(f"count: {n + 1}/{len(times)} frames, {(time.time() - t0) / (n + 1):.2f}s a frame", file=sys.stderr)
+            print(f"count: {n + 1}/{len(frames)} frames, {(time.time() - t0) / (n + 1):.2f}s a frame", file=sys.stderr)
+    out.close()
     low, high, tracks = distinct(tracker.finish(), a.min_seconds)
     share = untracked / shown if shown else 0.0
-    with open(os.path.join(a.out, "track.tsv"), "w") as f:
-        f.write("t\ton_screen\n" + "".join(rows))
     # distinct.tsv last: its presence is the run's success
     tmp = os.path.join(a.out, ".distinct.tsv.part")
     with open(tmp, "w") as f:
         f.write(f"low\thigh\ttracks\tmin_seconds\tuntracked_share\n{low}\t{high}\t{tracks}\t{a.min_seconds:g}\t{share:.3f}\n")
     os.replace(tmp, os.path.join(a.out, "distinct.tsv"))
-    print(f"count: {len(times)} frames on {device}, {(time.time() - t0) / len(times):.2f}s a frame; distinct {low} to {high} ({tracks} tracks)", file=sys.stderr)
+    print(f"count: {len(frames)} frames on {device}, {(time.time() - t0) / len(frames):.2f}s a frame; distinct {low} to {high} ({tracks} tracks)", file=sys.stderr)
 
 
 def main() -> None:
@@ -594,12 +603,14 @@ def main() -> None:
     ap.add_argument("--photo", action=Frame)
     ap.add_argument("--equirect", action=Frame)
     ap.add_argument("--track", action="store_true")
-    for k in ("--reid", "--reid-revision", "--reid-file", "--times"):
+    for k in ("--reid", "--reid-revision", "--reid-file", "--pano"):
         ap.add_argument(k)
     ap.add_argument("--min-seconds", type=float, default=3)
     ap.set_defaults(frames=[])
     a = ap.parse_args()
-    if not a.frames:
+    if a.track != bool(a.pano) or (a.track and a.frames):
+        sys.exit("count.py: --track takes its frames from --pano, and only --track takes --pano")
+    if not a.frames and not a.track:
         sys.exit("count.py: no frames")
     gaps, live = geometry_gaps(a.nadir_deg, a.zenith_deg)
     if gaps:
@@ -608,7 +619,7 @@ def main() -> None:
     device = pick()
     det = Detector(a.detector, a.detector_revision, device)
     dens = Density(a.density, a.density_revision, a.density_file, device)
-    views = Views(live, a.nadir_deg, a.zenith_deg, dens.red, device) if any(k == "equirect" for k, _ in a.frames) else None
+    views = Views(live, a.nadir_deg, a.zenith_deg, dens.red, device) if a.track or any(k == "equirect" for k, _ in a.frames) else None
     if a.track:
         track(a, views, det, dens, device)
         sys.stdout.flush()
