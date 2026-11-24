@@ -72,6 +72,9 @@ func near(t *testing.T, what string, at, got, want, tol float64) {
 	}
 }
 
+// TestStaticTilt holds from the first frame: the attitude starts from the
+// first sample's accelerometer, so there is nothing for the slow Gain to
+// settle.
 func TestStaticTilt(t *testing.T) {
 	imu := synth(2, rolled, [3]float64{})
 	ts := frames(2)

@@ -38,8 +38,10 @@ const (
 type Rot struct{ Yaw, Pitch, Roll float64 }
 
 // Gain is the fraction of the angle between the predicted and the measured
-// gravity direction that each IMU sample's correction turns away.
-const Gain = 0.02
+// gravity direction that each IMU sample's correction turns away: on the
+// X3's 1 kHz IMU a time constant of about 2 s, slow enough that footsteps
+// and sway barely move the horizon between frames.
+const Gain = 0.0005
 
 // HeadingTau is the time constant, in seconds, of the low-pass that Level
 // keeps the heading through.
