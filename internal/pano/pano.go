@@ -2,8 +2,6 @@ package pano
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -114,10 +112,11 @@ func (j job) run(ctx context.Context, path, out string, stdout io.Writer) error 
 	if _, ok := lensFOV[meta.Model]; !ok {
 		return fmt.Errorf("%s: a %q's lenses are not calibrated in plate", front, meta.Model)
 	}
-	fps, rate, dur, err := probe(ctx, front)
+	src, err := video.Probe(ctx, front, false)
 	if err != nil {
 		return err
 	}
+	fps, rate, dur := src.FPS, src.Rate, src.Dur
 	end := dur
 	if j.to != 0 {
 		end = math.Min(j.to, dur)
@@ -182,7 +181,7 @@ func (j job) writeFrames(ctx context.Context, front, back, maps string, meta ins
 	}
 	for k, t := range times {
 		dst := filepath.Join(dir, names[k])
-		args := append(lensInputs(front, back, seek(t, fps), ""), mapInputs(maps)...)
+		args := append(lensInputs(front, back, video.Seek(t, fps), ""), mapInputs(maps)...)
 		args = append(args, "-filter_complex", graph(level(rots[k])), "-frames:v", "1", "-q:v", "2", "-update", "1", dst)
 		if _, err := engine.Run(ctx, engine.Cmd{Engine: "ffmpeg", Args: args, Inputs: []string{front, back}, Outputs: []string{dst}}); err != nil {
 			return err
@@ -197,11 +196,7 @@ func (j job) writeVideo(ctx context.Context, front, back, maps string, meta insv
 	if err := outdir.RefuseExisting(dir, []string{"pano.mp4", "pano.tsv"}); err != nil {
 		return err
 	}
-	first := int(math.Ceil(j.from*fps - 1e-6))
-	var times []float64
-	for k := first; float64(k)/fps < end-1e-6; k++ {
-		times = append(times, float64(k)/fps)
-	}
+	times := video.FrameTimes(j.from, end, fps)
 	rots, err := Rotations(meta.IMU, times, j.mode)
 	if err != nil {
 		return err
@@ -210,7 +205,7 @@ func (j job) writeVideo(ctx context.Context, front, back, maps string, meta insv
 		rots[k] = j.applied(rots[k])
 	}
 	send := resent(rots, resendAngle)
-	var cmds strings.Builder
+	var cmds []video.Command
 	rows := make([]string, len(times))
 	shown := 0
 	for k, t := range times {
@@ -219,27 +214,21 @@ func (j job) writeVideo(ctx context.Context, front, back, maps string, meta insv
 			r := degrees(rots[k])
 			// Each command reconfigures v360; with reset_rot the three
 			// angles together replace the last rotation sent.
-			fmt.Fprintf(&cmds, "%.6f v360@level yaw %.4f, v360@level pitch %.4f, v360@level roll %.4f;\n", t-times[0], r[0], r[1], r[2])
+			cmds = append(cmds, video.Command{T: t - times[0],
+				Args: fmt.Sprintf("v360@level yaw %.4f, v360@level pitch %.4f, v360@level roll %.4f", r[0], r[1], r[2])})
 		}
 		clock, _ := clockName(front, t)
 		rows[k] = row("pano.mp4", t, clock, rots[shown])
 	}
-	cmdFile, err := os.CreateTemp("", "pano-commands-*.txt")
+	cmdFile, err := video.WriteCommands(cmds, fps)
 	if err != nil {
 		return err
 	}
-	defer os.Remove(cmdFile.Name())
-	if _, err := cmdFile.WriteString(cmds.String()); err != nil {
-		cmdFile.Close()
-		return err
-	}
-	if err := cmdFile.Close(); err != nil {
-		return err
-	}
+	defer os.Remove(cmdFile)
 	dur := strconv.FormatFloat(float64(len(times))/fps, 'f', 6, 64)
-	args := append(lensInputs(front, back, seek(times[0], fps), dur), mapInputs(maps)...)
+	args := append(lensInputs(front, back, video.Seek(times[0], fps), dur), mapInputs(maps)...)
 	r0 := degrees(rots[0])
-	rot := fmt.Sprintf("sendcmd=f=%s,v360@level=e:e:yaw=%.4f:pitch=%.4f:roll=%.4f:reset_rot=1:interp=cubic", filterPath(cmdFile.Name()), r0[0], r0[1], r0[2])
+	rot := fmt.Sprintf("sendcmd=f=%s,v360@level=e:e:yaw=%.4f:pitch=%.4f:roll=%.4f:reset_rot=1:interp=cubic", video.FilterPath(cmdFile), r0[0], r0[1], r0[2])
 	args = append(args, "-filter_complex", graph(rot)+"[v]", "-map", "[v]")
 	args = append(args, video.H264(rate, nil, true)...)
 	args = append(args, dst)
@@ -249,12 +238,6 @@ func (j job) writeVideo(ctx context.Context, front, back, maps string, meta insv
 	}
 	fmt.Fprintln(stdout, dst)
 	return writeTSV(filepath.Join(dir, "pano.tsv"), rows)
-}
-
-// seek is ffmpeg's -ss for the frame at t: a quarter frame early, so it
-// lands on that frame whatever the rounding of t's decimal form.
-func seek(t, fps float64) string {
-	return strconv.FormatFloat(math.Max(0, t-0.25/fps), 'f', 6, 64)
 }
 
 // lensInputs are ffmpeg's inputs 0 (front) and 1 (back), each from ss, for
@@ -307,12 +290,6 @@ func writeTSV(path string, rows []string) error {
 	return atomicfile.WriteFile(path, []byte(body), 0o644)
 }
 
-// filterPath escapes a path for a filtergraph option value.
-func filterPath(p string) string {
-	r := strings.NewReplacer(`\`, `\\\\`, `'`, `\\\'`, `:`, `\\:`, `,`, `\,`, `;`, `\;`, `[`, `\[`, `]`, `\]`)
-	return r.Replace(p)
-}
-
 var startName = regexp.MustCompile(`^VID_(\d{8}_\d{6})_`)
 
 // clockName is the wall-clock time, HH:MM:SS.mmm to the nearest
@@ -328,35 +305,6 @@ func clockName(path string, t float64) (string, error) {
 		return "", fmt.Errorf("%s: %w", path, err)
 	}
 	return start.Add(time.Duration(math.Round(t*1000)) * time.Millisecond).Format("15:04:05.000"), nil
-}
-
-// probe reads the clip's video frame rate (as a number and in ffmpeg's
-// form) and duration from the file itself: the trailer's rate is measured,
-// the stream's is exact.
-func probe(ctx context.Context, path string) (fps float64, rate string, dur float64, err error) {
-	res, err := engine.Run(ctx, engine.Cmd{Engine: "ffprobe", Inputs: []string{path}, Args: []string{"-v", "error",
-		"-select_streams", "v:0", "-show_entries", "stream=r_frame_rate,duration", "-of", "json", path}})
-	if err != nil {
-		return 0, "", 0, err
-	}
-	var p struct {
-		Streams []struct {
-			Rate     string `json:"r_frame_rate"`
-			Duration string `json:"duration"`
-		} `json:"streams"`
-	}
-	if err := json.Unmarshal(res.Stdout, &p); err != nil || len(p.Streams) == 0 {
-		return 0, "", 0, fmt.Errorf("ffprobe: %s has no readable video stream", path)
-	}
-	s := p.Streams[0]
-	num, den, ok := strings.Cut(s.Rate, "/")
-	n, err1 := strconv.ParseFloat(num, 64)
-	d, err2 := strconv.ParseFloat(den, 64)
-	dur, err3 := strconv.ParseFloat(s.Duration, 64)
-	if !ok || errors.Join(err1, err2, err3) != nil || n <= 0 || d <= 0 || dur <= 0 {
-		return 0, "", 0, fmt.Errorf("ffprobe: %s: frame rate %q, duration %q", path, s.Rate, s.Duration)
-	}
-	return n / d, s.Rate, dur, nil
 }
 
 // rotQ is r as a quaternion: Rz(Yaw)·Ry(Pitch)·Rx(Roll).

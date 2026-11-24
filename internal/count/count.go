@@ -164,14 +164,12 @@ func sameStem(frames []string) error {
 	return nil
 }
 
-// isEquirect reports a 2:1 frame, a pixel either way.
 func isEquirect(path string) (bool, error) {
 	w, h, err := imgsize.Dims(path)
 	if err != nil {
 		return false, err
 	}
-	d := w - 2*h
-	return d >= -1 && d <= 1, nil
+	return imgsize.IsEquirect(w, h), nil
 }
 
 func (j job) run(ctx context.Context, frames []string, out string, stdout io.Writer) error {

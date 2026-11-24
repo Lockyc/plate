@@ -5,8 +5,6 @@ package reframe
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -20,6 +18,7 @@ import (
 	"github.com/BurntSushi/toml"
 	"github.com/lockyc/plate/internal/cli"
 	"github.com/lockyc/plate/internal/engine"
+	"github.com/lockyc/plate/internal/imgsize"
 	"github.com/lockyc/plate/internal/video"
 )
 
@@ -248,61 +247,24 @@ type job struct {
 	at, from, to float64
 }
 
-// source is what a probe of the input says.
-type source struct {
-	fps  float64
-	rate string  // fps in ffmpeg's form
-	dur  float64 // seconds; 0 for an image
-}
-
-// probe reads the input's picture size, refusing one that is not 2:1, and
-// for a video its frame rate and duration.
-func probe(ctx context.Context, in string, image bool) (source, error) {
-	res, err := engine.Run(ctx, engine.Cmd{Engine: "ffprobe", Inputs: []string{in}, Args: []string{"-v", "error",
-		"-select_streams", "v:0", "-show_entries", "stream=width,height,r_frame_rate,duration:format=duration", "-of", "json", in}})
+// probe reads the input, refusing one that is not a 2:1 equirect, and for a
+// video its frame rate and duration.
+func probe(ctx context.Context, in string, image bool) (video.Source, error) {
+	src, err := video.Probe(ctx, in, image)
 	if err != nil {
-		return source{}, err
+		return video.Source{}, err
 	}
-	var p struct {
-		Streams []struct {
-			W        int    `json:"width"`
-			H        int    `json:"height"`
-			Rate     string `json:"r_frame_rate"`
-			Duration string `json:"duration"`
-		} `json:"streams"`
-		Format struct {
-			Duration string `json:"duration"`
-		} `json:"format"`
+	if !imgsize.IsEquirect(src.W, src.H) {
+		return video.Source{}, fmt.Errorf("%s is %dx%d, not a 2:1 equirect", in, src.W, src.H)
 	}
-	if err := json.Unmarshal(res.Stdout, &p); err != nil || len(p.Streams) == 0 {
-		return source{}, fmt.Errorf("ffprobe: %s has no readable picture", in)
-	}
-	s := p.Streams[0]
-	if s.H == 0 || s.W != 2*s.H {
-		return source{}, fmt.Errorf("%s is %dx%d, not a 2:1 equirect", in, s.W, s.H)
-	}
-	if image {
-		return source{}, nil
-	}
-	d := s.Duration
-	if d == "" || d == "N/A" {
-		d = p.Format.Duration
-	}
-	num, den, ok := strings.Cut(s.Rate, "/")
-	n, err1 := strconv.ParseFloat(num, 64)
-	dn, err2 := strconv.ParseFloat(den, 64)
-	dur, err3 := strconv.ParseFloat(d, 64)
-	if !ok || errors.Join(err1, err2, err3) != nil || n <= 0 || dn <= 0 || dur <= 0 {
-		return source{}, fmt.Errorf("ffprobe: %s: frame rate %q, duration %q", in, s.Rate, d)
-	}
-	return source{fps: n / dn, rate: s.Rate, dur: dur}, nil
+	return src, nil
 }
 
 // inside refuses a key past the source's end.
-func (j job) inside(src source) error {
+func (j job) inside(src video.Source) error {
 	for i, k := range j.path {
-		if k.T > src.dur {
-			return fmt.Errorf("%s is past the source's end at %.3f s", k.name(i), src.dur)
+		if k.T > src.Dur {
+			return fmt.Errorf("%s is past the source's end at %.3f s", k.name(i), src.Dur)
 		}
 	}
 	return nil
@@ -349,16 +311,10 @@ func (j job) videoStill(ctx context.Context, in, out string) error {
 	if err := j.inside(src); err != nil {
 		return err
 	}
-	if j.at >= src.dur {
-		return fmt.Errorf("--at %v is past the source's end at %.3f s", j.at, src.dur)
+	if j.at >= src.Dur {
+		return fmt.Errorf("--at %v is past the source's end at %.3f s", j.at, src.Dur)
 	}
-	return j.still(ctx, in, out, seek(j.at, src.fps), j.path.At(j.at))
-}
-
-// seek is ffmpeg's -ss for the frame at t: a quarter frame early, so it
-// lands on that frame whatever the rounding of t's decimal form.
-func seek(t, fps float64) string {
-	return strconv.FormatFloat(math.Max(0, t-0.25/fps), 'f', 6, 64)
+	return j.still(ctx, in, out, video.Seek(j.at, src.FPS), j.path.At(j.at))
 }
 
 func (j job) clip(ctx context.Context, in, out string) error {
@@ -369,51 +325,39 @@ func (j job) clip(ctx context.Context, in, out string) error {
 	if err := j.inside(src); err != nil {
 		return err
 	}
-	end := src.dur
+	end := src.Dur
 	if j.to != 0 {
-		end = math.Min(j.to, src.dur)
+		end = math.Min(j.to, src.Dur)
 	}
 	if j.from >= end {
-		return fmt.Errorf("--from %v is past the source's end at %.3f s", j.from, src.dur)
+		return fmt.Errorf("--from %v is past the source's end at %.3f s", j.from, src.Dur)
 	}
-	first := int(math.Ceil(j.from*src.fps - 1e-6))
-	var times []float64
-	for k := first; float64(k)/src.fps < end-1e-6; k++ {
-		times = append(times, float64(k)/src.fps)
-	}
+	times := video.FrameTimes(j.from, end, src.FPS)
 	vf := j.flat(j.path.At(times[0]), "@view")
-	if cmds := commands(j.path, times, j.w, j.h, src.fps); cmds != "" {
-		cmdFile, err := os.CreateTemp("", "reframe-commands-*.txt")
+	if cmds := commands(j.path, times, j.w, j.h); len(cmds) > 0 {
+		f, err := video.WriteCommands(cmds, src.FPS)
 		if err != nil {
 			return err
 		}
-		defer os.Remove(cmdFile.Name())
-		if _, err := cmdFile.WriteString(cmds); err != nil {
-			cmdFile.Close()
-			return err
-		}
-		if err := cmdFile.Close(); err != nil {
-			return err
-		}
-		vf = "sendcmd=f=" + filterPath(cmdFile.Name()) + "," + vf
+		defer os.Remove(f)
+		vf = "sendcmd=f=" + video.FilterPath(f) + "," + vf
 	}
-	dur := strconv.FormatFloat(float64(len(times))/src.fps, 'f', 6, 64)
-	args := append(append([]string{}, head...), "-ss", seek(times[0], src.fps), "-t", dur, "-i", in,
+	dur := strconv.FormatFloat(float64(len(times))/src.FPS, 'f', 6, 64)
+	args := append(append([]string{}, head...), "-ss", video.Seek(times[0], src.FPS), "-t", dur, "-i", in,
 		"-vf", vf, "-map", "0:v:0")
-	args = append(args, video.H264(src.rate, nil, true)...)
+	args = append(args, video.H264(src.Rate, nil, true)...)
 	args = append(args, out)
 	_, err = engine.Run(ctx, engine.Cmd{Engine: "ffmpeg", Args: args, Timeout: 24 * time.Hour,
 		Inputs: []string{in}, Outputs: []string{out}})
 	return err
 }
 
-// commands is the sendcmd script that moves v360@view along p over the
-// frames at times: for each frame after the first, the values that differ
-// from the frame before, sent a quarter frame before it is shown. Every
-// value sent rebuilds v360's lookup table, so an unchanged one is never
-// sent.
-func commands(p Path, times []float64, w, h int, fps float64) string {
-	var b strings.Builder
+// commands are the sendcmd entries that move v360@view along p over the
+// frames at times, each at its time into the clip: for each frame after the
+// first, the values that differ from the frame before. Every value sent
+// rebuilds v360's lookup table, so an unchanged one is never sent.
+func commands(p Path, times []float64, w, h int) []video.Command {
+	var cmds []video.Command
 	last := p.At(times[0])
 	for _, t := range times[1:] {
 		v := p.At(t)
@@ -428,15 +372,9 @@ func commands(p Path, times []float64, w, h int, fps float64) string {
 			sends = append(sends, fmt.Sprintf("v360@view h_fov %.4f, v360@view v_fov %.4f", v.FOV, vfov(v.FOV, w, h)))
 		}
 		if len(sends) > 0 {
-			fmt.Fprintf(&b, "%.6f %s;\n", t-times[0]-0.25/fps, strings.Join(sends, ", "))
+			cmds = append(cmds, video.Command{T: t - times[0], Args: strings.Join(sends, ", ")})
 		}
 		last = v
 	}
-	return b.String()
-}
-
-// filterPath escapes a path for a filtergraph option value.
-func filterPath(p string) string {
-	r := strings.NewReplacer(`\`, `\\\\`, `'`, `\\\'`, `:`, `\\:`, `,`, `\,`, `;`, `\;`, `[`, `\[`, `]`, `\]`)
-	return r.Replace(p)
+	return cmds
 }

@@ -22,3 +22,10 @@ func Dims(path string) (int, int, error) {
 	}
 	return c.Width, c.Height, nil
 }
+
+// IsEquirect reports a w×h picture that is a 360 equirect: 2:1, a pixel
+// either way.
+func IsEquirect(w, h int) bool {
+	d := w - 2*h
+	return h > 0 && d >= -1 && d <= 1
+}

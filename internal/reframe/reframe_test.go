@@ -6,10 +6,12 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/lockyc/plate/internal/enginetest"
+	"github.com/lockyc/plate/internal/video"
 )
 
 func near(a, b float64) bool { return math.Abs(a-b) < 1e-9 }
@@ -111,13 +113,13 @@ func TestStillAt(t *testing.T) {
 
 func TestCommandsSendOnlyChanges(t *testing.T) {
 	p := Path{{T: 1, Yaw: 0, Pitch: 0, FOV: 80}, {T: 2, Yaw: 30, Pitch: 0, FOV: 80}}
-	got := commands(p, []float64{0, 1, 1.5, 2, 2.5}, 1080, 1920, 2)
-	want := "1.375000 v360@view yaw 15.0000;\n1.875000 v360@view yaw 30.0000;\n"
-	if got != want {
-		t.Fatalf("commands =\n%s\nwant\n%s", got, want)
+	got := commands(p, []float64{0, 1, 1.5, 2, 2.5}, 1080, 1920)
+	want := []video.Command{{T: 1.5, Args: "v360@view yaw 15.0000"}, {T: 2, Args: "v360@view yaw 30.0000"}}
+	if !slices.Equal(got, want) {
+		t.Fatalf("commands = %v, want %v", got, want)
 	}
-	if got := commands(Path{{FOV: 80}}, []float64{0, 1}, 1080, 1920, 30); got != "" {
-		t.Fatalf("a fixed view sends %q", got)
+	if got := commands(Path{{FOV: 80}}, []float64{0, 1}, 1080, 1920); len(got) != 0 {
+		t.Fatalf("a fixed view sends %v", got)
 	}
 }
 
