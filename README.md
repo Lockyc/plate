@@ -67,7 +67,7 @@ plate build site.manifest                                    # every target, ski
 | | `impose` | An A5 flyer two-up on A4, cut down the middle, one- or two-sided |
 | | `marks` | A print shop's copy: each page at its trim size with bleed and crop marks |
 | | `doc` | Markdown or HTML to a plain A4 PDF with running heads and page numbers |
-| | `pdf info` / `text` / `pages` / `images` / `extract` / `duplex` | Look inside a PDF: metadata, text, pages as PNG, embedded images; pull pages out as their own PDF; pair fronts with their back for double-sided printing |
+| | `pdf info` / `text` / `pages` / `images` / `extract` / `duplex` / `svg` | Look inside a PDF: metadata, text, pages as PNG, embedded images; pull pages out as their own PDF; pair fronts with their back for double-sided printing; a page as an SVG, such as a vector logo for a web page |
 | **Video** | `clip check` / `clip render` | A screen recording and its event log into a short looping demo clip |
 | | `animate` | A page's own animation captured frame by frame as MP4, WebM, WebP or GIF |
 | | `walkthrough check` / `walkthrough render` | A scripted tour of a live web app recorded in headless Chrome as a narrated, captioned MP4 |
